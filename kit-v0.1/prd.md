@@ -27,7 +27,7 @@ The fix is structural, not a feature: move the process into the repo, define a r
 
 ## Goals
 
-- **G1** — The factory's agents, process, and control plane live in the kit repo and in every onboarded target repo. No runtime is required to *hold* the process.
+- **G1** — The factory's agents, process, and control plane live in the kit repo and in every onboarded project's control home (the target repo in Mode 1; a dedicated workspace repo in Mode 2). No runtime is required to *hold* the process.
 - **G2** — A human with an editor, a shell, and git push access can take an idea to a completed PR by following the runbook — dispatching role work to any AI chat (or executing review steps themselves).
 - **G3** — Any AI orchestrator (any product) can execute the same process by following the same runbook and consuming the same dispatch packages.
 - **G4** — The kit proves itself: end-to-end dress rehearsal on a real target repo, plus a two-machine handover drill.
@@ -47,7 +47,7 @@ The fix is structural, not a feature: move the process into the repo, define a r
 
 ### FR-1 — Kit structure and single-source process
 
-The kit ships as: `agents/` (role packages), `process/` (process rules), `tools/` (control plane), `adapters/` (execution bindings), `runbook.md`, `onboarding/`. Process rules live **in the repo**, versioned with the code.
+The kit ships as: `agents/` (role packages), `process/` (process rules), `tools/` (control plane), `adapters/` (execution bindings), `templates/` (workspace + story + config templates), `runbook.md`, `onboarding/`. Process rules live **in the repo**, versioned with the code.
 
 - [ ] A fresh clone of a kit-onboarded repo contains every rule needed to run the process, with no reference to any external skill system as a requirement.
 - [ ] `process/` documents are the single source; no process rule exists only in an agent runtime.
@@ -75,7 +75,7 @@ The control plane (controller, ledger library, gates, prep scripts, renderers, b
 
 ### FR-5 — Event ledger and state machine
 
-`factory/ledger/events.jsonl` is the single source of truth: append-only, UTC-timestamped, schema-validated (missing values are `null` + reason — never invented zeros; corrections are events, never edits). The 16-state story machine is enforced against the ledger + git + GitHub. `state.md`, `DASHBOARD.md`, and `PROVENANCE.md` are **generated** renders.
+`factory/ledger/events.jsonl` is the single source of truth: append-only, UTC-timestamped, schema-validated (missing values are `null` + reason — never invented zeros; corrections are events, never edits). The story state machine (ported as-is from the reference — currently 19 pipeline states + BLOCKED; the exact set lands with the T1 extraction) is enforced against the ledger + git + GitHub. `state.md`, `DASHBOARD.md`, and `PROVENANCE.md` are **generated** renders.
 
 - [ ] **Given** a ledger and a story, **when** the renderers run, **then** generated files match the ledger byte-for-byte (check mode passes).
 - [ ] **Given** any event with a missing field, **when** validation runs, **then** it is rejected unless a sibling `<field>_reason` is present and non-empty.
@@ -122,7 +122,7 @@ Onboarding is deterministic scripts (python3, stdlib) plus a guided session: `on
 
 ### FR-12 — Human gates only
 
-The only human touchpoints in a run: Storybook approvals (for UI stories), the merge gate, and escalations (2 failed loops). "Completed PR" = MERGE_ELIGIBLE with evidence → human merges → live-proven → closeout with provenance rendered. Any other question to a human during a run is a process defect and is logged as such.
+The only human touchpoints in a run: Storybook approvals (for UI stories), the merge gate, and escalations (2 failed loops). "Completed PR" = MERGE_ELIGIBLE with evidence → human merges → live-proven → closeout with provenance rendered. Any other question to a human during a run is a process defect, logged as a `finding` event with the defect flag.
 
 - [ ] **Given** a story reaching MERGE_ELIGIBLE, **when** the operator requests merge eligibility, **then** the controller verifies tested SHA == head SHA, findings dispositioned, threads resolved, and a recorded human merge decision.
 
@@ -151,7 +151,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 - [ ] **Handover drill** (two machines, fresh clone): (a) transition refused without claim, (b) cooperative handover passes, (c) abrupt takeover flagged and passes, (d) override path exercised and annotated — all four recorded.
 - [ ] Control-plane test suite ported and green (python3 + git + gh only).
 - [ ] Runbook completes with no unanswered steps — validated by a cold read from a fresh clone.
-- [ ] Zero imports of any agent-runtime SDK in `tools/`; dispatch parity between `human` and `hermes` adapters on the dress-rehearsal story.
+- [ ] Zero imports of any agent-runtime SDK in `tools/`; dispatch parity between `human` and `hermes` adapters on the dress-rehearsal story (the live `hermes` leg is sequenced after the execution seam's launch authorization — recorded as pending, never as passed, until then).
 - [ ] Onboard verify runs green against the benchmark-app and reports precise failures on a deliberately non-compliant repo.
 
 ## Assumptions
@@ -163,7 +163,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 ## Dependencies
 
-- `git`, `gh` CLI (auth scopes per onboarding), `python3` (stdlib only).
+- `git`, `gh` CLI (auth scopes per onboarding), `python3` ≥ 3.11 (stdlib only; `tomllib` for config parsing — see `architecture.md` §Configuration).
 - GitHub: repo, labels, issue forms, Projects v2 board.
 - For the `hermes` adapter: a Hermes runtime with `delegate_task`; for the `human` adapter: any AI chat and a git identity.
 

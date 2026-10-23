@@ -17,7 +17,7 @@ Check categories: **CORE** (required for any factory run) · **UI** (only when s
 |---|---|---|---|
 | C-1 | Git repository with a GitHub remote | Everything hangs off git + GitHub | `git remote -v`, `gh repo view` |
 | C-2 | `gh` CLI authenticated with required scopes: Contents RW · Issues RW · Pull requests RW · Metadata R · **Projects v2 (classic `project` scope or org-level auth — not a fine-grained repo permission)** · **Administration: read** (for protection reads in C-3) | All forge operations | `gh auth status`; named API probes per check (registry) |
-| C-3 | Default branch protected by a **ruleset** (PR + approval + required checks; no force-push/delete) with **bypass = the factory bot App only** (the single mechanical writer) — where Evaluate mode is unavailable (GitHub Pro), stage `disabled` and flip `active` after the bot push path is verified | The merge gate must be real machinery; the bot stays the one writer | Ruleset read via API; bypass list inspected |
+| C-3 | Default branch protected by a **ruleset** (PR + approval + required checks; no force-push/delete) with **bypass = the factory bot App only** (the single mechanical writer) — where Evaluate mode is unavailable (GitHub Pro), stage `disabled` and flip `active` after the bot push path is verified | The merge gate must be real machinery; the bot stays the one writer | Ruleset read via API; bypass list inspected. **A repo is never described as protected until the `active` ruleset is read back via API post-flip; a staged-`disabled` or unreadable (plan-gated) ruleset renders `staged, not enforcing` in verify output** |
 | C-4 | Labels for the lifecycle (idea/planning/…/done, needs-human) created | Kanban visibility, automation hooks | `gh label list` |
 | C-5 | Idea front door: issue form + `idea` label | Standard intake path | Issue form in `.github/ISSUE_TEMPLATE/`, label exists |
 | C-6 | GitHub Projects v2 board linked to the repo, with the `Stage` field (and derived group/status fields) | Board mirrors the lifecycle; stage writes are explicit | GraphQL probe of project fields |
@@ -40,6 +40,8 @@ Check categories: **CORE** (required for any factory run) · **UI** (only when s
 | W-4 | Every bound target repo reachable with required scopes; branch conventions available (`story/<id>-<slug>`) | Multi-repo mechanics depend on it | `gh repo view` per binding |
 | W-5 | Ledger seeded at the control home (`factory/ledger/events.jsonl`); renders pass | Source of truth exists | Ledger validation + render `--check` |
 | W-6 | Cross-repo contract-block template present for story specs (pinned interface owned by the provider repo) | Multi-repo story quality | Template exists |
+| W-7 | Bot App installed on the control-home repo; ruleset bypass list contains the bot only | The single-writer mechanics need their home | Ruleset read via API; bypass list inspected |
+| W-8 | Projects v2 board linked to the control home (the workspace repo in Mode 2); Stage options = state names | Board mirrors the lifecycle at the work's home | GraphQL probe of project fields |
 
 ## UI — when stories touch UI
 

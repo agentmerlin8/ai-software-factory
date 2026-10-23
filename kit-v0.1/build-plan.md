@@ -20,8 +20,8 @@ A standalone, runtime-agnostic factory: the **kit** (this repo) is the distribut
 
 | # | Task | Deliverable | Acceptance |
 |---|---|---|---|
-| T1 | **Extraction (self-containment)** — transition ↔ evidence ↔ gate table, per-event-type schemas, role catalog, extracted genericized from the reference | new sections in `architecture.md` (+ schema module in `tools/`) | builders can implement the controller **from the bundle alone** — no "see the reference" remains for this scope |
-| T2 | **Workspace + environment config** — schemas, example templates, validator | `templates/workspace/workspace.toml`, `templates/workspace/environments/{local,github}.toml`, a `tools/` validator + tests | validator PASSes both templates; every refusal class has a named, precise FAIL (unknown key, malformed binding, unresolvable pin, inline secret) |
+| T1 | **Extraction (self-containment)** — transition ↔ evidence ↔ gate table, per-event-type schemas, role catalog, extracted genericized from the reference | new sections in `architecture.md` (+ schema module in `tools/`), genericized (private-identifier grep clean before push) | a fresh-context reader (agent or human with no reference access), given only the folded bundle, answers a fixed questionnaire — every transition's required evidence keys, every event type's required/null-allowed fields, the full role→tier matrix, the gate catalog with invocations — with zero clarification requests; each unanswered item is a named FAIL |
+| T2 | **Workspace + environment config** — schemas, example templates, validator | `templates/workspace/workspace.toml`, `templates/workspace/environments/{local,github}.toml`, a `tools/` validator + tests, plus the frozen key-by-key schema table in `architecture.md` §Configuration (required/optional, types, defaults, validation rule per key) | validator PASSes both templates; every refusal class has a named, precise FAIL (unknown key, malformed binding, unresolvable pin, inline secret) |
 | T3 | **Multi-repo ledger schema** — `repo@sha` pinning, per-repo sub-events, set-level transitions + completeness rules, corrections | architecture section + schema module + fixtures/tests | set-level transitions refuse on an incomplete set; per-repo sub-events fold correctly |
 | T4 | **CI** — minimal workflow: `python3 -m unittest` + validator over the templates | workflow file | green on the PR; runs on every push |
 | T5 | **Alignment pass** — layouts, readiness checks, command paths, cross-refs | doc diffs | cold-read: no contradictory paths left in the bundle |
@@ -34,7 +34,7 @@ A standalone, runtime-agnostic factory: the **kit** (this repo) is the distribut
 
 ### S3 — Onboarding
 
-Deterministic scripts (preflight → inspect → propose → apply idempotent → verify fail-closed) + the guided-session brief (`ONBOARDING.md` consumed by any agent runtime) + the readiness registry (target + workspace checks) + the **fresh-repo test-out**. Acceptance: verify green on `benchmark-app`; precise FAILs on a deliberately non-compliant repo; one from-scratch repo onboarded end-to-end.
+Deterministic scripts (preflight → inspect → propose → apply idempotent → verify fail-closed) + the guided-session brief (`ONBOARDING.md` consumed by any agent runtime) + the readiness registry (target + workspace checks) + the **fresh-repo test-out scripts** (the from-scratch test-out **run** gates v0.1.x hardening — per the vision and PRD FR-11). Acceptance: verify green on `benchmark-app`; precise FAILs on a deliberately non-compliant repo; the test-out scripts ship and run green against `benchmark-app` as a smoke.
 
 ### S4 — Runbook + adapter packages
 
@@ -56,12 +56,12 @@ The reference's bounded queue — **artifact validation** (contract item 7) next
 
 | # | Call | Recommendation | Why |
 |---|---|---|---|
-| C1 | Config format | **TOML** (`tomllib`, Python ≥ 3.11) | the only format satisfying the stdlib law; YAML would need a non-stdlib dependency or a hand-rolled parser (forbidden) |
+| C1 | Config format | **TOML** (`tomllib`, Python ≥ 3.11) | the only format satisfying the stdlib law; YAML would need a non-stdlib dependency or a hand-rolled parser (forbidden); ratify **before S1/T2 starts** |
 | C2 | Live-parity measurement | **Both legs in D-1 + mechanical contract shape** (required paths + sections); live hermes leg sequenced after launch authorization | makes FR-3's parity real, not tautological |
-| C3 | Acceptance targets | Keep v0.1 criteria: `benchmark-app` dress rehearsal + handover drill + fresh-repo test-out | the reference product's adoption stays a separate, later migration |
+| C3 | Acceptance targets | Keep v0.1 criteria: `benchmark-app` dress rehearsal + handover drill; the from-scratch fresh-repo test-out **execution** gates v0.1.x hardening (S3 ships the scripts — confirm this split, or pull the execution into v0.1) | the reference product's adoption stays a separate, later migration |
 
 ## How the build runs
 
 - Work items: issues in this repo; **each slice lands as a reviewed PR** — bounded increments, independent fresh-context review before the merge gate, owner merges.
 - Every increment states its own explicit exclusions (what it deliberately does not do) — the same discipline as the reference's bounded queue.
-- Definition of done for the program: kit onboards a fresh repo; one story runs idea → merged PR via the runbook (human leg; hermes leg when launch is authorized); handover drill passes; every render/provenance check clean. Then the reference product is adopted (controlled), and the factory builds its products.
+- Definition of done for the program: kit onboards a fresh repo (from-scratch test-out — the v0.1.x hardening gate); one story runs idea → merged PR via the runbook (human leg; hermes leg when launch is authorized); handover drill passes; every render/provenance check clean. Then the reference product is adopted (controlled), and the factory builds its products.

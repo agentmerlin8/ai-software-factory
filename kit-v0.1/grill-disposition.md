@@ -8,7 +8,7 @@
 
 | # | Finding (short) | Disposition | Where it now lives |
 |---|---|---|---|
-| 1 | Ledger branch & push model contradicted branch protection | FOLDED | `architecture.md` §Ledger durability and the single writer (single writer; ruleset bypass = bot App only; push-on-write; no-merge rule) — mechanism proven live in the reference |
+| 1 | Ledger branch & push model contradicted branch protection | FOLDED | `architecture.md` §Ledger durability and the single writer (single writer; ruleset bypass = bot App only; push-on-write; no-merge rule) — bot identity + push path proven live in the reference; enforcing ruleset staged pending activation |
 | 2 | Bundle not self-contained (evidence/role catalogs, per-type schemas) | TASK T1 | extraction → `architecture.md` (+ `tools/` schema module); acceptance: controller implementable from the bundle alone |
 | 3 | Config format vs stdlib (YAML needs PyYAML) | RESOLVED + FOLDED | TOML pinned (`architecture.md` §Configuration; PRD C-10; readiness C-10); validator = TASK T2 |
 | 4 | Kit/target layout disagreed across four docs | FOLDED | `architecture.md` §Canonical layouts (kit-repo vs installed control home); C-7, test-strategy paths aligned |
@@ -47,7 +47,7 @@
 
 | # | Decision | Disposition |
 |---|---|---|
-| D1 | Ledger push model | RESOLVED — single-writer + App bypass ruleset (proven live; folded into `architecture.md` §Ledger durability) |
+| D1 | Ledger push model | RESOLVED — single-writer + App bypass ruleset (bot identity + push path proven live; ruleset staged pending activation; folded into `architecture.md` §Ledger durability) |
 | D2 | Config format & schema | RESOLVED — TOML (`tomllib`, Python ≥ 3.11); schema freeze = TASK T2 (ratify C1) |
 | D3 | Self-containment extraction | TASK T1 — extraction is build work, from the reference, genericized |
 | D4 | State machine port-as-is | RESOLVED — port as-is; "16 states + BLOCKED" wording superseded by the reference's current 19 + BLOCKED; extraction ports the current set |

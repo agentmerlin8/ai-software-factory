@@ -13,14 +13,14 @@ The kit puts the process in the repo and keeps every runtime behind an adapter. 
                  │                                                │
   idea ──▶ issue │  factory/          runbook.md                  │
                  │   ├── tools/       (control plane, python3)    │
-                 │   ├── ledger/      (events.jsonl = truth)      │
                  │   ├── gates/       (mechanical checks)         │
+                 │   ├── ledger/      (events.jsonl = truth)      │
                  │   ├── templates/   (dispatch pkg, state, etc.) │
-                 │   └── locks/       (OVERRIDE escape hatch)     │
-                 │   process/         (process rules, versioned)  │
-                 │   agents/          (role packages)             │
-                 │   adapters/        (human · hermes · …)        │
-                 │   stories/         (specs, plans, evidence)    │
+                 │   ├── locks/       (OVERRIDE escape hatch)     │
+                 │   ├── process/     (process rules, versioned)  │
+                 │   ├── agents/      (role packages)             │
+                 │   └── adapters/    (human · hermes · …)        │
+                 │  stories/          (specs, plans, evidence)    │
                  └───────────┬───────────────────┬────────────────┘
                              │                   │
               operator (human) │         orchestrator (any runtime)
@@ -54,6 +54,7 @@ factory repo (this repo)   the distribution: CLI · core agents · skills · pro
 - **Workspace = the control home.** It carries `workspace.toml` (identity, repo bindings, factory pin), `environments/`, `ledger/`, `stories/`, dispatch packages, `locks/`, renders. Same skeleton as the single-repo `factory/` install — what changes is *who hosts it*:
   - **Mode 1 — in-repo** (single-repo projects): control home inside the target repo. The original kit shape; **no migration needed**.
   - **Mode 2 — dedicated workspace repo** (multi-repo default): control home in its own repo, created from this kit's workspace template; `workspace.toml` lists the target repos. Idea front door, board, and story records live at the workspace; the target repos stay product.
+  - **Mode 3 — primary-repo control home** (special cases only): control home inside a designated primary target repo — permitted by the accepted model; out of scope for v0.1 tooling.
 - **The "ledger lives with the product" law generalizes:** with N repos the product = the workspace's repo set, and the **control home is the set's authoritative git home**. Every event still pins exact SHAs; validation resolves `repo@sha` against *that repo's* object database; provenance joins across the set.
 
 ### `workspace.toml` (pinned format: TOML)
@@ -105,20 +106,21 @@ limits = { wall = "…", runs = "…", budget = "…" }
 - **State**: story-level states unchanged; per-repo detail rides as sub-events (`BUILD_GREEN{repo}`, `DRAFT_OPENED{repo}`, `MERGED{repo}`). Set-level transitions refuse until the set is complete: `MERGE_ELIGIBLE` = all PRs review-closed + green; `MERGED` = all merges done; `LIVE_PROVEN` = cross-repo end-to-end proof.
 - **Merge order**: expand-first — the contract owner merges first, consumers follow; reverts run in reverse. Recorded in the plan.
 - **Closeout**: workspace-level PROVENANCE joins idea → decisions → dispatches (per repo) → evidence → PR set → merge set → proof. Each PR body references the workspace story.
+- **Local resolution**: each environment records where bound repos are checked out locally (workspace-relative sibling paths by default, plus an optional `repos[].path` override key); the exact convention freezes with T2/T3.
 
 ### CLI surface (candidate additions)
 
-Shipped in the reference and ported genericized: `status` · `doctor` · `prepare` (sealed, non-launching) · `validate`. Workspace layer (candidates): `factory workspace init|add-repo|show` · `factory env show|resolve` · `run-stage` · `render` · `claim` / `transition` (wraps the existing controller — no second state machine; read path first).
+Shipped in the reference and ported genericized: `status` · `doctor` · `prepare` (sealed, non-launching) · `validate`, plus the run-phase record path, surfaced in the kit as `run-stage`. Workspace layer (candidates): `factory workspace init|add-repo|show` · `factory env show|resolve` · `render` · `claim` / `transition` (wraps the existing controller — no second state machine; read path first).
 
 ## Ledger durability and the single writer
 
-The "ledger lives with the product" law is binding, and the write path is a **single mechanical writer** — proven live in the reference implementation and pinned here:
+The "ledger lives with the product" law is binding, and the write path is a **single mechanical writer** — the bot-App identity and its push path are proven live in the reference implementation; the enforcing ruleset there is staged (`disabled`) pending activation verification (see item 5), and the same staging discipline applies to every onboarded repo:
 
 1. The ledger lives at the control home, on the default branch (`main`).
-2. `main` is protected by a **ruleset** (require PR + approval + required checks; block force-push/delete). The bypass list contains **only the factory bot App** (actor type `Integration`, mode `always`). Humans are never in the bypass list — the human merge gate stays mechanically real.
+2. `main` is protected by a **ruleset** (require PR + approval + required checks; block force-push/delete). The bypass list contains **only the factory bot App** (actor type `Integration`, mode `always`). Humans are never in the bypass list — the human merge gate stays mechanically real. In Mode 2 the ruleset and bot-App bypass live on the workspace repo (the control home); target repos keep standard protection with no factory bypass.
 3. Claims and handovers **push on write** through the controller (bot identity). Races: first-push-wins; the loser is refused with the handover path. A non-fast-forward push → fetch → re-validate claim uniqueness → retry, so a duplicate claim never lands. If one ever does, it is adjudicated with a `correction` event — never an edit.
 4. Workers and agents never hold writer authority: every state mutation flows through the permissioned controller path. Story branches + PRs are the only artifacts workers write directly.
-5. **Staging:** where a forge plan lacks ruleset *Evaluate* mode (GitHub Pro — Evaluate is Enterprise-only), stage the ruleset `disabled` (non-enforcing) and flip to `active` after the bot push path is verified live. Never describe a disabled or merely documented ruleset as active protection.
+5. **Staging:** where a forge plan lacks ruleset *Evaluate* mode (GitHub Pro — Evaluate is Enterprise-only), stage the ruleset `disabled` (non-enforcing) and flip to `active` after the bot push path is verified live. Never describe a disabled or merely documented ruleset as active protection; where even ruleset API reads are plan-gated (observed live in the reference — HTTP 403), enforcement is recorded as unverified and never claimed as protection.
 
 ## Components
 
@@ -138,7 +140,7 @@ Installed layout differs — see §Canonical layouts below.
 
 ### Canonical layouts
 
-Kit repo (this repo — the distribution): `agents/` · `process/` · `tools/` · `adapters/` · `templates/` · `onboarding/` · `runbook.md` · `docs/` · `kit-v0.1/`.
+Kit repo (this repo — the distribution): `agents/` · `process/` · `tools/` (incl. `tools/gates/`) · `adapters/` · `templates/` · `onboarding/` · `runbook.md` · `docs/` · `kit-v0.1/`.
 
 Installed control home (Mode 1 target repo, or Mode 2 workspace repo):
 
@@ -179,6 +181,8 @@ Work artifacts (code) live on the story branch in each touched repo; the control
 
 **Port rules:** keep behavior; genericize names (no product-specific component/file/test names); drop runtime-specific code paths (runtime-config writes, runtime-DB harvests → replaced per FR-9/FR-10); stdlib only.
 
+Gate scripts live under `tools/gates/` in the kit repo; on install they land at `factory/gates/` (a sibling of `factory/tools/`, per §Canonical layouts).
+
 Since the draft, the reference shipped a read-only CLI (`status`, `doctor`) and a sealed, non-launching preparation/validation path (the **execution seam**). The kit ports those genericized; the launch surface remains gated in the reference (no cloud runner, no spend).
 
 ## State machine
@@ -203,7 +207,7 @@ BACKLOG → GRILLED → TEST_PLAN → SPEC_FROZEN → PLANNED → GATE_PASSED
 
 `factory/ledger/events.jsonl` — append-only, one JSON object per event, UTC timestamps, stable IDs.
 
-Event types (v0.1): `transition`, `dispatch`, `usage`, `stage`, `finding`, `loop`, `correction`, `assignment` (claim lifecycle), `handover`, `human_gate`, `recovery`, `outcome`, `override_used`.
+Event types (v0.1): `transition`, `dispatch`, `usage`, `stage`, `finding`, `loop`, `correction`, `assignment` (claim lifecycle), `handover`, `human_gate`, `recovery`, `outcome`. (`override_used` is an annotation payload on transition events — not an event type; see conventions below.)
 
 Conventions (unchanged from the reference):
 

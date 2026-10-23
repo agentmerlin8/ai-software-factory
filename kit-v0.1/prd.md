@@ -1,11 +1,11 @@
 # PRD: Factory Kit v0.1
 
-> Status: DRAFT — context bundle (pre-grill). Drafted 2026-09-28.
+> Status: DRAFT — direction folded 2026-10-23 (workspace model, environments, single-writer; see `architecture.md`, `build-plan.md`, `grill-disposition.md`). Drafted 2026-09-28.
 > Scope of this release: v0.1 ("the dress rehearsal build"), per the project vision.
 
 ## Executive Summary
 
-The Factory Kit makes the software factory's process, agents, and control plane fully portable. They live **in the target repository**, run on nothing but `git` + `gh` + `python3` (plus the project's own toolchain), and can be executed by a **human operator or any AI orchestrator**.
+The Factory Kit makes the software factory's process, agents, and control plane fully portable. They live **in the target repository (single-repo) or in the project's workspace control home (multi-repo)**, run on nothing but `git` + `gh` + `python3` (plus the project's own toolchain), and can be executed by a **human operator or any AI orchestrator**.
 
 v0.1 ships: the kit skeleton, the universal **dispatch-package** interface, the deterministic **control plane** (ledger, controller, gates, prep, renders), two execution **adapters** (`human`, `hermes`), the complete **idea → completed PR runbook**, and a **dress rehearsal** proving the whole path end-to-end on a real target repo, plus a **two-machine handover drill**.
 
@@ -61,7 +61,7 @@ The kit ships as: `agents/` (role packages), `process/` (process rules), `tools/
 
 ### FR-3 — Dispatch packages are the universal interface
 
-The kit generates, for **every role dispatch**, one self-contained markdown package: role instruction, pinned inputs (at a recorded SHA), expected outputs, stop rules, and the resume preamble. The same package is consumed by an adapter (fed to an agent) or pasted by a human into any AI chat.
+The kit generates, for **every role dispatch**, one self-contained markdown package with six sections: header, role instruction, pinned inputs (at a recorded SHA), expected outputs, stop rules, and the resume preamble. One assembler owns the final package file; prep tools produce its inputs. The same package is consumed by an adapter (fed to an agent) or pasted by a human into any AI chat.
 
 - [ ] **Given** an approved story at PLANNED, **when** the operator runs the package generator, **then** a single file is produced that includes the role instruction, every input pinned by SHA, the expected output paths, and explicit stop rules.
 - [ ] **Given** the same package, **when** it is executed by the `human` adapter (paste into a chat) and by the `hermes` adapter (subagent dispatch), **then** both produce artifacts at the same paths with the same contract shape (parity check).
@@ -97,7 +97,7 @@ A versioned file `factory/locks/OVERRIDE` (template `OVERRIDE.example`) with `sc
 
 ### FR-8 — Execution adapters
 
-An adapter declares: prerequisites, how to execute a dispatch package, how usage is reported, and identity conventions. v0.1 ships `human` (operator pastes package into any AI chat, commits artifacts) and `hermes` (subagent dispatch with per-role model application). Interfaces are defined so `claude-code`, `codex`, and `api-direct` (OpenAI-compatible — the locked-down path) drop in at v0.2.
+An adapter declares its contract in `adapters/<name>/adapter.toml` (machine-readable: prerequisites, tier→model table, usage reporting, identity convention) plus a `README.md`. v0.1 ships `human` (operator pastes package into any AI chat, commits artifacts) and `hermes` (dispatch with per-role model application). Interfaces are defined so `claude-code`, `codex`, and `api-direct` (OpenAI-compatible — the locked-down path) drop in at v0.2.
 
 - [ ] **Given** the adapters directory, **when** a new adapter is authored, **then** it can be added without changing control-plane code (interface constraint test).
 
@@ -115,7 +115,7 @@ Usage is **executor-reported**: adapters that can harvest tokens do so; executor
 
 ### FR-11 — Onboarding and target-repo readiness
 
-`onboarding/onboard.sh` installs the kit into a target repo (idempotent, never overwrites). v0.1 ships the **Target-Repo Readiness Checklist** and an **onboard verify** mode: per-check PASS/FAIL, fail-closed, non-zero exit, CI-gateable. Checks are **adapter-aware** (checks like "coding agent assignable" belong to one optional adapter, not to the core). v0.1.x hardens this with a fresh-repo test-out.
+Onboarding is deterministic scripts (python3, stdlib) plus a guided session: `onboard <repo>` preflight → inspect → propose → apply (idempotent, never overwrites) → verify. v0.1 ships the **Target-Repo Readiness Checklist** (target + workspace-level checks) and an **onboard verify** mode: per-check PASS/FAIL, fail-closed, non-zero exit, CI-gateable. Checks are **adapter-aware** (checks like "coding agent assignable" belong to one optional adapter, not to the core). v0.1.x hardens this with a fresh-repo test-out.
 
 - [ ] **Given** a target repo missing a prerequisite (e.g. no board or no labels), **when** verify mode runs, **then** it reports the specific missing prerequisite as FAIL and exits non-zero.
 - [ ] **Given** a compliant fresh repo, **when** onboard + verify run, **then** all checks PASS and the repo can immediately start the runbook.
@@ -130,7 +130,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 - **NFR-1 No services** — control plane runs with `python3` (stdlib), `git`, `gh`. No databases, no daemons, no second remote.
 - **NFR-2 Determinism** — same inputs → same outputs for every control-plane command and generator; renders are regenerable.
-- **NFR-3 Portability** — Linux and macOS; no root required; works inside devcontainers and locked-down networks where only the repo travels.
+- **NFR-3 Portability** — Linux and macOS; no root required; works inside devcontainers and locked-down networks where only the repo travels (the process definition travels in git; execution still needs GitHub — the fully offline path is the v0.2 `api-direct` adapter).
 - **NFR-4 Fail-closed** — every check refuses on ambiguity and names the problem.
 - **NFR-5 Honest records** — null + reason; corrections are events; no invented zeros; override and adjudication always visible.
 - **NFR-6 Token economy** — dispatch packages inline their inputs (bundle pattern); every dispatch lifecycle closes with a usage row.
@@ -138,7 +138,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 ## Out of Scope (v0.1)
 
 - Adapters beyond `human` and `hermes` (deferred to v0.2).
-- True concurrent story scheduling (prevented by the lock; revisit per reference-spec §7 policy).
+- Concurrent execution of multiple stories is allowed but uncoordinated in v0.1; per-story serialization is enforced by the claim lock (revisit per reference policy).
 - Autonomous merge (human gate stays; opt-in policy only, if ever).
 - Hash-chained tamper-evidence (v0.2 trigger-based).
 - Central warehouse / cross-project rollups (derived-only, later).
@@ -169,6 +169,4 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 ## Open Items (for grill)
 
-- Exact dispatch-package section schema (draft in architecture doc).
-- Where the runbook's state names converge with the reference 16-state machine (port as-is vs. trim).
-- Verify-mode check registry format for adapter-aware checks.
+All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`; the owner calls awaiting ratification and the first build slice are in `build-plan.md`.

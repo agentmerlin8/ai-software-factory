@@ -1,6 +1,6 @@
 # Test Strategy: Factory Kit v0.1
 
-> Status: DRAFT — context bundle (pre-grill). Drafted 2026-09-28.
+> Status: DRAFT — direction folded 2026-10-23 (parity clarification, config/workspace schema tests, D-1 both legs; see `architecture.md`, `build-plan.md`, `grill-disposition.md`). Drafted 2026-09-28.
 > Companion docs: `prd.md`, `architecture.md`, `target-repo-readiness.md`.
 
 ## Testing Philosophy
@@ -14,7 +14,7 @@ Two principles carried from the reference implementation:
 
 ## Test Pyramid
 
-| Layer | Share | What it covers |
+| Layer | Share (indicative) | What it covers |
 |---|---|---|
 | **Unit** (deterministic) | ~70% | controller refusals, ledger schema, gates, prep/template generators, renders (`--check`), routing, usage reconciliation |
 | **Integration** (deterministic) | ~20% | full transition chains on fixture repos: ledger + git + gh-free paths (forge mocked or fixture-backed) |
@@ -35,6 +35,7 @@ No network in unit/integration tests. Forge interactions are either fixture-back
 ### 2. Ledger schema tests
 
 - Every event type: required fields enforced; `<field>` null requires `<field>_reason` non-empty; reason present with a value → rejected.
+- **Config + workspace schema** (build-plan S1): `workspace.toml` and `environments/*.toml` schema-validate; unknown keys refuse; `repo@sha` pins resolve against each repo's object database.
 - Corrections: an edit attempt (in-place change) is detectable; correction events validate.
 - Render determinism: `render_state --check`, `render_dashboard --check`, `render_provenance --check` match ledger byte-for-byte after regeneration.
 
@@ -51,7 +52,8 @@ No network in unit/integration tests. Forge interactions are either fixture-back
 
 ### 5. Parity test (the runtime-agnostic promise)
 
-- Same dispatch package fed to the `human` adapter path (scripted: artifacts committed by a stub executor) and the `hermes` adapter path (stub dispatch) → both produce artifacts at identical paths with identical contract shape. This test guards FR-3/FR-8 without calling any live model.
+- Mechanical **contract test** (CI): the same dispatch package fed to stub executors on both adapter paths → artifacts at identical paths with identical contract shape. This proves the **contract**, never live models.
+- **Live parity** is measured in D-1 (both legs), not here. **Contract shape** = required artifact paths + required sections/front-matter keys per role output (defined in `agents/`).
 
 ### 6. Conformance tests (`onboard verify`)
 
@@ -62,7 +64,7 @@ No network in unit/integration tests. Forge interactions are either fixture-back
 
 ### D-1 — Dress rehearsal (end-to-end)
 
-One small idea → merged PR on the `benchmark-app` target, operated via kit + runbook only, human adapter driving at least the control plane. Recorded: provenance trail, render outputs, board Stage at each transition, PR link, merge decision. **Pass = the runbook needed no outside knowledge.**
+One small idea → merged PR on the `benchmark-app` target, operated via kit + runbook only. **Both legs:** (a) **human** — operator drives the control plane and role work via pasted packages; (b) **hermes** — at least one dispatch through the hermes adapter once the execution seam's launch increment is authorized (until then, leg (b) is recorded as pending — never as passed). Recorded: provenance trail, render outputs, board Stage at each transition, PR link, merge decision. **Pass = the runbook needed no outside knowledge:** a fresh-context agent or uninstructed human given only the clone + runbook completes D-1 with zero clarification requests; every request is recorded as a `finding`/`human_gate` with a defect flag.
 
 ### D-2 — Handover drill (two machines)
 
@@ -101,7 +103,7 @@ python3 factory/tools/render_state.py <story> --check
 python3 factory/tools/render_dashboard.py --check
 
 # conformance
-./onboarding/onboard.sh verify <target>
+python3 onboarding/onboard.py verify <target>
 ```
 
 ## Anti-Patterns (explicitly rejected)
@@ -121,4 +123,5 @@ python3 factory/tools/render_dashboard.py --check
 | FR-3, FR-8 | Categories 4, 5 |
 | FR-9, FR-10 | Category 2 (ledger records) + metrics fixtures |
 | FR-11 | Category 6 |
+| Build S1 (config + ledger schema) | Category 2 (config/workspace schema) |
 | FR-2, FR-12, G4 | D-1, D-2 (acceptance drills) |

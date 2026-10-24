@@ -175,37 +175,40 @@ def _check_workspace_repos(doc: dict, errs: list[str]) -> None:
         for key in item:
             if key not in ("id", "role", "url", "path"):
                 errs.append(f"unknown key: repos[{i}].{key}")
-        # id
+        # id (a deferred placeholder stands in — concrete checks skipped)
         rid = item.get("id")
         if "id" not in item:
             errs.append(f"missing required key: repos[{i}].id")
         elif not isinstance(rid, str):
             errs.append(bad_type(f"repos[{i}].id", "str", rid))
-        elif not REPO_ID_RE.fullmatch(rid):
-            errs.append(f"malformed binding: repos[{i}].id must be a "
-                        "lowercase slug (^[a-z][a-z0-9-]*$)")
-        elif rid in ids:
-            errs.append(f"malformed binding: duplicate repo id {rid!r}")
-        else:
-            ids.add(rid)
-        # role
+        elif not _skip_placeholder(f"repos[{i}].id", rid):
+            if not REPO_ID_RE.fullmatch(rid):
+                errs.append(f"malformed binding: repos[{i}].id must be a "
+                            "lowercase slug (^[a-z][a-z0-9-]*$)")
+            elif rid in ids:
+                errs.append(f"malformed binding: duplicate repo id {rid!r}")
+            else:
+                ids.add(rid)
+        # role (deferred placeholder → enum check and primary count skipped)
         role = item.get("role")
         if "role" not in item:
             errs.append(f"missing required key: repos[{i}].role")
         elif not isinstance(role, str):
             errs.append(bad_type(f"repos[{i}].role", "str", role))
-        elif role not in REPO_ROLES:
-            errs.append(f"malformed binding: repos[{i}].role must be "
-                        f"primary|member (got {role!r})")
-        elif role == "primary":
-            primaries += 1
-        # url
+        elif not _skip_placeholder(f"repos[{i}].role", role):
+            if role not in REPO_ROLES:
+                errs.append(f"malformed binding: repos[{i}].role must be "
+                            f"primary|member (got {role!r})")
+            elif role == "primary":
+                primaries += 1
+        # url (deferred placeholder → URL grammar skipped)
         url = item.get("url")
         if "url" not in item:
             errs.append(f"missing required key: repos[{i}].url")
         elif not isinstance(url, str):
             errs.append(bad_type(f"repos[{i}].url", "str", url))
-        elif not URL_RE.fullmatch(url):
+        elif not _skip_placeholder(f"repos[{i}].url", url) and \
+                not URL_RE.fullmatch(url):
             errs.append(f"malformed binding: repos[{i}].url must be "
                         "host/owner/name — never a URL scheme")
         # path

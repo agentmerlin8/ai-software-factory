@@ -282,6 +282,72 @@ class TestSubEventsAndFold(unittest.TestCase):
         self.assertEqual(folded, {})
 
 
+class TestCorrectionScopedFold(unittest.TestCase):
+    """F1 regression: corrections are applied AT their ledger position —
+    a rollback never permanently overrides later progress, and MERGED
+    completeness no longer refuses on a folded-back-then-forward repo."""
+
+    def test_rollback_then_progress_folds_to_merged(self):
+        events = [
+            sub_event("s1", "app", "READY_FOR_REVIEW"),
+            correction("corr-1", "app", "DRAFT_OPENED"),
+            sub_event("s2", "app", "MERGED"),
+        ]
+        folded = M.fold_repo_status(events, STORY)
+        self.assertEqual(folded, {
+            "app": {"reached": "MERGED", "sub_events": 2, "corrected": True},
+        })
+        self.assertEqual(M.set_completeness(events, STORY, ["app"], "MERGED"),
+                         [])
+
+    def test_rollback_without_later_progress_refuses(self):
+        events = [
+            sub_event("s1", "app", "READY_FOR_REVIEW"),
+            correction("corr-1", "app", "DRAFT_OPENED"),
+        ]
+        folded = M.fold_repo_status(events, STORY)
+        self.assertEqual(folded, {
+            "app": {"reached": "DRAFT_OPENED", "sub_events": 1,
+                    "corrected": True},
+        })
+        got = M.set_completeness(events, STORY, ["app"], "MERGE_ELIGIBLE")
+        self.assertEqual(got, ["repo 'app': reached DRAFT_OPENED, "
+                               "needs >= READY_FOR_REVIEW"])
+
+    def test_correction_after_progress_still_rolls_back(self):
+        events = [
+            sub_event("s1", "app", "MERGED"),
+            correction("corr-1", "app", "DRAFT_OPENED"),
+        ]
+        folded = M.fold_repo_status(events, STORY)
+        self.assertEqual(folded["app"]["reached"], "DRAFT_OPENED")
+        self.assertTrue(folded["app"]["corrected"])
+
+    def test_multiple_rollbacks_and_advances_last_position_wins(self):
+        events = [
+            sub_event("s1", "app", "MERGED"),
+            correction("c1", "app", "BUILD_GREEN"),
+            sub_event("s2", "app", "FULL_TESTS_GREEN"),
+            correction("c2", "app", "DRAFT_OPENED"),
+            sub_event("s3", "app", "READY_FOR_REVIEW"),
+        ]
+        folded = M.fold_repo_status(events, STORY)
+        self.assertEqual(folded["app"]["reached"], "READY_FOR_REVIEW")
+        self.assertTrue(folded["app"]["corrected"])
+        self.assertEqual(folded["app"]["sub_events"], 3)
+
+    def test_non_dict_rows_skipped(self):
+        events = [None, "x", 123,
+                  sub_event("s1", "app", "BUILD_GREEN")]
+        folded = M.fold_repo_status(events, STORY)
+        self.assertEqual(folded, {
+            "app": {"reached": "BUILD_GREEN", "sub_events": 1,
+                    "corrected": False},
+        })
+        self.assertEqual([e["event_id"]
+                          for e in M.sub_events(events, STORY)], ["s1"])
+
+
 class TestSetCompleteness(unittest.TestCase):
     def test_complete_merge_eligible(self):
         events = load_jsonl("subevents_complete_ready.jsonl")

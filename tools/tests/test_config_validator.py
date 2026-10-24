@@ -164,6 +164,85 @@ class TestWorkspaceFailures(unittest.TestCase):
                           error_lines(output))
 
 
+class TestDeferredRepoBindings(unittest.TestCase):
+    """F2 regression: deferred `<…>` placeholders are allowed for EVERY
+    string-typed repos[] key (id/role/url/path) in default mode — the
+    frozen rule admits placeholders wherever a string is expected.
+    --strict reports each with its indexed dotted path."""
+
+    DEFERRED_WS = """\
+workspace = "demo"
+control_home = "dedicated"
+[factory]
+pin = "<kit>"
+[[repos]]
+id = "<repo-id>"
+role = "<repo-role>"
+url = "<repo-url>"
+path = "<checkout-path>"
+"""
+
+    def test_deferred_bindings_pass_default_mode(self):
+        path = write_tmp(self.DEFERRED_WS, "workspace.toml")
+        code, output = run_main([path])
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output, [f"OK {path}"])
+
+    def test_deferred_bindings_strict_mode_indexed_errors(self):
+        path = write_tmp(self.DEFERRED_WS, "workspace.toml")
+        code, output = run_main(["--strict", path])
+        self.assertEqual(code, 1, output)
+        errors = error_lines(output)
+        for expected in ("deferred placeholder not resolved: repos[0].id",
+                         "deferred placeholder not resolved: repos[0].role",
+                         "deferred placeholder not resolved: repos[0].url",
+                         "deferred placeholder not resolved: repos[0].path",
+                         "deferred placeholder not resolved: factory.pin"):
+            self.assertIn(f"  - {expected}", errors)
+        # default mode still passes
+        code, output = run_main([path])
+        self.assertEqual(code, 0, output)
+
+    def test_deferred_ids_never_count_as_duplicates(self):
+        doc = self.DEFERRED_WS + ('[[repos]]\nid = "<repo-id>"\n'
+                                  'role = "<repo-role>"\n'
+                                  'url = "<repo-url>"\n')
+        code, output = run_main([write_tmp(doc, "workspace.toml")])
+        self.assertEqual(code, 0, output)
+
+    def test_non_deferred_invalid_values_still_refused(self):
+        head = ('workspace = "demo"\ncontrol_home = "dedicated"\n'
+                '[factory]\npin = "<kit>"\n[[repos]]\n')
+        for label, doc, expected in (
+                ("id", 'id = "App"\nrole = "primary"\n'
+                 'url = "github.com/acme/app"\n',
+                 "malformed binding: repos[0].id must be a "
+                 "lowercase slug (^[a-z][a-z0-9-]*$)"),
+                ("role", 'id = "app"\nrole = "secondary"\n'
+                 'url = "github.com/acme/app"\n',
+                 "malformed binding: repos[0].role must be "
+                 "primary|member (got 'secondary')"),
+                ("url", 'id = "app"\nrole = "primary"\n'
+                 'url = "https://github.com/acme/app"\n',
+                 "malformed binding: repos[0].url must be host/owner/name "
+                 "— never a URL scheme"),
+                ("path", 'id = "app"\nrole = "primary"\n'
+                 'url = "github.com/acme/app"\npath = "../escape"\n',
+                 "malformed binding: repos[0].path must be a "
+                 "relative path with no '..'")):
+            with self.subTest(field=label):
+                code, output = run_main([write_tmp(head + doc,
+                                                   "workspace.toml")])
+                self.assertEqual(code, 1, output)
+                self.assertIn(f"  - {expected}", error_lines(output))
+
+    def test_shipped_templates_still_pass_default_mode(self):
+        code, output = run_main(SHIPPED_TEMPLATES)
+        self.assertEqual(code, 0, output)
+        for line in output:
+            self.assertTrue(line.startswith("OK "), line)
+
+
 class TestEnvironmentFailures(unittest.TestCase):
     def _refuse(self, name: str, messages: list[str]) -> None:
         code, output = run_main([fixture(name)])

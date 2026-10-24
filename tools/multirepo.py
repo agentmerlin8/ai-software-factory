@@ -18,10 +18,12 @@ Core rules:
     are per-repo local progress markers on SUB_STATE_LADDER; they NEVER
     change the story-level state
     (tools/ledger_schema.current_state excludes them).
-  * Folding is per-repo max on the ladder (order-independent — duplicates
-    and backtracks are fine). A `correction` event with a `repo` and a
-    ladder `corrected_value` overrides that repo's folded value and sets
-    corrected=true; a non-ladder corrected_value is ignored. Whether a
+  * Folding processes the ledger IN ORDER: sub-events advance their repo
+    by per-repo max on the ladder (duplicates and backtracks are fine);
+    a `correction` event with a `repo` and a ladder `corrected_value`
+    RESETS that repo's folded value at its ledger position (a rollback,
+    which may lower it) and sets corrected=true — later sub-events may
+    advance it again. A non-ladder corrected_value is ignored. Whether a
     correction is CORRECT is the controller's business, not a schema rule.
   * Set-level completeness: MERGE_ELIGIBLE requires every declared repo
     folded to >= READY_FOR_REVIEW; MERGED requires every repo >= MERGED;
@@ -162,6 +164,8 @@ def sub_events(events: list[dict], story_id: str,
     Sub-events never change the story-level state."""
     result: list[dict] = []
     for e in events:
+        if not isinstance(e, dict):
+            continue
         if e.get("event") != "transition" or e.get("story_id") != story_id \
                 or not e.get("repo"):
             continue
@@ -174,35 +178,39 @@ def fold_repo_status(events: list[dict], story_id: str) -> dict[str, dict]:
     """Fold per-repo sub-event status: for each repo id, {"reached": highest
     ladder state reached or None, "sub_events": count, "corrected": bool}.
 
-    Order-independent — the max ladder index wins, so unordered input,
-    duplicates, and a lower state after a higher one are all fine. Then
-    corrections with repo scope apply: a `correction` event with a `repo`
-    and a ladder `corrected_value` overrides that repo's reached value and
-    sets corrected=true; a non-ladder corrected_value is ignored (corrected
-    stays false). Repos with no sub-events are absent from the result.
+    Single pass in LEDGER ORDER: a sub-event advances its repo by max on
+    the ladder (duplicates and backtracks are fine); a `correction` with a
+    `repo` and a ladder `corrected_value` RESETS that repo's reached value
+    at its ledger position (a rollback — it may lower it) and sets
+    corrected=true, so later sub-events may advance it again. A non-ladder
+    corrected_value is ignored (corrected stays false), as is a correction
+    for a repo with no sub-events (repos with no sub-events are absent from
+    the result). Non-dict rows are skipped.
     """
     folded: dict[str, dict] = {}
-    for e in sub_events(events, story_id):
-        repo = e["repo"]
-        entry = folded.setdefault(
-            repo, {"reached": None, "sub_events": 0, "corrected": False})
-        entry["sub_events"] += 1
-        to_state = e.get("to_state")
-        if to_state in SUB_STATE_LADDER:
-            idx = SUB_STATE_LADDER.index(to_state)
-            if entry["reached"] is None or \
-                    idx > SUB_STATE_LADDER.index(entry["reached"]):
-                entry["reached"] = to_state
     for e in events:
-        if e.get("event") != "correction" or \
-                e.get("story_id") != story_id or not e.get("repo"):
+        if not isinstance(e, dict) or e.get("story_id") != story_id \
+                or not e.get("repo"):
             continue
-        repo = e["repo"]
-        value = e.get("corrected_value")
-        if repo not in folded or value not in SUB_STATE_LADDER:
-            continue
-        folded[repo]["reached"] = value
-        folded[repo]["corrected"] = True
+        etype = e.get("event")
+        if etype == "transition":
+            repo = e["repo"]
+            entry = folded.setdefault(
+                repo, {"reached": None, "sub_events": 0, "corrected": False})
+            entry["sub_events"] += 1
+            to_state = e.get("to_state")
+            if to_state in SUB_STATE_LADDER:
+                idx = SUB_STATE_LADDER.index(to_state)
+                if entry["reached"] is None or \
+                        idx > SUB_STATE_LADDER.index(entry["reached"]):
+                    entry["reached"] = to_state
+        elif etype == "correction":
+            repo = e["repo"]
+            value = e.get("corrected_value")
+            if repo not in folded or value not in SUB_STATE_LADDER:
+                continue
+            folded[repo]["reached"] = value
+            folded[repo]["corrected"] = True
     return folded
 
 

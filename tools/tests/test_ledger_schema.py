@@ -651,6 +651,22 @@ class TestOtherTypes(unittest.TestCase):
                             for e in errs), errs)
 
 
+def join_ledger(**overrides) -> list[dict]:
+    """Module-level join fixture: [internal rc, external rc, finding,
+    attribution] — shared by TestLedgerInvariants and F5 regression tests."""
+    internal = valid_review_context(eid="rc-int",
+                                    role="behavior_reviewer")
+    external = valid_review_context(eid="rc-ext",
+                                    role="external_review")
+    external["delivery_surface"] = "pr-full-diff"
+    finding = valid_finding(fid="F-1", source="external")
+    attr = valid_review_attribution(fid="F-1")
+    ledger = [internal, external, finding, attr]
+    for key, mutate in overrides.items():
+        mutate(ledger)
+    return ledger
+
+
 class TestLedgerInvariants(unittest.TestCase):
     def test_duplicate_non_dispatch_ids(self):
         a, b = valid_loop(eid="loop-1"), valid_loop(eid="loop-1")
@@ -714,25 +730,20 @@ class TestLedgerInvariants(unittest.TestCase):
         self.assertEqual(S.validate_events([valid_dispatch(ended=False)]), [])
 
     def test_mixed_event_types_sharing_id_rejected(self):
-        loop = valid_loop(eid="shared-1")
-        dispatch = valid_dispatch(eid="shared-1")
+        # Both rows are individually VALID but share one event_id across
+        # event types. (F5 validate-then-exclude: a rejected row no longer
+        # reaches the grouping pass, so the dispatch id here must satisfy
+        # the dispatch format to participate.)
+        shared = f"{STORY}-coder-1-1700000000"
+        loop = valid_loop(eid=shared)
+        dispatch = valid_dispatch(eid=shared)
         errs = S.validate_events([loop, dispatch])
-        self.assertTrue(any("duplicate event_id 'shared-1' (spans multiple "
+        self.assertTrue(any(f"duplicate event_id '{shared}' (spans multiple "
                             "event types)" in e for e in errs), errs)
 
     # -- review_attribution joins
     def _join_ledger(self, **overrides) -> list[dict]:
-        internal = valid_review_context(eid="rc-int",
-                                        role="behavior_reviewer")
-        external = valid_review_context(eid="rc-ext",
-                                        role="external_review")
-        external["delivery_surface"] = "pr-full-diff"
-        finding = valid_finding(fid="F-1", source="external")
-        attr = valid_review_attribution(fid="F-1")
-        ledger = [internal, external, finding, attr]
-        for key, mutate in overrides.items():
-            mutate(ledger)
-        return ledger
+        return join_ledger(**overrides)
 
     def test_attribution_join_valid(self):
         self.assertEqual(S.validate_events(self._join_ledger()), [])
@@ -945,6 +956,187 @@ class TestClaimPinStrayReason(unittest.TestCase):
         del multi["start_sha"]
         multi["start_shas"] = {"app": "abc1234", "contracts": "def5678"}
         self.assertEqual(S.validate_event(multi), [])
+
+
+class TestScalarGuardsBeforeEnumChecks(unittest.TestCase):
+    """F3 regression: non-string scalars yield the normal named error —
+    never a TypeError from frozenset/dict membership on unhashable or
+    non-string values."""
+
+    def test_provenance_list_named_error(self):
+        evt = valid_loop()
+        evt["provenance"] = ["live"]
+        errs = S.validate_event(evt)
+        self.assertIn("loop: provenance must be live|backfilled", errs)
+
+    def test_assignment_op_dict_named_error(self):
+        evt = valid_assignment()
+        evt["op"] = {}
+        errs = S.validate_event(evt)
+        self.assertTrue(any("op {} not in" in e for e in errs), errs)
+        # required-field extension is skipped for the unknown op, but the
+        # base op-missing check must not fire either
+        self.assertNotIn("assignment: missing required field `op`", errs)
+
+    def test_assignment_op_list_no_stray_reason_crash(self):
+        evt = valid_assignment(op="claim", eid="sg-1")
+        evt["op"] = ["claim"]
+        evt["owner_reason"] = "stray"
+        errs = S.validate_event(evt)
+        self.assertTrue(any("op ['claim'] not in" in e for e in errs), errs)
+
+    def test_finding_class_source_disposition_non_strings(self):
+        for field, bad in (("class", ["reasoning"]), ("source", {"x": 1}),
+                           ("disposition", 17)):
+            with self.subTest(field=field):
+                evt = valid_finding()
+                evt[field] = bad
+                errs = S.validate_event(evt)
+                self.assertTrue(any(e.startswith(f"finding: {field} ")
+                                    for e in errs), errs)
+
+    def test_human_gate_gate_and_decision_non_strings(self):
+        evt = valid_human_gate()
+        evt["gate"] = ["merge"]
+        errs = S.validate_event(evt)
+        self.assertTrue(any("gate ['merge'] not in" in e for e in errs), errs)
+        evt = valid_human_gate()
+        evt["decision"] = {"d": "approved"}
+        errs = S.validate_event(evt)
+        self.assertIn("human_gate: an answered gate requires decision in "
+                      "(approved, rejected)", errs)
+
+    def test_review_context_role_and_surface_non_strings(self):
+        evt = valid_review_context()
+        evt["review_role"] = ["behavior_reviewer"]
+        evt["delivery_surface"] = 42
+        errs = S.validate_event(evt)
+        self.assertTrue(any("review_role ['behavior_reviewer'] not in" in e
+                            for e in errs), errs)
+        self.assertTrue(any("delivery_surface must identify" in e
+                            for e in errs), errs)
+
+    def test_review_attribution_classification_non_string(self):
+        evt = valid_review_attribution()
+        evt["classification"] = ["MISSED_WITH_CONTEXT"]
+        errs = S.validate_event(evt)
+        self.assertTrue(any("classification ['MISSED_WITH_CONTEXT'] "
+                            "not in" in e for e in errs), errs)
+
+
+class TestModelUnverifiedBoolean(unittest.TestCase):
+    """F4 regression: model_unverified must be the boolean True — the
+    string "false" and int 1 are named refusals, never truthiness."""
+
+    def _unverified(self, value):
+        evt = valid_dispatch()
+        evt["reported_model"] = None
+        evt["reported_model_reason"] = "runtime cannot confirm"
+        evt["model_unverified"] = value
+        return evt
+
+    def test_string_false_refused(self):
+        errs = S.validate_event(self._unverified("false"))
+        self.assertIn("dispatch: model_unverified must be an explicit "
+                      "boolean", errs)
+        self.assertIn("dispatch: unconfirmed reported_model requires "
+                      "model_unverified=true", errs)
+
+    def test_int_one_refused(self):
+        errs = S.validate_event(self._unverified(1))
+        self.assertIn("dispatch: model_unverified must be an explicit "
+                      "boolean", errs)
+        self.assertIn("dispatch: unconfirmed reported_model requires "
+                      "model_unverified=true", errs)
+
+    def test_bool_true_ok(self):
+        self.assertEqual(S.validate_event(self._unverified(True)), [])
+
+    def test_bool_false_with_reported_model_ok(self):
+        evt = valid_dispatch()
+        evt["model_unverified"] = False
+        self.assertEqual(S.validate_event(evt), [])
+        # non-bool with reported_model SET still names the type error
+        evt = valid_dispatch()
+        evt["model_unverified"] = "false"
+        errs = S.validate_event(evt)
+        self.assertIn("dispatch: model_unverified must be an explicit "
+                      "boolean", errs)
+
+
+class TestValidateThenExclude(unittest.TestCase):
+    """F5 regression: rows rejected by validate_event are excluded from
+    every grouping/join pass — unhashable index keys never crash
+    validate_events."""
+
+    def test_review_context_list_event_id_no_crash(self):
+        rc = valid_review_context()
+        rc["event_id"] = ["rc-1"]
+        errs = S.validate_event(rc)
+        self.assertIn("review_context: event_id must be a string", errs)
+        ledger = join_ledger()
+        ledger[0] = rc  # internal context with the bad id
+        errs = S.validate_events(ledger)
+        self.assertIn("review_context: event_id must be a string", errs)
+        # the rejected row is excluded from the join → attribution misses
+        self.assertTrue(any("behavior_reviewer review_context" in e
+                            for e in errs), errs)
+
+    def test_row_with_list_event_field_no_crash(self):
+        bad = valid_loop(eid="loop-list-event")
+        bad["event"] = ["loop"]
+        errs = S.validate_events([bad, valid_loop(eid="loop-ok")])
+        self.assertEqual(errs, ["unknown event type ['loop']"])
+
+    def test_finding_list_story_id_no_crash(self):
+        finding = valid_finding()
+        finding["story_id"] = [1]
+        errs = S.validate_event(finding)
+        self.assertIn("finding: story_id must be a string", errs)
+        errs = S.validate_events([finding])
+        self.assertIn("finding: story_id must be a string", errs)
+
+    def test_finding_id_must_be_non_empty_string(self):
+        for bad in ([], "", None, 7):
+            with self.subTest(bad=bad):
+                evt = valid_finding()
+                evt["finding_id"] = bad
+                errs = S.validate_event(evt)
+                self.assertIn("finding: finding_id must be a non-empty "
+                              "string", errs)
+
+    def test_story_id_none_on_nullable_types_still_ok(self):
+        # human_gate/correction allow story_id=null — the string rule
+        # must not fire on None.
+        gate = valid_human_gate()
+        gate["story_id"] = None
+        gate["story_id_reason"] = "factory-level gate, not story-scoped"
+        self.assertEqual(S.validate_event(gate), [])
+
+    def test_attribution_unhashable_join_keys_no_crash(self):
+        attr = valid_review_attribution()
+        attr["internal_context_event_id"] = ["rc-int"]
+        attr["finding_id"] = {"f": 1}
+        ledger = join_ledger()
+        ledger[3] = attr
+        # no crash on the unhashable keys; they simply never match →
+        # the join reports the named misses.
+        errs = S.validate_events(ledger)
+        self.assertTrue(any("internal_context_event_id must reference" in e
+                            for e in errs), errs)
+        self.assertTrue(any("finding_id must reference a finding event" in e
+                            for e in errs), errs)
+
+    def test_rejected_rows_excluded_from_dispatch_grouping(self):
+        # a rejected dispatch row (bad provenance) no longer participates
+        # in the lifecycle grouping → its valid partner is judged alone.
+        pre = valid_dispatch(ended=False)
+        done = valid_dispatch(ended=True)
+        done["provenance"] = "reconstructed"
+        errs = S.validate_events([pre, done])
+        self.assertIn("dispatch: provenance must be live|backfilled", errs)
+        self.assertFalse(any("lifecycle is at most" in e for e in errs), errs)
+        self.assertFalse(any("re-started after end" in e for e in errs), errs)
 
 
 if __name__ == "__main__":

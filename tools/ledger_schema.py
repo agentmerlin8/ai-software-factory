@@ -261,14 +261,21 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
         except (ValueError, TypeError):
             errs.append(f"{etype}: recorded_at must be a UTC timestamp "
                         "(YYYY-MM-DDTHH:MM:SSZ)")
-    if evt.get("provenance") and evt["provenance"] not in PROVENANCES:
-        errs.append(f"{etype}: provenance must be live|backfilled")
+    if evt.get("provenance"):
+        prov = evt["provenance"]
+        if not (isinstance(prov, str) and prov in PROVENANCES):
+            errs.append(f"{etype}: provenance must be live|backfilled")
+    # story_id is a join/index key wherever it appears — a non-string
+    # (e.g. a list) would be unhashable in validate_events' indexes.
+    story_id = evt.get("story_id")
+    if story_id is not None and not isinstance(story_id, str):
+        errs.append(f"{etype}: story_id must be a string")
 
     # required fields present (value may be None only if nullable)
     required = list(REQUIRED[etype])
     if etype == "assignment":
         op = evt.get("op")
-        if op in ASSIGNMENT_OP_FIELDS:
+        if isinstance(op, str) and op in ASSIGNMENT_OP_FIELDS:
             required.extend(ASSIGNMENT_OP_FIELDS[op])
     for f in required:
         if f not in evt:
@@ -297,9 +304,11 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
     # any *_reason field for a NON-nullable required field is a violation
     # (assignment op-fields also count as required fields here)
     required_bases = set(REQUIRED.get(etype, ()))
-    if etype == "assignment" and evt.get("op") in ASSIGNMENT_OP_FIELDS:
-        required_bases |= set(ASSIGNMENT_OP_FIELDS[evt["op"]])
-        if evt["op"] == "claim":
+    _op = evt.get("op")
+    if etype == "assignment" and isinstance(_op, str) and \
+            _op in ASSIGNMENT_OP_FIELDS:
+        required_bases |= set(ASSIGNMENT_OP_FIELDS[_op])
+        if _op == "claim":
             # claim's exactly-one-of pin fields are required in practice —
             # a `start_sha*_reason` sibling on a non-nullable pin is the
             # same violation as on any other required field.
@@ -314,7 +323,7 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
     # type-specific rules
     if etype == "assignment":
         op = evt.get("op")
-        if op not in ASSIGNMENT_OPS:
+        if not (isinstance(op, str) and op in ASSIGNMENT_OPS):
             errs.append(f"assignment: op {op!r} not in {list(ASSIGNMENT_OPS)}")
         elif op == "handover" and not isinstance(evt.get("flagged"), bool):
             errs.append("assignment: handover `flagged` must be an explicit "
@@ -332,20 +341,30 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
             if not str(did).startswith(prefix):
                 errs.append("dispatch: event_id must match the row's "
                             f"story/role/attempt (id {did!r})")
-        if evt.get("reported_model") is None and not evt.get("model_unverified"):
+        if "model_unverified" in evt and \
+                not isinstance(evt["model_unverified"], bool):
+            errs.append("dispatch: model_unverified must be an explicit "
+                        "boolean")
+        if evt.get("reported_model") is None and \
+                evt.get("model_unverified") is not True:
             errs.append("dispatch: unconfirmed reported_model requires "
                         "model_unverified=true")
     if etype == "finding":
         cls = evt.get("class")
-        if cls not in FINDING_CLASSES:
+        if not (isinstance(cls, str) and cls in FINDING_CLASSES):
             errs.append(f"finding: class {cls!r} not in "
                         f"{sorted(FINDING_CLASSES)}")
-        if evt.get("source") not in FINDING_SOURCES:
-            errs.append(f"finding: source {evt.get('source')!r} not in "
+        src = evt.get("source")
+        if not (isinstance(src, str) and src in FINDING_SOURCES):
+            errs.append(f"finding: source {src!r} not in "
                         f"{sorted(FINDING_SOURCES)}")
-        if evt.get("disposition") not in FINDING_DISPOSITIONS:
-            errs.append(f"finding: disposition {evt.get('disposition')!r} "
+        disp = evt.get("disposition")
+        if not (isinstance(disp, str) and disp in FINDING_DISPOSITIONS):
+            errs.append(f"finding: disposition {disp!r} "
                         f"not in {sorted(FINDING_DISPOSITIONS)}")
+        fid = evt.get("finding_id")
+        if not (isinstance(fid, str) and fid):
+            errs.append("finding: finding_id must be a non-empty string")
         lt = evt.get("logic_touched")
         if not isinstance(lt, bool):
             errs.append("finding: logic_touched must be an explicit boolean")
@@ -359,13 +378,16 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
         if lt is True and cls == "nit":
             errs.append("finding: logic_touched=true + class=nit is forbidden")
     if etype == "human_gate":
-        if evt.get("gate") not in HUMAN_GATE_KINDS:
-            errs.append(f"human_gate: gate {evt.get('gate')!r} not in "
+        gate = evt.get("gate")
+        if not (isinstance(gate, str) and gate in HUMAN_GATE_KINDS):
+            errs.append(f"human_gate: gate {gate!r} not in "
                         f"{sorted(HUMAN_GATE_KINDS)}")
         # pending/answered contract: an answered gate records its decision
         # and responding human; a pending gate carries neither.
         if evt.get("answered_at") is not None:
-            if evt.get("decision") not in HUMAN_GATE_DECISIONS:
+            decision = evt.get("decision")
+            if not (isinstance(decision, str)
+                    and decision in HUMAN_GATE_DECISIONS):
                 errs.append("human_gate: an answered gate requires decision "
                             "in (approved, rejected)")
             ab = evt.get("answered_by")
@@ -389,11 +411,14 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
                         "string (tagged at the moment it happens — never "
                         "backfilled)")
     if etype == "review_context":
-        if evt.get("review_role") not in REVIEW_ROLES:
+        role = evt.get("review_role")
+        if not (isinstance(role, str) and role in REVIEW_ROLES):
             errs.append(f"review_context: review_role "
-                        f"{evt.get('review_role')!r} not in "
+                        f"{role!r} not in "
                         f"{sorted(REVIEW_ROLES)}")
-        if evt.get("delivery_surface") not in REVIEW_DELIVERY_SURFACES:
+        surface = evt.get("delivery_surface")
+        if not (isinstance(surface, str)
+                and surface in REVIEW_DELIVERY_SURFACES):
             errs.append("review_context: delivery_surface must identify the "
                         "exact dispatch-package or PR full-diff surface")
         for field in ("reviewed_sha", "base_sha"):
@@ -411,9 +436,11 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
             errs.append("review_context: context_manifest_path must stay "
                         f"under {expected_prefix}")
     if etype == "review_attribution":
-        if evt.get("classification") not in REVIEW_ATTRIBUTIONS:
+        classification = evt.get("classification")
+        if not (isinstance(classification, str)
+                and classification in REVIEW_ATTRIBUTIONS):
             errs.append(f"review_attribution: classification "
-                        f"{evt.get('classification')!r} not in "
+                        f"{classification!r} not in "
                         f"{sorted(REVIEW_ATTRIBUTIONS)}")
     return errs
 
@@ -429,6 +456,12 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
     completion (stale re-start), an orphan completion, or reversed order.
     Non-dispatch event_ids are strictly unique.
 
+    Validate-then-exclude: a row rejected by validate_event (or a
+    non-dict row) is reported and then EXCLUDED from every ledger-wide
+    pass below — rejected rows never enter the dispatch lifecycle
+    grouping, the review-context/finding indexes, or the attribution
+    joins, so malformed field values can never crash them.
+
     Review-attribution joins: internal_context_event_id must reference a
     behavior_reviewer review_context; external_context_event_id must
     reference an external_review review_context; both from the same story;
@@ -439,12 +472,21 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
     errs: list[str] = []
     seen_ids: set[str] = set()
     rows_by_id: dict[str, list[dict[str, Any]]] = {}
+    valid_rows: list[dict[str, Any]] = []
     for evt in events:
         if not isinstance(evt, dict):
             errs.append(f"malformed ledger row: {type(evt).__name__} "
                         "(expected an object)")
             continue
-        errs.extend(validate_event(evt))
+        row_errs = validate_event(evt)
+        if row_errs:
+            # Validate-then-exclude: a rejected row never enters the
+            # grouping/join passes below — its fields may be unhashable or
+            # nonsensical, and its row-level errors already name the
+            # violation.
+            errs.extend(row_errs)
+            continue
+        valid_rows.append(evt)
         eid = evt.get("event_id")
         if isinstance(eid, str):
             etype = evt.get("event")
@@ -482,19 +524,20 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
                         "pre-spawn row — only pre-spawn (ended_at null) may "
                         "be followed by a completion")
 
-    context_by_id = {e.get("event_id"): e for e in events
-                     if isinstance(e, dict) and e.get("event") == "review_context"}
+    context_by_id = {e.get("event_id"): e for e in valid_rows
+                     if e.get("event") == "review_context"}
     # finding index keyed by (story_id, finding_id) — finding ids are only
     # unique WITHIN a story, so two stories may both carry an `F-1`.
     finding_by_id = {(e.get("story_id"), e.get("finding_id")): e
-                     for e in events
-                     if isinstance(e, dict) and e.get("event") == "finding"}
-    for evt in events:
-        if not isinstance(evt, dict) or \
-                evt.get("event") != "review_attribution":
+                     for e in valid_rows
+                     if e.get("event") == "finding"}
+    for evt in valid_rows:
+        if evt.get("event") != "review_attribution":
             continue
-        internal = context_by_id.get(evt.get("internal_context_event_id"))
-        external = context_by_id.get(evt.get("external_context_event_id"))
+        iid = evt.get("internal_context_event_id")
+        xid = evt.get("external_context_event_id")
+        internal = context_by_id.get(iid) if isinstance(iid, str) else None
+        external = context_by_id.get(xid) if isinstance(xid, str) else None
         if internal is None or internal.get("review_role") != "behavior_reviewer":
             errs.append("review_attribution: internal_context_event_id must "
                         "reference a behavior_reviewer review_context event")
@@ -513,13 +556,14 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
             errs.append("review_attribution: capability/context "
                         "classifications require identical internal and "
                         "external snapshots")
-        finding = finding_by_id.get((evt.get("story_id"),
-                                     evt.get("finding_id")))
+        fid = evt.get("finding_id")
+        finding = finding_by_id.get((evt.get("story_id"), fid)) \
+            if isinstance(fid, str) else None
         if finding is None:
             # Precise miss reporting: the same finding_id under another
             # story (external source) is a same-story violation, not a
             # dangling reference.
-            elsewhere = any(f.get("finding_id") == evt.get("finding_id")
+            elsewhere = any(f.get("finding_id") == fid
                             for f in finding_by_id.values())
             if elsewhere:
                 errs.append("review_attribution: finding must be an "

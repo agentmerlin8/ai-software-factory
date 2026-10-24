@@ -311,6 +311,26 @@ class TestEnvelope(unittest.TestCase):
         self.assertIn("loop: missing envelope field `recorded_at`", errs)
         self.assertFalse(any("UTC timestamp" in e for e in errs), errs)
 
+    def test_event_id_must_be_a_string(self):
+        # truthy non-string ids would bypass the string-keyed uniqueness
+        # index in validate_events — rejected at the envelope boundary.
+        for bad in (1, 1.5, ["loop-1"], {"id": "loop-1"}, True):
+            evt = valid_loop()
+            evt["event_id"] = bad
+            errs = S.validate_event(evt)
+            self.assertIn("loop: event_id must be a string", errs)
+
+    def test_event_id_falsy_reports_missing_only(self):
+        for bad in ("", None, 0):
+            evt = valid_loop()
+            evt["event_id"] = bad
+            errs = S.validate_event(evt)
+            self.assertIn("loop: missing envelope field `event_id`", errs)
+            self.assertNotIn("loop: event_id must be a string", errs)
+
+    def test_string_event_id_unaffected(self):
+        self.assertEqual(S.validate_event(valid_loop()), [])
+
 
 class TestRequiredAndNullReason(unittest.TestCase):
     def test_missing_required_field(self):
@@ -637,6 +657,16 @@ class TestLedgerInvariants(unittest.TestCase):
         b["root_cause_one_line"] = "different cause"
         errs = S.validate_events([a, b])
         self.assertIn("duplicate event_id 'loop-1'", errs)
+
+    def test_non_string_event_id_cannot_bypass_uniqueness(self):
+        # regression: two loop events sharing event_id=1 used to slip past
+        # the string-only duplicate index — both are now flagged.
+        a, b = valid_loop(), valid_loop()
+        a["event_id"] = 1
+        b["event_id"] = 1
+        b["root_cause_one_line"] = "different cause"
+        errs = S.validate_events([a, b])
+        self.assertEqual(errs.count("loop: event_id must be a string"), 2)
 
     def test_dispatch_three_rows(self):
         rows = [valid_dispatch(ended=False),

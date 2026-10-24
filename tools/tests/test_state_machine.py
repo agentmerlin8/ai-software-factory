@@ -108,6 +108,37 @@ class TestBlockedResume(unittest.TestCase):
                  self.t("BLOCKED", "TEST_PLAN")]
         self.assertEqual(SM.blocked_origin(trans), "TEST_PLAN")
 
+    # -- repo-tagged sub-events are per-repo moves, not story-level ones
+    def st(self, to, frm, repo):
+        return {"to_state": to, "from_state": frm, "repo": repo}
+
+    def test_sub_event_after_block_does_not_resume(self):
+        # regression: BLOCKED(CODING) then BUILD_GREEN{repo app} used to
+        # clear the origin, letting resume_ok accept ANY target state.
+        trans = [self.t("CODING", "PLAN_APPROVED"),
+                 self.t("BLOCKED", "CODING"),
+                 self.st("BUILD_GREEN", "CODING", "app")]
+        self.assertEqual(SM.blocked_origin(trans), "CODING")
+        self.assertFalse(SM.resume_ok("CODING", "MERGED"))
+        self.assertTrue(SM.resume_ok("CODING", "CODING"))
+
+    def test_story_transition_after_block_still_resumes(self):
+        trans = [self.t("BLOCKED", "CODING"),
+                 self.st("BUILD_GREEN", "CODING", "app"),
+                 self.t("CODING", "BLOCKED")]
+        self.assertIsNone(SM.blocked_origin(trans))
+
+    def test_sub_events_before_block_do_not_affect_origin(self):
+        trans = [self.st("BUILD_GREEN", "CODING", "app"),
+                 self.t("BLOCKED", "CODING")]
+        self.assertEqual(SM.blocked_origin(trans), "CODING")
+
+    def test_repo_tagged_block_does_not_set_story_block(self):
+        # a sub-event is never a story-level BLOCKED either.
+        trans = [self.t("CODING", "PLAN_APPROVED"),
+                 self.st("BLOCKED", "CODING", "app")]
+        self.assertIsNone(SM.blocked_origin(trans))
+
 
 if __name__ == "__main__":
     unittest.main()

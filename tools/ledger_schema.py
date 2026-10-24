@@ -245,6 +245,11 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
     for f in ("event_id", "recorded_at", "provenance"):
         if not evt.get(f):
             errs.append(f"{etype}: missing envelope field `{f}`")
+    event_id = evt.get("event_id")
+    if event_id and not isinstance(event_id, str):
+        # truthy non-string ids never enter the uniqueness index —
+        # reject them at the boundary so duplicates can't slip through.
+        errs.append(f"{etype}: event_id must be a string")
     recorded_at = evt.get("recorded_at")
     if recorded_at:
         try:

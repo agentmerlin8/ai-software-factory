@@ -170,16 +170,18 @@ def order_ok(cur: str, to: str, non_ui_declared: bool = False) -> bool:
 def blocked_origin(transitions: list[dict]) -> str | None:
     """From-state of the last BLOCKED transition, if nothing after it
     resumed. `transitions` = transition events in ledger order.
-    None when not blocked."""
+    None when not blocked. Repo-tagged sub-events are excluded: they are
+    per-repo moves, so they never set or resume the story-level block."""
+    story = [t for t in transitions if not t.get("repo")]
     last_block_idx = None
-    for i, t in enumerate(transitions):
+    for i, t in enumerate(story):
         if t.get("to_state") == "BLOCKED":
             last_block_idx = i
     if last_block_idx is None:
         return None
-    if len(transitions) > last_block_idx + 1:
+    if len(story) > last_block_idx + 1:
         return None  # resumed
-    return transitions[last_block_idx].get("from_state")
+    return story[last_block_idx].get("from_state")
 
 
 def resume_ok(origin: str | None, to: str) -> bool:

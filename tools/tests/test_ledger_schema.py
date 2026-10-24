@@ -87,15 +87,16 @@ def valid_stage(eid: str = "stage-1") -> dict:
 
 
 def valid_finding(cls: str = "reasoning", eid: str = "finding-1",
-                  fid: str = "F-1", source: str = "external") -> dict:
+                  fid: str = "F-1", source: str = "external",
+                  story: str = STORY) -> dict:
     evt = env(eid, "finding")
-    evt.update({"finding_id": fid, "story_id": STORY, "source": source,
+    evt.update({"finding_id": fid, "story_id": story, "source": source,
                 "reviewed_sha": SHA40, "introduced_sha": SHA40_B,
                 "class": cls, "severity": "major",
                 "disposition": "accepted", "logic_touched": False,
                 "overlap_id": None, "fixer": "fixer-1",
                 "fix_sha": "d" * 40, "validation": "tests green",
-                "evidence_path": f"stories/{STORY}/evidence/f1.md"})
+                "evidence_path": f"stories/{story}/evidence/f1.md"})
     evt["overlap_id_reason"] = "no overlapping finding"
     for f in S.NULLABLE["finding"]:
         evt.setdefault(f + "_reason", None)
@@ -137,13 +138,30 @@ def valid_transition(eid: str = "transition-1", to: str = "GRILLED",
 
 def valid_human_gate(eid: str = "human_gate-1",
                      gate: str = "merge") -> dict:
+    """An ANSWERED gate: decision + answered_by are part of the answer."""
     evt = env(eid, "human_gate")
     evt.update({"story_id": STORY, "gate": gate,
                 "question": "approve merge?",
                 "asked_at": "2026-10-24T00:00:00Z",
-                "answered_at": "2026-10-24T01:00:00Z"})
+                "answered_at": "2026-10-24T01:00:00Z",
+                "decision": "approved",
+                "answered_by": "an allowlisted human approver"})
     for f in S.NULLABLE["human_gate"]:
         evt.setdefault(f + "_reason", None)
+    return evt
+
+
+def pending_human_gate(eid: str = "human_gate-p",
+                       gate: str = "merge") -> dict:
+    """A PENDING gate: answered_at, decision, answered_by all null with
+    their sibling reasons."""
+    evt = valid_human_gate(eid=eid, gate=gate)
+    evt["answered_at"] = None
+    evt["answered_at_reason"] = "awaiting human response"
+    evt["decision"] = None
+    evt["decision_reason"] = "gate not yet answered"
+    evt["answered_by"] = None
+    evt["answered_by_reason"] = "gate not yet answered"
     return evt
 
 
@@ -208,14 +226,16 @@ def valid_review_context(eid: str = "rc-1",
 
 def valid_review_attribution(eid: str = "ra-1",
                              classification: str = "MISSED_WITH_CONTEXT",
-                             fid: str = "F-1") -> dict:
+                             fid: str = "F-1", story: str = STORY,
+                             internal: str = "rc-int",
+                             external: str = "rc-ext") -> dict:
     evt = env(eid, "review_attribution")
-    evt.update({"story_id": STORY, "finding_id": fid,
-                "internal_context_event_id": "rc-int",
-                "external_context_event_id": "rc-ext",
+    evt.update({"story_id": story, "finding_id": fid,
+                "internal_context_event_id": internal,
+                "external_context_event_id": external,
                 "classification": classification,
                 "classified_by": "orchestrator",
-                "evidence_path": f"stories/{STORY}/evidence/attr.md"})
+                "evidence_path": f"stories/{story}/evidence/attr.md"})
     return evt
 
 
@@ -475,6 +495,75 @@ class TestOtherTypes(unittest.TestCase):
         errs = S.validate_event(evt)
         self.assertTrue(any("gate 'vibes' not in" in e for e in errs), errs)
 
+    # -- human_gate pending/answered contract
+    def test_human_gate_answered_valid(self):
+        for decision in S.HUMAN_GATE_DECISIONS:
+            evt = valid_human_gate()
+            evt["decision"] = decision
+            with self.subTest(decision=decision):
+                self.assertEqual(S.validate_event(evt), [])
+
+    def test_human_gate_answered_missing_decision(self):
+        evt = valid_human_gate()
+        del evt["decision"]
+        errs = S.validate_event(evt)
+        self.assertIn("human_gate: missing required field `decision`", errs)
+
+    def test_human_gate_answered_bad_decision_value(self):
+        evt = valid_human_gate()
+        evt["decision"] = "maybe"
+        errs = S.validate_event(evt)
+        self.assertIn("human_gate: an answered gate requires decision in "
+                      "(approved, rejected)", errs)
+
+    def test_human_gate_answered_missing_answered_by(self):
+        evt = valid_human_gate()
+        evt["answered_by"] = "   "
+        errs = S.validate_event(evt)
+        self.assertIn("human_gate: an answered gate requires answered_by "
+                      "(the responding human)", errs)
+
+    def test_human_gate_pending_valid(self):
+        self.assertEqual(S.validate_event(pending_human_gate()), [])
+
+    def test_human_gate_pending_must_not_carry_decision(self):
+        evt = pending_human_gate()
+        evt["decision"] = "approved"
+        evt["decision_reason"] = None
+        errs = S.validate_event(evt)
+        self.assertIn("human_gate: a pending gate must not carry "
+                      "decision/answered_by", errs)
+
+    def test_human_gate_pending_must_not_carry_answered_by(self):
+        evt = pending_human_gate()
+        evt["answered_by"] = "some human"
+        evt["answered_by_reason"] = None
+        errs = S.validate_event(evt)
+        self.assertIn("human_gate: a pending gate must not carry "
+                      "decision/answered_by", errs)
+
+    # -- dispatch event_id prefix must match the row's story/role/attempt
+    def test_dispatch_id_prefix_mismatches(self):
+        for label, eid in {
+                "story": "STORY-099-coder-1-1700000000",
+                "role": f"{STORY}-reviewer-1-1700000000",
+                "attempt": f"{STORY}-coder-2-1700000000"}.items():
+            evt = valid_dispatch(eid=eid)
+            with self.subTest(mismatch=label):
+                errs = S.validate_event(evt)
+                self.assertTrue(
+                    any("event_id must match the row's story/role/attempt"
+                        in e for e in errs), errs)
+
+    def test_dispatch_id_prefix_match_valid(self):
+        self.assertEqual(S.validate_event(valid_dispatch()), [])
+
+    def test_dispatch_id_bad_shape_not_double_reported(self):
+        evt = valid_dispatch(eid="not-a-dispatch-id")
+        errs = S.validate_event(evt)
+        self.assertEqual(len([e for e in errs if "event_id" in e]), 1)
+        self.assertTrue(any("does not match" in e for e in errs), errs)
+
     def test_transition_checks_types(self):
         evt = valid_transition()
         evt["checks_run"] = "story_md"
@@ -669,6 +758,38 @@ class TestLedgerInvariants(unittest.TestCase):
         self.assertTrue(any("external-source finding from the same story"
                             in e for e in errs), errs)
 
+    # -- finding index keyed by (story_id, finding_id)
+    def test_two_stories_sharing_finding_id_both_validate(self):
+        # regression: finding ids are only unique WITHIN a story — two
+        # stories each carrying an external F-1 must both attribute.
+        other = "STORY-099"
+        ledger = []
+        for story, tag in ((STORY, "a"), (other, "b")):
+            internal = valid_review_context(eid=f"rc-int-{tag}", story=story)
+            external = valid_review_context(eid=f"rc-ext-{tag}", story=story,
+                                            role="external_review")
+            external["delivery_surface"] = "pr-full-diff"
+            ledger += [internal, external,
+                       valid_finding(eid=f"f-{tag}", fid="F-1", story=story),
+                       valid_review_attribution(eid=f"ra-{tag}", fid="F-1",
+                                                story=story,
+                                                internal=f"rc-int-{tag}",
+                                                external=f"rc-ext-{tag}")]
+        self.assertEqual(S.validate_events(ledger), [])
+
+    def test_attribution_referencing_another_story_finding(self):
+        # no F-1 under the attributing story, but one exists elsewhere →
+        # same-story violation, not a dangling reference.
+        other = "STORY-099"
+        ledger = self._join_ledger()
+        del ledger[2]  # drop the local F-1 finding
+        ledger.append(valid_finding(eid="f-other", fid="F-1", story=other))
+        errs = S.validate_events(ledger)
+        self.assertTrue(any("external-source finding from the same story"
+                            in e for e in errs), errs)
+        self.assertFalse(any("finding_id must reference a finding event"
+                             in e for e in errs), errs)
+
 
 class TestHelpers(unittest.TestCase):
     def test_events_for_and_current_state(self):
@@ -689,6 +810,25 @@ class TestHelpers(unittest.TestCase):
         latest = S.latest_findings([f1, f2, f1b])
         self.assertEqual([f["finding_id"] for f in latest], ["F-1", "F-2"])
         self.assertEqual(latest[0]["disposition"], "fixed")
+
+    def test_latest_findings_same_id_different_stories(self):
+        # regression: the lifecycle key includes story_id — two stories
+        # sharing F-1 both surface; same-story updates still fold.
+        other = "STORY-099"
+        f1 = valid_finding(fid="F-1", eid="f1")
+        f1b = copy.deepcopy(f1)
+        f1b.update({"event_id": "f1b", "disposition": "fixed"})
+        g1 = valid_finding(fid="F-1", eid="g1", story=other)
+        g1b = copy.deepcopy(g1)
+        g1b.update({"event_id": "g1b", "disposition": "dismissed"})
+        latest = S.latest_findings([f1, g1, f1b, g1b])
+        self.assertEqual(len(latest), 2)
+        by_story = {f["story_id"]: f for f in latest}
+        self.assertEqual(by_story[STORY]["disposition"], "fixed")
+        self.assertEqual(by_story[other]["disposition"], "dismissed")
+        # story filter still narrows
+        self.assertEqual(len(S.latest_findings([f1, g1, f1b, g1b],
+                                               story_id=other)), 1)
 
     def test_utcnow_format(self):
         import re as _re

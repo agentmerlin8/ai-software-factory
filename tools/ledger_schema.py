@@ -32,6 +32,9 @@ Core rules enforced here:
   * dispatch_id format: <story>-<role>-<attempt>-<unix>, recorded BEFORE
     the dispatch is spawned; a dispatch already recorded `ended` can never
     be re-started by a stale notification.
+  * human_gate pending/answered contract: an answered gate
+    (`answered_at` set) requires `decision` ∈ {approved, rejected} AND
+    `answered_by` (the responding human); a pending gate carries neither.
 
 Stdlib only. Python >= 3.11.
 """
@@ -97,7 +100,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "story_id", "from_state", "to_state", "requested_by", "checks_run",
         "check_results", "approved_by",
     ),
-    "human_gate": ("story_id", "gate", "question", "asked_at", "answered_at"),
+    "human_gate": ("story_id", "gate", "question", "asked_at", "answered_at",
+                   "decision", "answered_by"),
     "outcome": (
         "story_id", "merged_sha", "merged_at", "live_proof_status",
         "observation_end", "escaped_defects", "totals", "recommendation",
@@ -142,7 +146,8 @@ NULLABLE: dict[str, frozenset[str]] = {
     "recovery": frozenset({"actual_model", "remaining_scope",
                            "additional_cost", "original_assignment"}),
     "transition": frozenset({"approved_by", "repo"}),
-    "human_gate": frozenset({"answered_at", "story_id"}),
+    "human_gate": frozenset({"answered_at", "story_id", "decision",
+                             "answered_by"}),
     "outcome": frozenset({"merged_sha", "merged_at", "live_proof_status",
                           "observation_end", "escaped_defects", "totals",
                           "recommendation"}),
@@ -162,6 +167,7 @@ FINDING_DISPOSITIONS = frozenset({"accepted", "dismissed", "deferred",
                                   "fixed", "fix_in_revision", "record_only"})
 HUMAN_GATE_KINDS = frozenset({"visual", "merge", "loop_cap", "scope",
                               "safety", "meta", "avoidable", "spec_freeze"})
+HUMAN_GATE_DECISIONS = ("approved", "rejected")
 REVIEW_ROLES = frozenset({"behavior_reviewer", "contract_reviewer",
                           "external_review"})
 REVIEW_DELIVERY_SURFACES = frozenset({"dispatch-package", "pr-full-diff"})
@@ -306,6 +312,12 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
         if not DISPATCH_ID_RE.match(str(did)):
             errs.append(f"dispatch: event_id {did!r} does not match "
                         "<story>-<role>-<attempt>-<unix> (pre-spawn ID)")
+        else:
+            prefix = f"{evt.get('story_id')}-{evt.get('role')}-" \
+                     f"{evt.get('attempt')}-"
+            if not str(did).startswith(prefix):
+                errs.append("dispatch: event_id must match the row's "
+                            f"story/role/attempt (id {did!r})")
         if evt.get("reported_model") is None and not evt.get("model_unverified"):
             errs.append("dispatch: unconfirmed reported_model requires "
                         "model_unverified=true")
@@ -336,6 +348,19 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
         if evt.get("gate") not in HUMAN_GATE_KINDS:
             errs.append(f"human_gate: gate {evt.get('gate')!r} not in "
                         f"{sorted(HUMAN_GATE_KINDS)}")
+        # pending/answered contract: an answered gate records its decision
+        # and responding human; a pending gate carries neither.
+        if evt.get("answered_at") is not None:
+            if evt.get("decision") not in HUMAN_GATE_DECISIONS:
+                errs.append("human_gate: an answered gate requires decision "
+                            "in (approved, rejected)")
+            ab = evt.get("answered_by")
+            if not isinstance(ab, str) or not ab.strip():
+                errs.append("human_gate: an answered gate requires "
+                            "answered_by (the responding human)")
+        elif evt.get("decision") is not None or evt.get("answered_by") is not None:
+            errs.append("human_gate: a pending gate must not carry "
+                        "decision/answered_by")
     if etype == "transition":
         checks_run = evt.get("checks_run")
         if not isinstance(checks_run, list) or \
@@ -441,8 +466,10 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
 
     context_by_id = {e.get("event_id"): e for e in events
                      if e.get("event") == "review_context"}
-    finding_by_id = {e.get("finding_id"): e for e in events
-                     if e.get("event") == "finding"}
+    # finding index keyed by (story_id, finding_id) — finding ids are only
+    # unique WITHIN a story, so two stories may both carry an `F-1`.
+    finding_by_id = {(e.get("story_id"), e.get("finding_id")): e
+                     for e in events if e.get("event") == "finding"}
     for evt in events:
         if evt.get("event") != "review_attribution":
             continue
@@ -466,12 +493,21 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
             errs.append("review_attribution: capability/context "
                         "classifications require identical internal and "
                         "external snapshots")
-        finding = finding_by_id.get(evt.get("finding_id"))
+        finding = finding_by_id.get((evt.get("story_id"),
+                                     evt.get("finding_id")))
         if finding is None:
-            errs.append("review_attribution: finding_id must reference a "
-                        "finding event in the ledger")
-        elif finding.get("story_id") != evt.get("story_id") or \
-                finding.get("source") != "external":
+            # Precise miss reporting: the same finding_id under another
+            # story (external source) is a same-story violation, not a
+            # dangling reference.
+            elsewhere = any(f.get("finding_id") == evt.get("finding_id")
+                            for f in finding_by_id.values())
+            if elsewhere:
+                errs.append("review_attribution: finding must be an "
+                            "external-source finding from the same story")
+            else:
+                errs.append("review_attribution: finding_id must reference "
+                            "a finding event in the ledger")
+        elif finding.get("source") != "external":
             errs.append("review_attribution: finding must be an "
                         "external-source finding from the same story")
     return errs
@@ -500,14 +536,18 @@ def current_state(events: list[dict], story_id: str) -> str | None:
 
 def latest_findings(events: list[dict],
                     story_id: str | None = None) -> list[dict]:
-    """Return one latest lifecycle row per finding_id, first-seen order."""
-    order: list[str] = []
-    latest: dict[str, dict] = {}
+    """Return one latest lifecycle row per (story_id, finding_id), in
+    first-seen order — finding ids are only unique within a story, so the
+    story is part of the lifecycle key and cross-story rows never fold
+    together."""
+    order: list[tuple[str, str]] = []
+    latest: dict[tuple[str, str], dict] = {}
     for event in events:
         if event.get("event") != "finding" or \
                 (story_id is not None and event.get("story_id") != story_id):
             continue
-        key = str(event.get("finding_id") or event.get("event_id"))
+        key = (str(event.get("story_id")),
+               str(event.get("finding_id") or event.get("event_id")))
         if key not in latest:
             order.append(key)
         latest[key] = event

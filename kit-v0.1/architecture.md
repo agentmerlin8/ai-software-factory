@@ -185,9 +185,28 @@ Gate scripts live under `tools/gates/` in the kit repo; on install they land at 
 
 Since the draft, the reference shipped a read-only CLI (`status`, `doctor`) and a sealed, non-launching preparation/validation path (the **execution seam**). The kit ports those genericized; the launch surface remains gated in the reference (no cloud runner, no spend).
 
+## Gate catalog (extracted)
+
+Four mechanical gates, extracted from the reference with descriptive slugs (no numeric ids):
+
+| Gate | What it checks | Script | Invocation | When |
+|---|---|---|---|---|
+| `digest-gate` | Context digest completeness + anchors at a pinned base SHA | `check_digest.py` | `python3 factory/tools/check_digest.py <STORY-ID> [BASE_SHA]` | After context acquisition, before the planner dispatch. Exit 0 = planner may dispatch; non-zero = re-dispatch context acquisition, never hand-patch the digest |
+| `plan-gate` | Plan-lane mechanical checks: contract block schema, AC coverage, cross-story collisions, anchor resolution, seam verification, coverage set-diffs, snippet annotations | `pre_review_gate.py` (plan mode) | `python3 factory/gates/pre_review_gate.py plan <story-dir> [--spec <path>] [--inflight auto\|none]` | PLANNED → GATE_PASSED (run live by the controller) and before any LLM plan review. Exit 0 = pass |
+| `build-gate` | Build-lane mechanical checks: manifest↔diff, AC↔test discovery, pinned command execution, api-shape, UI DOM assertions, fidelity checks | `pre_review_gate.py` (build mode) | `python3 factory/gates/pre_review_gate.py build <story-dir> [--base main] [--diff-file <name-status file>] [--discovery <project>=<list-tests file>]... [--run-discovery] [--run-verify]` | At BUILD_GREEN, before any LLM code review. Exit 0 = pass |
+| `gate-selftest` | Gate acceptance harness: seeded-invalid fixtures rejected, valid-but-unusual accepted | `test_gate.py` | `python3 factory/gates/test_gate.py` | CI and before any gate change deploys. Non-zero if any fixture behaves wrongly |
+
+Notes:
+
+- `plan-gate` and `build-gate` are **modes of one script** (the pre-review gate).
+- Invocations are the **installed** control-home form (`factory/...`); in this kit repo the scripts live under `tools/` (`python3 tools/gates/pre_review_gate.py ...`) — see §Canonical layouts.
+- **Mechanical gates run BEFORE any LLM review** (mechanical-before-judgment law).
+- Fixtures policy: a gate change is not deployed until the acceptance harness rejects every seeded-invalid fixture and accepts every valid-but-unusual one.
+- Machine-readable form: `tools/gate_catalog.py` (`GATES`).
+
 ## State machine
 
-Pipeline states, **ported as-is from the reference** (the reference map has extended since this draft — currently 19 pipeline states + BLOCKED; the extraction task ports the current set):
+Pipeline states, **ported as-is from the reference** (the reference map has extended since this draft — currently 19 pipeline states + BLOCKED; the current set is extracted below):
 
 ```
 BACKLOG → GRILLED → TEST_PLAN → SPEC_FROZEN → PLANNED → GATE_PASSED
@@ -197,17 +216,55 @@ BACKLOG → GRILLED → TEST_PLAN → SPEC_FROZEN → PLANNED → GATE_PASSED
 (any) → BLOCKED → resumes at originating state
 ```
 
-- `STORYBOOK_APPROVAL` applies to UI stories; lane-skip rules ride with the extraction task.
+- `STORYBOOK_APPROVAL` applies to UI stories (see the UI-skip rule below).
 - Every arrow = a controller transition with evidence + checks.
 - `READY_FOR_REVIEW` (forge flag) ≠ `MERGE_ELIGIBLE` (factory state). Never conflated.
 - Loop caps: 2 per stage; escalation beyond.
-- BLOCKED entry/exit evidence rules land with the extraction task (transition table).
+- BLOCKED entry/exit evidence rules: see the transition table below (`reason` required; resumes at the originating state).
+
+### Transition table (extracted — current set)
+
+Required evidence keys are passed `k=v` on a transition request and persisted into the transition event's `check_results`; the controller refuses without them — it never invents values. Hard checks are controller-enforced; gate/artifact names refer to §Gate catalog and §Canonical layouts. Machine-readable form: `tools/state_machine.py` (`EVIDENCE_KEYS`, `CHECK_SUMMARY`).
+
+| To state | Required evidence keys | Hard checks (controller-enforced) | Gate / artifacts |
+|---|---|---|---|
+| GRILLED | — | `story.md` exists; Given/When/Then acceptance criteria; ≤6 top-level ACs; one structural signal | `stories/<id>/story.md` |
+| TEST_PLAN | — | `story.md` re-checked; DEV and QA grill records exist, each signed by its persona owner; ≥80% correct; zero major misunderstandings; signer/author overlap logged (never blocks) | `grill-dev.md`, `grill-qa.md` |
+| SPEC_FROZEN | `spec_path`, `spec_freeze_sha` | `test-plan.md` committed at `spec_freeze_sha`; canonical story id (next-in-sequence unless `sequence_reason`); spec file exists; `spec_freeze_sha` resolves in git; branch convention `story/<id>-<slug>` when supplied; spec-freeze human approval (answered `human_gate gate=spec_freeze`, or an allowlisted human via `approved_by`) | `test-plan.md`, spec file, git object DB |
+| PLANNED | — | SPEC_FROZEN reached; impl-plan contract block present and validates; planner lane closed dispatch, or a lane-skip deviation with human approval | `impl-plan.md` contract block |
+| GATE_PASSED | — | plan-gate exit 0 (run live) | `plan-gate` (§Gate catalog) |
+| PLAN_APPROVED | `verdict` | plan-review verdict recorded; verdict ∈ {PASS, PASS-WITH-NITS}; plan loops ≤2 | `stage` event (`stage=plan_review`) or evidence |
+| STORYBOOK_APPROVAL | — | answered `human_gate gate=visual` signed by an allowlisted human | UI stories only |
+| CODING | — | PLAN_APPROVED reached; claim (assignment) exists — the first gated transition; non-UI skip requires the declared non-UI line | `assignment` claim event (§Claim lifecycle) |
+| BUILD_GREEN | `commit_sha`, `build_result`, `named_tests_result` | `commit_sha` resolves; build green; named tests green; coder lane closed dispatch or lane-skip deviation | git object DB; the project's test runner |
+| DRAFT_OPENED | `pr_number`, `review_request_mechanism` | `pr_number` recorded; mechanism ∈ {ready-push, draft-mention-opportunistic} (ONE authenticated request); no duplicate DRAFT_OPENED | PR |
+| REVIEWING | — | DRAFT_OPENED reached | external review request |
+| FIXING | — | REVIEWING reached (or post-review reentry) | `finding` + `loop` events |
+| FULL_TESTS_GREEN | `projects`, `tests_passed`, `tests_failed`, `tests_skipped`, `exclusions`, `exit_code` | exact suite membership (projects, skip/exclusion reasons, exit code); `exit_code=0`; `tests_failed=0` | full-suite `stage` event |
+| READY_FOR_REVIEW | `internal_verdict`, `threads_state`, `fix_pushes`, `r1_arrival` | internal verdict ∈ {PASS, PASS-WITH-NITS}; threads all resolved OR an external-review-unavailable watchdog exception logged (absence is never recorded as PASS); ≤1 fix push where both first-round sets arrived pre-edit (target, not safety constraint) | review threads |
+| MERGE_ELIGIBLE | `tested_sha`, `head_sha`, `unresolved_threads` | tested SHA == current head (re-checked at the gate); verdict eligible; no logic-touched nits; external findings dispositioned; external-unique findings attributed when instrumentation present; `unresolved_threads=0`; human merge approval recorded (`human_gate gate=merge`, answered) | `finding`/`review_attribution` events; merge gate |
+| MERGED | `merged_sha`, `merged_at`, `pr_number` | merge evidence complete | merge commit |
+| LIVE_PROVEN | `live_proof_evidence` | evidence is an existing path or http(s) URL | live-proof artifact |
+| CLOSED | `doc_sync`, `closeout_checklist` | doc-sync obligations checked; closeout checklist complete; outcome recorded (`outcome` event with `merged_sha`) | `outcome` event; closeout checklist |
+| BLOCKED | `reason` | from any state; reason required; resumes at the originating state; nothing else allowed while blocked | `transition` event (flag, not a column) |
+
+Evidence value formats: sha keys are 7–40 hex resolving in the repo object DB; `tested_sha` must prefix-match `head_sha`; `pr_number`/`fix_pushes` are digits; verdict keys ∈ {PASS, PASS-WITH-NITS}; `build_result`/`named_tests_result` = `green`; `exit_code`/`tests_failed`/`unresolved_threads` = `0`; `threads_state` ∈ {all-resolved, watchdog-exception}; `r1_arrival` ∈ {both-pre-edit, other}; `live_proof_evidence` = existing path or http(s) URL.
+
+Rules:
+
+- **Next-in-sequence** is the only default move; SPEC_FROZEN accepts a recorded `sequence_reason` escape for the story-id sequence rule.
+- **FIXING reentry** is legal only from {FULL_TESTS_GREEN, READY_FOR_REVIEW, MERGE_ELIGIBLE} (a FAIL verdict routes back) — never from pre-review states.
+- **UI skip**: PLAN_APPROVED → CODING without STORYBOOK_APPROVAL is legal only when the story declares non-UI; a missing or ambiguous declaration is treated as UI (fail closed).
+- **BLOCKED**: from any state, `reason` required, resumes at the originating state, and no other transition is allowed while blocked.
+- **Claim gate**: CODING is the first gated transition — an assignment/claim must exist (§Claim lifecycle).
+- **Lane-skip deviations** for the planner/coder lanes require human approval (`deviation` event, `lane-skip:<role>`).
+- **Loop caps**: 2 per stage, then escalation (BLOCKED with `gate=loop_cap` human gate).
 
 ## Data model — the ledger
 
 `factory/ledger/events.jsonl` — append-only, one JSON object per event, UTC timestamps, stable IDs.
 
-Event types (v0.1): `transition`, `dispatch`, `usage`, `stage`, `finding`, `loop`, `correction`, `assignment` (claim lifecycle), `handover`, `human_gate`, `recovery`, `outcome`. (`override_used` is an annotation payload on transition events — not an event type; see conventions below.)
+Event types (v0.1, ported set): `transition`, `dispatch`, `usage`, `stage`, `finding`, `loop`, `recovery`, `correction`, `outcome`, `human_gate`, `deviation`, `review_context`, `review_attribution`, and `assignment` (claim lifecycle: claim · handover · release — ONE event type with per-op fields). (`override_used` is an annotation payload on transition events — not an event type; see conventions below.) Full per-type schemas: §Ledger event schemas.
 
 Conventions (unchanged from the reference):
 
@@ -223,7 +280,7 @@ Conventions (unchanged from the reference):
 
 | Op | Fields | Rule |
 |---|---|---|
-| claim | `owner`, `host`, `session`, `start_sha`, `claimed_at` | Required before the first active transition after BACKLOG (planning counts as working the story; the extraction task pins the exact first gated transition against the current map). Refused if an open claim exists (unless override) |
+| claim | `owner`, `host`, `session`, `start_sha`, `claimed_at` | Required before the first active transition after BACKLOG (planning counts as working the story; pinned: the controller-enforced gate is CODING — see §Transition table). Refused if an open claim exists (unless override) |
 | handover | `from`, `to`, `reason`, `flagged` (bool) | The only sanctioned transfer; abrupt takeover = flagged handover |
 | release | implicit at CLOSED; record persists | The durable ownership record |
 
@@ -239,6 +296,39 @@ date: <UTC>
 - Read semantics: the override is the blob at `HEAD` of the current branch; a working-tree file that differs from `HEAD` is fail-closed **uncommitted**. Not an override: absent, malformed, placeholder-filled (angle-bracket template values, empty values, literal `TODO`/`CHANGEME`), or uncommitted — the refusal names the bad field.
 - Valid + committed + scoped → claim-lock checks pass for the scope; every permitted transition carries an `override_used` annotation incl. the file's blob SHA at use time.
 - Narrow: never bypasses evidence, gate, or order checks. Renders show active overrides.
+
+## Ledger event schemas (extracted)
+
+Machine-readable form: `tools/ledger_schema.py` (pure validation, no I/O; the append/load ports connect at S2). This section and the module are the same contract — keep them consistent.
+
+**Envelope** — required on EVERY event: `event_id`, `recorded_at` (UTC `...Z`), `provenance` ∈ {`live`, `backfilled`}, plus `event` (the type name).
+
+**The null+reason law (both directions).** A null-allowed field carries a sibling `<field>_reason`: a non-empty string when the field is null, and null whenever the field has a value — never invented zeros. A `<field>_reason` for a NON-nullable required field is itself a violation. Exempt value fields (the field IS the reason, no sibling): `blocked_reason`, `fallback_reason`, `root_cause_one_line`.
+
+| Type | Required fields | Null-allowed fields (sibling `<field>_reason`) | Enums / type rules |
+|---|---|---|---|
+| `assignment` | `story_id`, `op` + per-op: claim → `owner`, `host`, `session`, `start_sha`, `claimed_at`; handover → `from`, `to`, `reason`, `flagged`; release → `owner` | — | `op` ∈ {claim, handover, release}; handover `flagged` is an explicit bool. "One open claim per story" + refusal semantics are CONTROLLER rules (S2), not schema rules |
+| `dispatch` | `story_id`, `role`, `requested_model`, `reported_model`, `thinking_setting`, `session_id`, `parent_session_id`, `attempt`, `started_at`, `ended_at`, `outcome`, `prompt_version`, `worktree`, `model_unverified` | `reported_model`, `thinking_setting`, `session_id`, `parent_session_id`, `ended_at`, `outcome`, `worktree`, `requested_model` | `event_id` matches `<story>-<role>-<attempt>-<unix>`; `reported_model` null requires `model_unverified=true` |
+| `usage` | `dispatch_id`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `thinking_tokens`, `token_semantics`, `usage_source` | `cached_input_tokens`, `thinking_tokens`, `dispatch_id` | tokens-only — no cost fields (kit law) |
+| `stage` | `story_id`, `stage`, `started_at`, `ended_at`, `commit_sha`, `tests_passed`, `tests_failed`, `tests_skipped`, `tests_excluded`, `evidence_path` | `started_at`, `ended_at`, `commit_sha`, `tests_passed`, `tests_failed`, `tests_skipped`, `tests_excluded`, `evidence_path` | |
+| `finding` | `finding_id`, `story_id`, `source`, `reviewed_sha`, `introduced_sha`, `class`, `severity`, `disposition`, `logic_touched`, `overlap_id`, `fixer`, `fix_sha`, `validation`, `evidence_path` | `reviewed_sha`, `introduced_sha`, `overlap_id`, `fixer`, `fix_sha`, `validation`, `evidence_path`, `severity` | `source` ∈ {internal, external, human, orchestrator, script_gate}; `class` ∈ {mechanical, reasoning, contract, nit, design-invalidating}; `disposition` ∈ {accepted, dismissed, deferred, fixed, fix_in_revision, record_only}; `logic_touched` bool; nit law below |
+| `loop` | `story_id`, `stage`, `loop_n`, `class`, `root_cause_one_line` | — | `root_cause_one_line` non-empty string — tagged at the moment it happens, never backfilled |
+| `recovery` | `story_id`, `original_assignment`, `fallback_reason`, `actual_model`, `remaining_scope`, `consumed_loop_count`, `additional_cost`, `human_intervention` | `actual_model`, `remaining_scope`, `additional_cost`, `original_assignment` | |
+| `transition` | `story_id`, `from_state`, `to_state`, `requested_by`, `checks_run`, `check_results`, `approved_by` | `approved_by` | `checks_run` is an array of strings; `check_results` is an object |
+| `human_gate` | `story_id`, `gate`, `question`, `asked_at`, `answered_at` | `answered_at`, `story_id` | `gate` ∈ {visual, merge, loop_cap, scope, safety, meta, avoidable, spec_freeze} |
+| `outcome` | `story_id`, `merged_sha`, `merged_at`, `live_proof_status`, `observation_end`, `escaped_defects`, `totals`, `recommendation` | `merged_sha`, `merged_at`, `live_proof_status`, `observation_end`, `escaped_defects`, `totals`, `recommendation` | |
+| `correction` | `story_id`, `contradicted_claim`, `corrected_value`, `source_citation`, `corrected_artifact` | `story_id` | |
+| `deviation` | `story_id`, `contract_field`, `planned`, `actual`, `justification`, `approved_by` | `approved_by` | lane-skip deviations carry `contract_field = lane-skip:<role>` + human `approved_by` |
+| `review_context` | `story_id`, `review_role`, `reviewed_sha`, `base_sha`, `context_manifest_path`, `context_manifest_digest`, `prompt_version`, `dispatch_id`, `delivery_surface`, `requested_at` | `dispatch_id` | `review_role` ∈ {behavior_reviewer, contract_reviewer, external_review}; `delivery_surface` ∈ {dispatch-package, pr-full-diff}; SHAs full 40-hex; digest full SHA-256; path confined under `stories/<story_id>/` (no `..`) |
+| `review_attribution` | `story_id`, `finding_id`, `internal_context_event_id`, `external_context_event_id`, `classification`, `classified_by`, `evidence_path` | — | `classification` ∈ {MISSED_WITH_CONTEXT, CONTEXT_ABSENT, INTRODUCED_AFTER_INTERNAL}; joins below |
+
+Rules:
+
+- **Dispatch IDs are pre-spawn**: `<story>-<role>-<attempt>-<unix>`. Lifecycle: up to TWO rows share one event_id — pre-spawn (`ended_at` null) then completion (`ended_at` set), in that order; a backfilled dispatch may be a single ended row. More rows, a second completion (stale re-start), an orphan completion, or reversed order are errors. Non-dispatch event_ids are strictly unique.
+- **Nit law**: a fix that changes logic is NEVER class `nit` — nits require `logic_touched=false` AND verifying evidence (`fix_sha` or `validation`); `logic_touched=true` + `class=nit` is forbidden at schema level.
+- **Review context is immutable**: full 40-character base/reviewed SHAs, a SHA-256 manifest digest, and a manifest path confined under `stories/<id>/`.
+- **Review-attribution joins**: `internal_context_event_id` must reference a `behavior_reviewer` review_context, `external_context_event_id` an `external_review` review_context, both of the same story; classifications other than INTRODUCED_AFTER_INTERNAL require identical `reviewed_sha` on both contexts; `finding_id` must reference an external-source finding of the same story.
+- **Corrections are events, never edits** — a contradicted claim gets a `correction` row citing its source; the ledger is append-only.
 
 ## Dispatch package (universal interface)
 
@@ -269,7 +359,32 @@ v0.1 adapters: **`human`** (operator pastes package into any AI chat; commits ar
 
 ## Routing
 
-Role→tier matrix by difficulty (S/M/L) stays static and complete (any unrouted role = process defect, counted). Tier→model is **per-environment** adapter config. Routing records to the ledger pre-spawn (`requested_model`), adapters report `reported_model`; mismatch → `model_unverified: true`.
+Role→tier matrix by difficulty (S/M/L) stays static and complete (any unrouted role = process defect, counted). Tier→model is **per-environment** adapter config. Routing records to the ledger pre-spawn (`requested_model`), adapters report `reported_model`; mismatch → `model_unverified: true`. The full extracted matrix: §Role catalog.
+
+## Role catalog (extracted)
+
+Twelve canonical dispatch roles (machine-readable form: `tools/role_catalog.py`). Canonical spelling is snake_case; aliases canonicalize hyphen variants and historical spellings (e.g. `implementation-planner` / `impl-planner` → `planner`, `story-decomposer` → `decomposer`, `test-plan-generator` → `test_plan_generator`, `behavior-reviewer` → `behavior_reviewer`). An unknown role raises with the known list — an unrouted role is a process defect, counted (unrouted-dispatch census).
+
+| Role | Purpose | S | M | L |
+|---|---|---|---|---|
+| `context_acquisition` | Assemble the pinned, digest-validated context bundle for a story | T1 | T1 | T1 |
+| `decomposer` | Break an approved idea into sequenced, independently mergeable stories | T1 | T1 | T2 |
+| `test_plan_generator` | Author the story's test plan and grill records (DEV/QA) | T1 | T1 | T2 |
+| `planner` | Author the implementation plan (the implementation-plan author) | T2 | T2 | T3 |
+| `plan_reviewer` | Adversarially review the implementation plan against the spec | T2 | T2 | T3 |
+| `plan_reviewer_a` | Plan review lane A (independent reviewer, two-reviewer split) | T2 | T2 | T3 |
+| `plan_reviewer_b` | Plan review lane B (independent reviewer, two-reviewer split) | T2 | T2 | T3 |
+| `coder` | Implement the story on its branch against the frozen plan | T1 | T2 | T2 |
+| `fixer` | Post-review combined fix pass against enumerated findings | T1 | T2 | T2 |
+| `code_reviewer` | Internal code review of the story diff before external review | T2 | T2 | T2 |
+| `behavior_reviewer` | Internal behavior review against acceptance criteria | T2 | T2 | T2 |
+| `contract_reviewer` | Internal contract review: plan contract block vs shipped diff | T2 | T2 | T2 |
+
+Notes:
+
+- The matrix is **static and complete** — every role resolves for every difficulty; a role absent from a resolution is a process defect, counted.
+- **Tier → concrete model is per-environment** adapter configuration (`environments/*.toml`, §Configuration) — never in the catalog.
+- The orchestrator runs as a **lane**, not a routed dispatch role.
 
 ## Onboarding architecture
 

@@ -169,4 +169,4 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 ## Open Items (for grill)
 
-All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`; the owner calls awaiting ratification and the first build slice are in `build-plan.md`.
+All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`; the owner calls (C1 — config format — ratified 2026-10-23) and the first build slice are in `build-plan.md`.

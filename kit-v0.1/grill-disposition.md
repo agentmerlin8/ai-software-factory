@@ -60,7 +60,7 @@
 | D11 | Render byte contract | RESOLVED — ledger+git only; ISO-8601 UTC; sorted keys; LF; no wall-clock |
 | D12 | Live parity in v0.1 | RESOLVED (C2) — both legs in D-1 + mechanical contract shape; live hermes leg sequenced after launch authorization |
 
-## Items awaiting owner ratification
+## Owner ratification items (C1 ✅; C2–C3 open)
 
 - **C1** — config format = TOML — **✅ ratified 2026-10-23.**
 - **C2** — live-parity measurement as above — open.

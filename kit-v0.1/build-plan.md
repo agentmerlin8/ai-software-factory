@@ -1,6 +1,6 @@
 # Standalone Factory — Build Plan
 
-> Status: DRAFT — for owner ratification (folded 2026-10-23). Companions: `prd.md`, `architecture.md`, `test-strategy.md`, `target-repo-readiness.md`, `grill-disposition.md`.
+> Status: DRAFT — direction folded 2026-10-23 (C1 — config format — ratified; C2–C3 open for the owner). Companions: `prd.md`, `architecture.md`, `test-strategy.md`, `target-repo-readiness.md`, `grill-disposition.md`.
 > This plan sequences the v0.1 program with the workspace model folded in. Everything here obeys the kit laws in `architecture.md`.
 
 ## Goal

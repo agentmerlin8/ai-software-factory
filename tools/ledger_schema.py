@@ -134,7 +134,8 @@ NULLABLE: dict[str, frozenset[str]] = {
     "dispatch": frozenset({"reported_model", "thinking_setting", "session_id",
                            "parent_session_id", "ended_at", "outcome",
                            "worktree", "requested_model"}),
-    "usage": frozenset({"cached_input_tokens", "thinking_tokens",
+    "usage": frozenset({"input_tokens", "output_tokens",
+                        "cached_input_tokens", "thinking_tokens",
                         "dispatch_id"}),
     "stage": frozenset({"started_at", "ended_at", "commit_sha", "tests_passed",
                         "tests_failed", "tests_skipped", "tests_excluded",
@@ -349,6 +350,11 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
                 evt.get("model_unverified") is not True:
             errs.append("dispatch: unconfirmed reported_model requires "
                         "model_unverified=true")
+        req_m, rep_m = evt.get("requested_model"), evt.get("reported_model")
+        if req_m is not None and rep_m is not None and req_m != rep_m and \
+                evt.get("model_unverified") is not True:
+            errs.append("dispatch: mismatched requested/reported models "
+                        "require model_unverified=true")
     if etype == "finding":
         cls = evt.get("class")
         if not (isinstance(cls, str) and cls in FINDING_CLASSES):
@@ -428,11 +434,12 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
             errs.append("review_context: delivery_surface must identify the "
                         "exact dispatch-package or PR full-diff surface")
         for field in ("reviewed_sha", "base_sha"):
-            if not FULL_SHA_RE.fullmatch(str(evt.get(field, ""))):
+            v = evt.get(field)
+            if not (isinstance(v, str) and FULL_SHA_RE.fullmatch(v)):
                 errs.append(f"review_context: {field} must be a full "
                             "lowercase 40-character commit SHA")
-        digest = str(evt.get("context_manifest_digest", ""))
-        if not SHA256_RE.fullmatch(digest):
+        v = evt.get("context_manifest_digest")
+        if not (isinstance(v, str) and SHA256_RE.fullmatch(v)):
             errs.append("review_context: context_manifest_digest must be "
                         "full lowercase SHA-256")
         expected_prefix = f"stories/{evt.get('story_id')}/"

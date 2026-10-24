@@ -388,12 +388,12 @@ class TestRequiredAndNullReason(unittest.TestCase):
         self.assertIn("assignment: required field `owner` must not be null "
                       "(not nullable in this event type)", errs)
 
-    def test_non_nullable_usage_input_tokens_null_rejected(self):
+    def test_nullable_usage_input_tokens_null_without_reason_rejected(self):
         evt = valid_usage()
         evt["input_tokens"] = None
         errs = S.validate_event(evt)
-        self.assertIn("usage: required field `input_tokens` must not be "
-                      "null (not nullable in this event type)", errs)
+        self.assertTrue(any("`input_tokens` is null but "
+                            "`input_tokens_reason`" in e for e in errs), errs)
 
     def test_nullable_required_field_null_with_reason_ok(self):
         evt = valid_dispatch(ended=False)  # ended_at null + reason
@@ -466,6 +466,56 @@ class TestDispatch(unittest.TestCase):
         evt["reported_model_reason"] = "runtime cannot confirm"
         evt["model_unverified"] = True
         self.assertEqual(S.validate_event(evt), [])
+
+    def test_mismatched_models_require_model_unverified(self):
+        evt = valid_dispatch()
+        evt["reported_model"] = "model-y"
+        evt["model_unverified"] = False
+        errs = S.validate_event(evt)
+        self.assertIn("dispatch: mismatched requested/reported models "
+                      "require model_unverified=true", errs)
+
+    def test_mismatched_models_with_unverified_ok(self):
+        evt = valid_dispatch()
+        evt["reported_model"] = "model-y"
+        evt["model_unverified"] = True
+        self.assertEqual(S.validate_event(evt), [])
+
+    def test_equal_models_without_unverified_ok(self):
+        evt = valid_dispatch()  # requested == reported == model-x
+        evt["model_unverified"] = False
+        self.assertEqual(S.validate_event(evt), [])
+
+    def test_requested_null_reported_set_no_mismatch_check(self):
+        evt = valid_dispatch()
+        evt["requested_model"] = None
+        evt["requested_model_reason"] = "router chose at spawn"
+        evt["reported_model"] = "model-y"
+        evt["model_unverified"] = False
+        errs = S.validate_event(evt)
+        self.assertNotIn("dispatch: mismatched requested/reported models "
+                         "require model_unverified=true", errs)
+        self.assertEqual(errs, [])
+
+
+class TestUsageNullTokens(unittest.TestCase):
+    """N2/FR-10: an executor reporting NO token counts records null+reason —
+    never invented zeros."""
+
+    def test_usage_null_tokens_with_reasons_ok(self):
+        evt = valid_usage()
+        evt["input_tokens"] = None
+        evt["input_tokens_reason"] = "executor reported no counts"
+        evt["output_tokens"] = None
+        evt["output_tokens_reason"] = "executor reported no counts"
+        self.assertEqual(S.validate_event(evt), [])
+
+    def test_usage_null_token_reason_with_value_rejected(self):
+        evt = valid_usage()  # input_tokens has a value (100)
+        evt["input_tokens_reason"] = "not needed"
+        errs = S.validate_event(evt)
+        self.assertTrue(any("`input_tokens` has a value so "
+                            "`input_tokens_reason`" in e for e in errs), errs)
 
 
 class TestFinding(unittest.TestCase):
@@ -633,6 +683,34 @@ class TestOtherTypes(unittest.TestCase):
         errs = S.validate_event(evt)
         self.assertTrue(any("context_manifest_digest must be full lowercase "
                             "SHA-256" in e for e in errs), errs)
+
+    def test_review_context_integer_sha_rejected(self):
+        # N3: a JSON int whose digits happen to fit the hex regex must not
+        # pass — the stored value would break string equality downstream.
+        evt = valid_review_context()
+        evt["reviewed_sha"] = int("1" * 40)
+        errs = S.validate_event(evt)
+        self.assertTrue(any("reviewed_sha must be a full lowercase "
+                            "40-character" in e for e in errs), errs)
+        evt = valid_review_context()
+        evt["base_sha"] = int("2" * 40)
+        errs = S.validate_event(evt)
+        self.assertTrue(any("base_sha must be a full lowercase "
+                            "40-character" in e for e in errs), errs)
+
+    def test_review_context_integer_digest_rejected(self):
+        evt = valid_review_context()
+        evt["context_manifest_digest"] = int("3" * 64)
+        errs = S.validate_event(evt)
+        self.assertTrue(any("context_manifest_digest must be full lowercase "
+                            "SHA-256" in e for e in errs), errs)
+
+    def test_review_context_string_sha_and_digest_ok(self):
+        evt = valid_review_context()
+        evt["reviewed_sha"] = "1" * 40
+        evt["base_sha"] = "2" * 40
+        evt["context_manifest_digest"] = "3" * 64
+        self.assertEqual(S.validate_event(evt), [])
 
     def test_review_context_path_escaping(self):
         for bad in (f"stories/OTHER/{STORY}/manifest.md",

@@ -57,7 +57,7 @@ Mode-aware applicability: control-home checks (kit install, ledger, config, kick
 | # | Adapter | Prerequisites |
 |---|---|---|
 | A-1 | `human` | Editor + shell + git identity with push access to story branches; **any** AI chat (or human peers) for role work; the operator reads/writes artifacts directly |
-| A-2 | `hermes` | Hermes runtime available to the operator; dispatch usable; adapter manifest + model table installed (`adapters/hermes/adapter.toml`) |
+| A-2 | `hermes` | Hermes runtime available to the operator; dispatch usable; adapter manifest + model table installed at the canonical installed path (`factory/adapters/hermes/adapter.toml`) |
 | A-3 | `claude-code` (v0.2) | CLI installed + authenticated; non-interactive invocation documented |
 | A-4 | `codex` (v0.2) | CLI installed + authenticated; non-interactive invocation documented |
 | A-5 | `api-direct` (v0.2) | OpenAI-compatible endpoint + token; used for locked-down/Foundry targets |

@@ -151,7 +151,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 - [ ] **Handover drill** (two machines, fresh clone): (a) transition refused without claim, (b) cooperative handover passes, (c) abrupt takeover flagged and passes, (d) override path exercised and annotated — all four recorded.
 - [ ] Control-plane test suite ported and green (python3 + git + gh only).
 - [ ] Runbook completes with no unanswered steps — validated by a cold read from a fresh clone.
-- [ ] Zero imports of any agent-runtime SDK in `tools/`; dispatch parity between `human` and `hermes` adapters on the dress-rehearsal story (the live `hermes` leg is sequenced after the execution seam's launch authorization — recorded as pending, never as passed, until then).
+- [ ] Zero imports of any agent-runtime SDK in `tools/`; dispatch parity between `human` and `hermes` adapters on the dress-rehearsal story (the live `hermes` leg runs locally through the standard dispatch mechanism — recorded as exactly that, never as the sealed mechanism; the sealed re-run follows when launch is authorized).
 - [ ] Onboard verify runs green against the benchmark-app and reports precise failures on a deliberately non-compliant repo.
 
 ## Assumptions

@@ -58,12 +58,12 @@
 | D9 | Verify registry format | RESOLVED — JSON registry files; attest records = ledger `human_gate` events |
 | D10 | KICKOFF.md keep/drop | RESOLVED — keep both; PREFLIGHT = verify report (render-exempt); KICKOFF = installed template |
 | D11 | Render byte contract | RESOLVED — ledger+git only; ISO-8601 UTC; sorted keys; LF; no wall-clock |
-| D12 | Live parity in v0.1 | RESOLVED (C2) — both legs in D-1 + mechanical contract shape; live hermes leg sequenced after launch authorization |
+| D12 | Live parity in v0.1 | RESOLVED (C2, ratified 2026-10-23) — both legs in D-1 + mechanical contract shape; the live hermes leg runs locally (non-sealed, labeled as such); sealed re-run when launch is authorized |
 
-## Owner ratification items (C1 ✅; C2–C3 open)
+## Owner ratification items (C1–C2 ✅; C3 open)
 
 - **C1** — config format = TOML — **✅ ratified 2026-10-23.**
-- **C2** — live-parity measurement as above — open.
+- **C2** — live-parity measurement (pragmatic path: one real local dispatch, labeled non-sealed; sealed re-run when authorized) — **✅ ratified 2026-10-23.**
 - **C3** — acceptance targets (test-out split: scripts in v0.1 / from-scratch execution v0.1.x) — open.
 
 See `build-plan.md` §Owner calls.

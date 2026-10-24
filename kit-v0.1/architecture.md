@@ -302,4 +302,4 @@ Docker Compose (kit has no services — target projects define their own), UI de
 
 ## Open items
 
-All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`. Owner calls and the first build slice are tracked in `build-plan.md` (config format — TOML — ratified 2026-10-23; live-parity measurement and the test-out split remain open).
+All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`. Owner calls and the first build slice are tracked in `build-plan.md` (config format — TOML — and the live-parity path — pragmatic — ratified 2026-10-23; the test-out split remains open).

@@ -38,7 +38,7 @@ Deterministic scripts (preflight → inspect → propose → apply idempotent �
 
 ### S4 — Runbook + adapter packages
 
-`runbook.md` (idea → merged PR; human and orchestrator modes; contained-mode section) + `adapters/human` + `adapters/hermes` packages (`adapter.toml` + README). The hermes adapter's **live** leg is contingent on the execution seam's launch increment (separately gated in the reference — no spend here).
+`runbook.md` (idea → merged PR; human and orchestrator modes; contained-mode section) + `adapters/human` + `adapters/hermes` packages (`adapter.toml` + README). The hermes adapter's **live** leg: one real local dispatch through the standard dispatch mechanism (small token cost — no cloud), recorded as "live dispatch, non-sealed mechanism"; the sealed-mechanism re-run follows when the launch increment is authorized.
 
 ### S5 — Acceptance drills
 
@@ -50,14 +50,14 @@ v0.2 adapters (`claude-code`, `codex`, `api-direct`); reference-product adoption
 
 ## Relationship to the execution seam (reference side)
 
-The reference's bounded queue — **artifact validation** (contract item 7) next, then the gated launch increment — continues on its own track. The seam is the **per-environment dispatch mechanism** that environments drive; it blocks nothing here until S4's live hermes leg.
+The reference's bounded queue — **artifact validation** (contract item 7) next, then the gated launch increment — continues on its own track. The seam is the **per-environment dispatch mechanism** that environments drive; it no longer gates the kit's acceptance — the live hermes leg (C2, ratified) runs locally on the standard dispatch mechanism, with the sealed re-run following whenever the launch increment is authorized.
 
-## Owner calls (C1 ratified 2026-10-23; C2–C3 open)
+## Owner calls (C1–C2 ratified 2026-10-23; C3 open)
 
 | # | Call | Recommendation | Why |
 |---|---|---|---|
 | C1 | Config format | **TOML — ✅ ratified 2026-10-23** (`tomllib`, Python ≥ 3.11) | the only format satisfying the stdlib law; YAML would need a non-stdlib dependency or a hand-rolled parser (forbidden) |
-| C2 | Live-parity measurement | **Both legs in D-1 + mechanical contract shape** (required paths + sections); live hermes leg sequenced after launch authorization | makes FR-3's parity real, not tautological |
+| C2 | Live-parity measurement | **✅ ratified 2026-10-23 (pragmatic path)** — both legs in D-1 + mechanical contract shape (required paths + sections); the live hermes leg runs locally through the standard dispatch mechanism once S4 ships ("live dispatch, non-sealed mechanism"); sealed-mechanism re-run when launch is authorized | makes FR-3's parity real, not tautological; decouples the kit's sign-off from execution-spending decisions |
 | C3 | Acceptance targets | Keep v0.1 criteria: `benchmark-app` dress rehearsal + handover drill; the from-scratch fresh-repo test-out **execution** gates v0.1.x hardening (S3 ships the scripts — confirm this split, or pull the execution into v0.1) | the reference product's adoption stays a separate, later migration |
 
 ## How the build runs

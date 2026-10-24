@@ -168,6 +168,7 @@ Work artifacts (code) live on the story branch in each touched repo; the control
 |---|---|---|
 | `controller.py` | Transition engine: validates every state change against ledger + git + gh; refuses with named checks; claim-lock enforcement; override consultation; claim/handover/override commands | Judgment-free |
 | `ledger_lib.py` | Event schema, validation (null+reason), append/read helpers | Schema is the contract |
+| `config_validator.py` | Workspace + environment config validation (`workspace.toml` + `environments/*`) | New in the kit (S1); named refusal classes (unknown key · malformed binding · malformed/unresolvable pin · inline secret · unknown gate profile); stdlib `tomllib` |
 | `gates/` | Mechanical pre-checks (plan gate, pre-review gate, digest gate) with fixtures | Run before any LLM review |
 | `make_context_bundle.py` | Deterministic context assembly: inline pinned inputs at base SHA into one bundle | Feeds dispatch packages |
 | `dispatch_prep.py` | Seam recon: contract slice, named-test exists/missing inventory, scope boundary, generated hard-read gate block | Pre-coder/fixer |
@@ -395,7 +396,7 @@ Notes:
 
 ## Integrations
 
-- **git**: branches `story/<id>-<slug>`; one story = one branch = one worktree per repo; push-per-gate (closing gates), claims/handovers push-on-write; preflight fetch + staleness check stops the run on divergence (see §Ledger durability).
+- **git**: branches `story/<id>-<slug>` — slug = `[a-z0-9]+(-[a-z0-9]+)*`, ≤48 chars, no leading/trailing hyphen; one story = one branch = one worktree per repo; push-per-gate (closing gates), claims/handovers push-on-write; preflight fetch + staleness check stops the run on divergence (see §Ledger durability).
 - **GitHub via gh**: issues (idea front door), PRs, labels, Projects v2 board (Stage writes explicit via `sync_board.py`; Stage options = state names — a state with no matching option is a fail-closed refusal naming the missing option).
 - **Forge as the bus (contained mode)**: forge events (labels, comments, forms, dispatch) are the mechanical trigger bus; tasks move via **requests** (comment commands / labels / structured JSON) applied by one permissioned controller — "movers request, the controller disposes"; a Story Card comment shows state + next legal moves. Proven live in the reference; ported genericized. Environments resolve where/how execution happens; triggers stay forge-native.
 - **CI (advisory)**: control-plane test suite + gate scripts on PRs.
@@ -408,6 +409,59 @@ Two declarative layers, both pinned to **TOML** (stdlib `tomllib`; Python ≥ 3.
 |---|---|---|
 | `workspace.toml` | control home root | workspace identity, `factory` pin, `control_home` mode, repo bindings, policy, identity |
 | `environments/<name>.toml` | control home | runtime, dispatch mechanism/isolation, state paths, tier→model table, credential **references**, limits |
+
+### Frozen schema — `workspace.toml`
+
+Machine-readable form: `tools/config_validator.py` (stdlib `tomllib`). This section and the module are the same contract — keep them consistent.
+
+| Key | Type | Required | Default | Validation rule |
+|---|---|---|---|---|
+| `workspace` | str | yes | — | slug `^[a-z0-9][a-z0-9-]*$`, ≤64 chars |
+| `control_home` | str | yes | — | ∈ {`dedicated`, `in-repo`} |
+| `default_branch` | str | no | `main` | `^[A-Za-z0-9][A-Za-z0-9._/-]*$` |
+| `factory` | table | yes | — | |
+| `factory.pin` | str | yes | — | kit version tag · 7–40 lowercase hex commit · or deferred `<…>`; concrete pins must resolve against the factory repo (see rules) |
+| `repos` | array of tables | yes | — | ≥1 entry |
+| `repos[].id` | str | yes | — | slug `^[a-z][a-z0-9-]*$`, unique across repos |
+| `repos[].role` | str | yes | — | ∈ {`primary`, `member`}; ≤1 `primary` |
+| `repos[].url` | str | yes | — | `host/owner/name` — `^[a-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`; never a URL scheme |
+| `repos[].path` | str | no | — | optional local-checkout override: relative, non-empty, no `..` |
+| `board` | table | no | — | |
+| `board.project_id` | str | no | — | `<org>/projects/<n>` or deferred `<…>` |
+| `policy` | table | no | — | |
+| `policy.gates` | str | no | `default` | v0.1 profile set = {`default`}; anything else = `unknown gate profile` |
+| `identity` | table | no | — | |
+| `identity.approvers` | array[str] | no | — | each a non-empty GitHub login or deferred; **fail closed** — empty ⇒ human-approved actions refuse (controller-side, S2) |
+
+### Frozen schema — `environments/<name>.toml`
+
+| Key | Type | Required | Default | Validation rule |
+|---|---|---|---|---|
+| `runtime` | str | yes | — | slug `^[a-z0-9][a-z0-9_-]*$` |
+| `dispatch` | table | yes | — | |
+| `dispatch.mechanism` | str | yes | — | same slug |
+| `dispatch.isolation` | str | no | `per-invocation` | same slug |
+| `state` | table | no | — | |
+| `state.agent_home` | str | no | — | non-empty |
+| `state.transcripts` | str | no | — | non-empty or deferred `<…>` |
+| `state.usage` | str | no | `manual` | ∈ {`harvest`, `manual`} |
+| `models` | table | yes | — | keys ⊆ {`T1`, `T2`, `T3`} (unknown tier = unknown key); ≥1 key |
+| `models.T1`/`T2`/`T3` | str | ≥1 of them | — | non-empty or deferred `<…>` |
+| `credentials` | table | no | — | |
+| `credentials.refs` | array[str] | no | — | each `env:NAME` / `file:path` or deferred `<…>` — references only, never inline values |
+| `limits` | table | no | — | |
+| `limits.wall` | str | no | — | `^\d+[smhd]$` (e.g. `2h`) |
+| `limits.runs` | int | no | — | ≥1 (bools excluded) |
+| `limits.budget` | str | no | — | non-empty or deferred `<…>` |
+
+### Validation rules
+
+- **Deferred placeholders**: a string value matching `<…>` stands for a value the operator substitutes at onboarding. Allowed in templates; each unresolved one is refused under `--strict` as `deferred placeholder not resolved: <dotted.path>`.
+- **Pin grammar + resolution**: version tag (`^v?[0-9]+(\.[0-9]+)*([-+][A-Za-z0-9.-]+)?$`) or a 7–40 lowercase hex commit — anything else is `malformed pin`. Concrete pins must resolve against the factory repo given via `--repo` (hex: `git cat-file -e <sha>^{commit}`; tag: `git rev-parse --verify refs/tags/<tag>`); a miss is `unresolvable pin` and a concrete pin without `--repo` is refused (`pin resolution required`). Deferred pins never resolve.
+- **Inline secrets**: credential values are references only — `credentials.refs` entries must match `env:NAME` / `file:path` (or be deferred); secret-shaped keys (`api_key`, `access_key`, `secret`, `token`, `password`, `passwd`, `private_key`, `client_secret`, `*_token`, `*_secret` — case-insensitive) must hold a reference or a deferred placeholder, never a literal. A secret-shaped key that is also an unknown key reports **both** errors.
+- **Unknown keys refused**: any key outside the frozen tables fails as `unknown key: <path>` (nested paths dotted, array items `repos[<i>].<key>`).
+- **Gate profiles pinned**: v0.1 profile set = {`default`} — `policy.gates` with any other value fails `unknown gate profile`.
+- **Invocation**: `python3 tools/config_validator.py <file>... [--strict] [--repo <path>]` (installed form: `factory/tools/config_validator.py`). Exit codes: 0 all OK · 1 any FAIL · 2 usage (no files). Templates ship at `templates/workspace/…`.
 
 Machine-written artifacts stay JSON/JSONL (ledger, registries, move requests). No hardcoded paths in tools — all resolved from workspace config + control-home root.
 

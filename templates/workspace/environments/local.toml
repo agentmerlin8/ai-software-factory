@@ -1,0 +1,24 @@
+# environments/local.toml — local execution environment (example: a Hermes runtime).
+runtime = "hermes"
+
+[dispatch]
+mechanism = "delegate_task"
+isolation = "per-invocation"
+
+[state]
+agent_home = "~/.hermes"
+transcripts = "<path>"              # where run transcripts land, when recorded
+usage = "harvest"                   # harvest | manual
+
+[models]
+T1 = "<model-id>"
+T2 = "<model-id>"
+T3 = "<model-id>"
+
+[credentials]
+refs = ["env:LLM_API_KEY"]          # references only — never inline values
+
+[limits]
+wall = "2h"
+runs = 10
+budget = "50M"

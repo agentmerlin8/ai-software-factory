@@ -1,0 +1,9 @@
+workspace = "demo"
+control_home = "dedicated"
+api_key = "sk-literal-value"
+[factory]
+pin = "<kit>"
+[[repos]]
+id = "app"
+role = "primary"
+url = "github.com/acme/app"

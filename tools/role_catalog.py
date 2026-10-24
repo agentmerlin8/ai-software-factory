@@ -27,7 +27,7 @@ CANONICAL_ROLES: dict[str, tuple[str, tuple[str, str, str]]] = {
         "Break an approved idea into sequenced, independently mergeable stories",
         ("T1", "T1", "T2")),
     "test_plan_generator": (
-        "Author the story's test plan and grill records (DEV/QA)",
+        "Author the story's test plan before code exists",
         ("T1", "T1", "T2")),
     "planner": (
         "Author the implementation plan (the implementation-plan author)",

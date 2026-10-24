@@ -36,7 +36,7 @@ Acceptance: ported control-plane suite green in CI; the read-path commands run r
 
 ### S3 — Onboarding
 
-Deterministic scripts (preflight → inspect → propose → apply idempotent → verify fail-closed) + the guided-session brief (`ONBOARDING.md` consumed by any agent runtime) + the readiness registry (target + workspace checks) + the **fresh-repo test-out scripts** (the from-scratch test-out **run** gates v0.1.x hardening — per the vision and PRD FR-11). Acceptance: verify green on `benchmark-app`; precise FAILs on a deliberately non-compliant repo; the test-out scripts ship and run green against `benchmark-app` as a smoke.
+Deterministic scripts (preflight → inspect → propose → apply idempotent → verify fail-closed) + the guided-session brief (`ONBOARDING.md` consumed by any agent runtime) + the readiness registry (target + workspace checks) + the **fresh-repo test-out scripts** (the from-scratch test-out **run** gates v0.1.x hardening — per the vision and PRD FR-11). Acceptance (S3 gate, fixture-scoped): verify green on a fixture control-home repo (every check the S3 registry implements); precise FAILs on a deliberately non-compliant repo; the test-out scripts ship and run green against `benchmark-app` as a smoke. The full `benchmark-app` conformance smoke — verify green on a real onboarding, which requires C-7's installed runbook and adapter packages — is explicitly scheduled **after S4**, where those prerequisites ship; it stays a v0.1 criterion per C3, sequenced after its prerequisites.
 
 ### S4 — Runbook + adapter packages
 

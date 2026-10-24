@@ -483,5 +483,65 @@ class TestInvalidUtf8(unittest.TestCase):
         self.assertTrue(any(line.startswith("OK ") for line in output), output)
 
 
+class TestStrictEnforcedInDirectCallers(unittest.TestCase):
+    """N5: validate_workspace / validate_environment enforce the deferred-
+    placeholder walk themselves when strict=True — direct callers (not just
+    validate_document / the CLI) must refuse templates; and validate_document
+    must NOT double-report (the walk runs exactly once per path)."""
+
+    @staticmethod
+    def parse(path: Path) -> dict:
+        import tomllib
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+
+    def test_validate_workspace_strict_refuses_template(self):
+        doc = self.parse(WS_TEMPLATE)
+        errs = CV.validate_workspace(doc, strict=True)
+        self.assertIn("deferred placeholder not resolved: factory.pin", errs)
+        self.assertIn("deferred placeholder not resolved: board.project_id",
+                      errs)
+
+    def test_validate_environment_strict_refuses_template(self):
+        for template in ENV_TEMPLATES:
+            errs = CV.validate_environment(self.parse(template), strict=True)
+            self.assertIn("deferred placeholder not resolved: models.T1",
+                          errs, template)
+
+    def test_non_strict_still_clean_for_templates(self):
+        self.assertEqual(CV.validate_workspace(self.parse(WS_TEMPLATE)), [])
+        for template in ENV_TEMPLATES:
+            self.assertEqual(
+                CV.validate_environment(self.parse(template)), [], template)
+
+    def test_validate_document_no_duplicate_deferred_lines(self):
+        # The walk now lives in the per-kind validators; validate_document
+        # must report each deferred path EXACTLY once.
+        ws = self.parse(WS_TEMPLATE)
+        errs = CV.validate_document(ws, "workspace", strict=True)
+        deferred = [e for e in errs
+                    if e.startswith("deferred placeholder not resolved:")]
+        self.assertTrue(deferred)
+        self.assertEqual(len(deferred), len(set(deferred)))
+        self.assertIn("deferred placeholder not resolved: factory.pin", errs)
+        for template in ENV_TEMPLATES:
+            errs = CV.validate_document(self.parse(template), "environment",
+                                        strict=True)
+            deferred = [e for e in errs
+                        if e.startswith("deferred placeholder not resolved:")]
+            self.assertEqual(len(deferred), len(set(deferred)), template)
+
+    def test_document_strict_matches_direct_validator_plus_secrets(self):
+        # validate_document(strict=True) == direct validator(strict=True)
+        # + secret walk, sorted — proving the deferred walk runs once.
+        doc = self.parse(WS_TEMPLATE)
+        expected = CV.validate_workspace(doc, strict=True)
+        secret_errs: list[str] = []
+        CV._walk_secret_keys(doc, "", secret_errs)
+        expected = sorted(expected + secret_errs)
+        self.assertEqual(
+            CV.validate_document(doc, "workspace", strict=True), expected)
+
+
 if __name__ == "__main__":
     unittest.main()

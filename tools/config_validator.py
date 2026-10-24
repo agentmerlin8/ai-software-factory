@@ -339,6 +339,8 @@ def validate_workspace(doc: dict, *, strict: bool = False) -> list[str]:
                                            entry) and not entry.strip():
                     errs.append(f"bad value: identity.approvers[{i}] must be "
                                 "a non-empty GitHub login")
+    if strict:
+        _walk_deferred(doc, "", errs)
     return errs
 
 
@@ -485,6 +487,8 @@ def validate_environment(doc: dict, *, strict: bool = False) -> list[str]:
                     not budget.strip():
                 errs.append("bad value: limits.budget must be a non-empty "
                             "string")
+    if strict:
+        _walk_deferred(doc, "", errs)
     return errs
 
 
@@ -562,14 +566,17 @@ def pin_errors(doc: dict, repo: str | None) -> list[str]:
 
 def validate_document(doc: dict, kind: str, *,
                       strict: bool = False) -> list[str]:
-    """Return schema + secret + deferred errors for a parsed document."""
+    """Return schema + secret + deferred errors for a parsed document.
+
+    The deferred-placeholder walk runs inside validate_workspace /
+    validate_environment when strict=True — it is NOT repeated here (no
+    duplicate errors).
+    """
     if kind == "workspace":
         errs = validate_workspace(doc, strict=strict)
     else:
         errs = validate_environment(doc, strict=strict)
     _walk_secret_keys(doc, "", errs)
-    if strict:
-        _walk_deferred(doc, "", errs)
     errs.sort()
     return errs
 

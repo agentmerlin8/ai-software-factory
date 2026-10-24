@@ -32,15 +32,17 @@ Core rules:
     (repo, requirement) list — never silently advanced.
 
 Pure functions except pin resolution, which shells out to git (stdlib
-subprocess, no network). Stdlib only. Python >= 3.11.
+subprocess, no network). Stdlib only. Python >= 3.11. Sibling modules are
+imported package-relative so the module works in both the repo-root and the
+installed factory/tools layouts.
 """
 from __future__ import annotations
 
 import subprocess
 from typing import Any
 
-from tools import ledger_schema
-from tools import state_machine
+from . import ledger_schema
+from . import state_machine
 
 # ---------------------------------------------------------------- pins ----
 

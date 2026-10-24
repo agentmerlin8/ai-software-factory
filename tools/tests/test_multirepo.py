@@ -657,5 +657,44 @@ class TestRepoSlugValidation(unittest.TestCase):
                                           "corrected": False}})
 
 
+class TestInstalledLayoutImports(unittest.TestCase):
+    """N4: multirepo.py uses package-relative imports, so it must also work
+    in the documented INSTALLED layout (`factory/tools/`), not just from the
+    repo root. Simulate that layout in a temp dir on sys.path and import
+    `factory.tools.multirepo`."""
+
+    MODULES = ("ledger_schema.py", "state_machine.py", "multirepo.py")
+
+    def test_import_under_simulated_installed_layout(self):
+        import importlib
+        import shutil
+        import sys
+        src_dir = os.path.dirname(os.path.abspath(S.__file__))
+        with tempfile.TemporaryDirectory(prefix="installed-layout-") as tmp:
+            pkg = os.path.join(tmp, "factory")
+            tools_pkg = os.path.join(pkg, "tools")
+            os.makedirs(tools_pkg)
+            for init in (os.path.join(pkg, "__init__.py"),
+                         os.path.join(tools_pkg, "__init__.py")):
+                open(init, "w").close()
+            for name in self.MODULES:
+                shutil.copy(os.path.join(src_dir, name),
+                            os.path.join(tools_pkg, name))
+            sys.path.insert(0, tmp)
+            loaded = []
+            try:
+                mod = importlib.import_module("factory.tools.multirepo")
+                loaded = [m for m in sys.modules
+                          if m.startswith("factory.tools") or m == "factory"]
+                # basic calls work through the installed-layout import
+                self.assertEqual(mod.fold_repo_status([], STORY), {})
+                self.assertEqual(mod.validate_pin("app@abc1234"), [])
+                self.assertTrue(mod.validate_pin("nope"))
+            finally:
+                sys.path.remove(tmp)
+                for name in loaded:
+                    sys.modules.pop(name, None)
+
+
 if __name__ == "__main__":
     unittest.main()

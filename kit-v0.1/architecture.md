@@ -287,7 +287,7 @@ Role→tier matrix by difficulty (S/M/L) stays static and complete (any unrouted
 
 ## Configuration
 
-Two declarative layers, both pinned to **TOML** (stdlib `tomllib`; Python ≥ 3.11 — no YAML: it would break the stdlib-only law, and hand-rolling a parser is forbidden. Owner ratification pending — see `build-plan.md` §Open calls):
+Two declarative layers, both pinned to **TOML** (stdlib `tomllib`; Python ≥ 3.11 — no YAML: it would break the stdlib-only law, and hand-rolling a parser is forbidden. **Owner-ratified 2026-10-23**):
 
 | File | Where | Carries |
 |---|---|---|
@@ -302,4 +302,4 @@ Docker Compose (kit has no services — target projects define their own), UI de
 
 ## Open items
 
-All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`. The two owner calls awaiting ratification (config format; live-parity measurement) and the first build slice are in `build-plan.md`.
+All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`. Owner calls and the first build slice are tracked in `build-plan.md` (config format — TOML — ratified 2026-10-23; live-parity measurement and the test-out split remain open).

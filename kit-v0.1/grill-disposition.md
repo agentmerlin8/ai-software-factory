@@ -48,7 +48,7 @@
 | # | Decision | Disposition |
 |---|---|---|
 | D1 | Ledger push model | RESOLVED — single-writer + App bypass ruleset (bot identity + push path proven live; ruleset staged pending activation; folded into `architecture.md` §Ledger durability) |
-| D2 | Config format & schema | RESOLVED — TOML (`tomllib`, Python ≥ 3.11); schema freeze = TASK T2 (ratify C1) |
+| D2 | Config format & schema | RESOLVED — TOML (`tomllib`, Python ≥ 3.11); schema freeze = TASK T2 (C1 ratified 2026-10-23) |
 | D3 | Self-containment extraction | TASK T1 — extraction is build work, from the reference, genericized |
 | D4 | State machine port-as-is | RESOLVED — port as-is; "16 states + BLOCKED" wording superseded by the reference's current 19 + BLOCKED; extraction ports the current set |
 | D5 | Gate catalog naming | RESOLVED — descriptive slugs (numeric ids violate the genericization rule) |
@@ -62,8 +62,8 @@
 
 ## Items awaiting owner ratification
 
-- **C1** — config format = TOML (no rival under the stdlib law).
-- **C2** — live-parity measurement as above.
-- **C3** — acceptance targets (`benchmark-app` + handover + fresh-repo test-out; reference adoption separate/later).
+- **C1** — config format = TOML — **✅ ratified 2026-10-23.**
+- **C2** — live-parity measurement as above — open.
+- **C3** — acceptance targets (test-out split: scripts in v0.1 / from-scratch execution v0.1.x) — open.
 
-See `build-plan.md` §Open calls.
+See `build-plan.md` §Owner calls.

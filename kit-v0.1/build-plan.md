@@ -52,11 +52,11 @@ v0.2 adapters (`claude-code`, `codex`, `api-direct`); reference-product adoption
 
 The reference's bounded queue — **artifact validation** (contract item 7) next, then the gated launch increment — continues on its own track. The seam is the **per-environment dispatch mechanism** that environments drive; it blocks nothing here until S4's live hermes leg.
 
-## Open calls (owner ratification requested)
+## Owner calls (C1 ratified 2026-10-23; C2–C3 open)
 
 | # | Call | Recommendation | Why |
 |---|---|---|---|
-| C1 | Config format | **TOML** (`tomllib`, Python ≥ 3.11) | the only format satisfying the stdlib law; YAML would need a non-stdlib dependency or a hand-rolled parser (forbidden); ratify **before S1/T2 starts** |
+| C1 | Config format | **TOML — ✅ ratified 2026-10-23** (`tomllib`, Python ≥ 3.11) | the only format satisfying the stdlib law; YAML would need a non-stdlib dependency or a hand-rolled parser (forbidden) |
 | C2 | Live-parity measurement | **Both legs in D-1 + mechanical contract shape** (required paths + sections); live hermes leg sequenced after launch authorization | makes FR-3's parity real, not tautological |
 | C3 | Acceptance targets | Keep v0.1 criteria: `benchmark-app` dress rehearsal + handover drill; the from-scratch fresh-repo test-out **execution** gates v0.1.x hardening (S3 ships the scripts — confirm this split, or pull the execution into v0.1) | the reference product's adoption stays a separate, later migration |
 

@@ -1,0 +1,29 @@
+# workspace.toml — workspace template.
+# Onboarding substitutes every <...> placeholder; the validator refuses
+# unresolved placeholders in strict mode (--strict).
+workspace = "example-workspace"
+control_home = "dedicated"          # dedicated | in-repo
+default_branch = "main"
+
+[factory]
+pin = "<kit tag/sha>"               # tag or commit sha of the kit this workspace runs
+
+[[repos]]
+id = "app"
+role = "primary"
+url = "github.com/ORG/app"          # host/owner/name — never a URL scheme
+
+[[repos]]
+id = "web"
+role = "member"
+url = "github.com/ORG/web"
+# path = "repos/web"                # optional local-checkout override
+
+[board]
+project_id = "<org>/projects/<n>"   # optional; board sync refuses while absent
+
+[policy]
+gates = "default"
+
+[identity]
+# approvers = ["<github-login>"]    # human-gate allowlist (exact tokens)

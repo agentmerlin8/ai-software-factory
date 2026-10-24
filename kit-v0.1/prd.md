@@ -75,7 +75,7 @@ The control plane (controller, ledger library, gates, prep scripts, renderers, b
 
 ### FR-5 — Event ledger and state machine
 
-`factory/ledger/events.jsonl` is the single source of truth: append-only, UTC-timestamped, schema-validated (missing values are `null` + reason — never invented zeros; corrections are events, never edits). The story state machine (ported as-is from the reference — currently 19 pipeline states + BLOCKED; the exact set lands with the T1 extraction) is enforced against the ledger + git + GitHub. `state.md`, `DASHBOARD.md`, and `PROVENANCE.md` are **generated** renders.
+`factory/ledger/events.jsonl` is the single source of truth: append-only, UTC-timestamped, schema-validated (missing values are `null` + reason — never invented zeros; corrections are events, never edits). The story state machine (ported as-is from the reference — currently 19 pipeline states + BLOCKED; the current set is extracted in `architecture.md` §State machine) is enforced against the ledger + git + GitHub. `state.md`, `DASHBOARD.md`, and `PROVENANCE.md` are **generated** renders.
 
 - [ ] **Given** a ledger and a story, **when** the renderers run, **then** generated files match the ledger byte-for-byte (check mode passes).
 - [ ] **Given** any event with a missing field, **when** validation runs, **then** it is rejected unless a sibling `<field>_reason` is present and non-empty.
@@ -169,4 +169,4 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 ## Open Items (for grill)
 
-All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`; the owner calls (C1 — config format — ratified 2026-10-23) and the first build slice are in `build-plan.md`.
+All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`; the owner calls (C1–C3, all ratified 2026-10-23) and the first build slice are in `build-plan.md`.

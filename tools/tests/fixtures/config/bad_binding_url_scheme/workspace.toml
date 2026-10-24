@@ -1,0 +1,8 @@
+workspace = "demo"
+control_home = "dedicated"
+[factory]
+pin = "<kit>"
+[[repos]]
+id = "app"
+role = "primary"
+url = "https://github.com/acme/app"

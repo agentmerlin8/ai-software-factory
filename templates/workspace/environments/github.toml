@@ -1,0 +1,21 @@
+# environments/github.toml — forge-contained execution environment
+# (workers run on hosted runners; movement via forge requests).
+runtime = "github-actions"
+
+[dispatch]
+mechanism = "contained"
+isolation = "ephemeral-runner"
+
+[state]
+usage = "manual"                    # usage reported by the executor, or null+reason
+
+[models]
+T1 = "<model-id>"
+T2 = "<model-id>"
+T3 = "<model-id>"
+
+[credentials]
+refs = ["env:LLM_API_KEY"]          # references only — never inline values
+
+[limits]
+wall = "1h"

@@ -28,9 +28,11 @@ A standalone, runtime-agnostic factory: the **kit** (this repo) is the distribut
 
 **Explicitly NOT in S1:** runtime launch, model invocation, dispatch reservation, any change inside the reference implementation, board-schema changes, cloud spending.
 
-### S2 — Workspace CLI (read path first)
+### S2 — Control-plane port + workspace CLI (read path first)
 
-`factory workspace show` (bindings, factory pin, control-home mode, derived states) and `factory env show|resolve` (resolved models/limits per environment, refusing on missing credential references) — stable text/JSON output, nonzero refusal exits, read-only proof. Reuses existing controller/ledger/card helpers; no second state machine. Write-path candidates (`workspace init | add-repo`) as a follow-on increment.
+Port the control-plane tools genericized (controller, ledger library, gates, prep tools, renders, card helpers) per the T1/T3 extractions, with their test suite wired into CI — the port lands **here, before its consumers** (S3's verify mode, S5's drills). Then the workspace CLI wraps the ported helpers: `factory workspace show` (bindings, factory pin, control-home mode, derived states) and `factory env show|resolve` (resolved models/limits per environment, refusing on missing credential references) — stable text/JSON output, nonzero refusal exits, read-only proof. No second state machine. Write-path candidates (`workspace init | add-repo`) as a follow-on increment.
+
+Acceptance: ported control-plane suite green in CI; the read-path commands run read-only against a fixture workspace, wrapping the ported helpers.
 
 ### S3 — Onboarding
 
@@ -64,4 +66,4 @@ The reference's bounded queue — **artifact validation** (contract item 7) next
 
 - Work items: issues in this repo; **each slice lands as a reviewed PR** — bounded increments, independent fresh-context review before the merge gate, owner merges.
 - Every increment states its own explicit exclusions (what it deliberately does not do) — the same discipline as the reference's bounded queue.
-- Definition of done for the program: kit onboards a fresh repo (from-scratch test-out — the v0.1.x hardening gate, its first item); one story runs idea → merged PR via the runbook (human leg; hermes leg when launch is authorized); handover drill passes; every render/provenance check clean. Then the reference product is adopted (controlled), and the factory builds its products.
+- Definition of done for the program: kit onboards a fresh repo (from-scratch test-out — the v0.1.x hardening gate, its first item); one story runs idea → merged PR via the runbook (**both adapter legs** — human + hermes, the hermes leg run locally per C2; the sealed-mechanism re-run is a later strengthening, not a completion gate); handover drill passes; every render/provenance check clean. Then the reference product is adopted (controlled), and the factory builds its products.

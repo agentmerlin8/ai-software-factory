@@ -37,7 +37,7 @@
 | 27 | D-1 "human adapter driving control plane" garbled | FOLDED | `test-strategy.md` D-1 reworded |
 | 28 | Pointer direction (skills) | FOLDED | `architecture.md` kit-structure note — pointers remain conveniences in a runtime's skill system, never requirements |
 | 29 | Concurrency wording conflated lock vs scheduling | FOLDED | PRD out-of-scope reworded |
-| 30 | Locked-down network wording vs GitHub requirement | FOLDED | PRD NFR-3 clarification (process travels; execution needs GitHub; offline path = v0.2 `api-direct`) |
+| 30 | Locked-down network wording vs GitHub requirement | FOLDED | PRD NFR-3 clarification (process travels; execution needs GitHub; `api-direct` (v0.2) covers restricted model-provider access only) |
 | 31 | Labels/issue-form set not frozen | TASK S3 | exact label list + form filename published with the onboarding registry |
 | 32 | C-13 heavy verify execution in CI | FOLDED | readiness C-13 — manual attest / cached last-run allowed; full execution drill-only |
 | 33 | Identity consumption; branch slug rules | FOLDED (partial) + TASK | identity conventions in `adapter.toml` + claim fields; exact slug rules ride T1/T2 docs |

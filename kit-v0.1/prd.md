@@ -130,7 +130,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 - **NFR-1 No services** — control plane runs with `python3` (stdlib), `git`, `gh`. No databases, no daemons, no second remote.
 - **NFR-2 Determinism** — same inputs → same outputs for every control-plane command and generator; renders are regenerable.
-- **NFR-3 Portability** — Linux and macOS; no root required; works inside devcontainers and locked-down networks where only the repo travels (the process definition travels in git; execution still needs GitHub — the fully offline path is the v0.2 `api-direct` adapter).
+- **NFR-3 Portability** — Linux and macOS; no root required; works inside devcontainers and locked-down networks where only the repo travels (the process definition travels in git; execution still needs GitHub — `api-direct` (v0.2) addresses restricted **model-provider access** for locked-down environments; it does not remove the GitHub dependency).
 - **NFR-4 Fail-closed** — every check refuses on ambiguity and names the problem.
 - **NFR-5 Honest records** — null + reason; corrections are events; no invented zeros; override and adjudication always visible.
 - **NFR-6 Token economy** — dispatch packages inline their inputs (bundle pattern); every dispatch lifecycle closes with a usage row.

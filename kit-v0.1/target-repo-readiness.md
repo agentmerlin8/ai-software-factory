@@ -11,7 +11,9 @@
 
 Check categories: **CORE** (required for any factory run) · **UI** (only when stories touch UI) · **ADAPTER** (required only when that adapter executes work) · **ADVISORY** (recommended).
 
-## CORE — required in every target repo
+Mode-aware applicability: control-home checks (kit install, ledger, config, kickoff) run **once** at the control home. In Mode 2, product-only target repos are checked against the binding subset (C-1, C-2, and the story-branch conventions) — they never duplicate the control home.
+
+## CORE — required in the control home (Mode 1: the target repo itself; Mode 2: the workspace repo)
 
 | # | Check | Why | Verify method |
 |---|---|---|---|
@@ -30,11 +32,11 @@ Check categories: **CORE** (required for any factory run) · **UI** (only when s
 | C-13 | Test environment runnable (project's own: docker compose, test DB, etc.) — or an explicit "manual" declaration | The coder's exit condition is build+tests green | Project-defined command, executed once by verify with the project's health check; may PASS via recorded manual attest or cached last-run (full execution is drill-only) |
 | C-14 | Working agreement recorded (human touchpoints: Storybook approvals, merge gate, escalations; override file location) | The run's rules must be discoverable without tribal knowledge | Documented in runbook/config |
 
-## WORKSPACE — control-home checks (Mode 2; in-repo Mode 1 folds the same checks into CORE)
+## WORKSPACE — control-home checks (Mode 2 only)
 
 | # | Check | Why | Verify method |
 |---|---|---|---|
-| W-1 | Control home exists as its own repo, created from the kit workspace template | Multi-repo default | Repo + template files present |
+| W-1 | Control home exists as a **dedicated workspace repo**, created from the kit workspace template (**Mode 2 only**; Mode 1 uses the in-repo layout — no separate repo) | Multi-repo default | Repo + template files present |
 | W-2 | `workspace.toml` valid: factory pin resolvable, repo bindings listed with roles | Workspace identity | Schema-validate + pin resolve |
 | W-3 | `environments/` present; every declared environment file valid and resolvable (credential references named; no inline secrets) | Execution declared per environment | Schema-validate; credential refs checked for presence only — values never read |
 | W-4 | Every bound target repo reachable with required scopes; branch conventions available (`story/<id>-<slug>`) | Multi-repo mechanics depend on it | `gh repo view` per binding |

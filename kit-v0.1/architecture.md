@@ -100,13 +100,28 @@ limits = { wall = "…", runs = "…", budget = "…" }
 
 - **Identity**: workspace-scoped `STORY-NNN`. The spec declares `repos: [...]`, each repo's role (provider / consumer / both), plus a **cross-repo contract block** — the pinned interface (API shapes, events, schemas), owned by the provider repo.
 - **Branches**: the story's branch exists in **every touched repo**; one worktree per repo per story.
-- **Plans & dispatches**: impl/test plans carry per-repo manifests; seam recon runs per repo; dispatch packages pin inputs as `repo@sha:path` (bundle pattern; parity rule unchanged).
-- **Ownership**: **one claim per story**, workspace level (`start_shas` per repo). Handover transfers the whole story.
+- **Plans & dispatches**: impl/test plans carry per-repo manifests; seam recon runs per repo; dispatch packages pin inputs as `repo@sha[:path]` (bundle pattern; parity rule unchanged).
+- **Ownership**: **one claim per story**, workspace level — the claim pins its start with exactly one of `start_sha` (single-repo) or `start_shas` (per-repo map). Handover transfers the whole story.
 - **Gates**: build/tests green in **each** touched repo; the mechanical plan gate runs once at the workspace; the review package carries all repo diffs + the contract block; findings tagged by repo; fix loops target specific repos.
-- **State**: story-level states unchanged; per-repo detail rides as sub-events (`BUILD_GREEN{repo}`, `DRAFT_OPENED{repo}`, `MERGED{repo}`). Set-level transitions refuse until the set is complete: `MERGE_ELIGIBLE` = all PRs review-closed + green; `MERGED` = all merges done; `LIVE_PROVEN` = cross-repo end-to-end proof.
+- **State**: story-level states unchanged; per-repo detail rides as sub-events (`BUILD_GREEN{repo}`, `DRAFT_OPENED{repo}`, `MERGED{repo}`). Set-level transitions refuse until the set is complete — the refusal names every missing (repo, requirement) and never silently advances (§Multi-repo ledger schema below): `MERGE_ELIGIBLE` = all PRs review-closed + green; `MERGED` = all merges done; `LIVE_PROVEN` = cross-repo end-to-end proof.
 - **Merge order**: expand-first — the contract owner merges first, consumers follow; reverts run in reverse. Recorded in the plan.
 - **Closeout**: workspace-level PROVENANCE joins idea → decisions → dispatches (per repo) → evidence → PR set → merge set → proof. Each PR body references the workspace story.
 - **Local resolution**: each environment records where bound repos are checked out locally (workspace-relative sibling paths by default, plus an optional `repos[].path` override key); the exact convention freezes with T2/T3.
+
+### Multi-repo ledger schema (frozen)
+
+- **Pins**: `repo@sha[:path]` — `repo` is a workspace binding id (`^[a-z][a-z0-9-]*$`), `sha` is 7–40 lowercase hex, optional `:path` is a repo-relative path (no `..` segment, no leading `/`, non-empty after `:`). Resolution is an existence check in the bound repo's local checkout (`git cat-file -e <sha>^{commit}`) — never a fetch. Refusals are named: `malformed repo@sha pin: <pin> (<reason>)` (the reason names the broken part — missing @, bad repo id, bad sha, path escapes via `..`, absolute path, empty path) · `unknown repo '<id>' — not in the workspace binding` · `unresolvable pin: <repo>@<sha> (not found in <path>)`.
+- **Per-repo sub-events**: a `transition` event with a non-null `repo` (nullable under the sibling-reason law) is a per-repo local progress marker on the ladder `BUILD_GREEN → DRAFT_OPENED → FULL_TESTS_GREEN → READY_FOR_REVIEW → MERGED`. Sub-events **never change the story-level state** (story state = latest `to_state` among repo-less transition events). The fold is per-repo max on the ladder — order-independent, duplicates and backtracks are fine; repos with no sub-events are absent. A `correction` with a `repo` and a ladder `corrected_value` overrides that repo's folded value and flags it corrected; a non-ladder corrected value is ignored (corrected stays false) — whether a correction is correct is the controller's business.
+- **Set-level completeness** — a set-level transition refuses on an incomplete set, naming every missing (repo, requirement); it never silently advances:
+
+| Target | Requirement |
+|---|---|
+| `MERGE_ELIGIBLE` | every declared repo folded to ≥ `READY_FOR_REVIEW` |
+| `MERGED` | every declared repo folded to ≥ `MERGED` |
+| `LIVE_PROVEN` | every declared repo ≥ `MERGED` **and** recorded proof evidence |
+
+- **Claims** pin the start repo-scoped: exactly one of `start_sha` (single-repo) or `start_shas` (multi-repo map repo-id → 7–40 hex, non-empty).
+- Machine-readable form: `tools/multirepo.py` (pin parse/validate/resolve, sub-event validation + fold, set completeness, corrections with repo scope).
 
 ### CLI surface (candidate additions)
 
@@ -274,14 +289,14 @@ Conventions (unchanged from the reference):
 - `override_used` is an annotation payload embedded in the transition it permitted — **not** a separate event; `stage` records forge/board sync — distinct from `transition`.
 - Dispatch IDs are pre-spawn: `<story>-<role>-<attempt>-<unix>` (unix = seconds, UTC; attempt numbers are allocated by the controller at pre-spawn).
 - Every dispatch lifecycle closes (outcome + usage or null+reason).
-- In multi-repo mode, pinning fields carry `repo@sha` (see §Workspace model).
+- In multi-repo mode, pinning fields carry `repo@sha[:path]` pins (see §Workspace model → Multi-repo ledger schema).
 - **Render byte contract:** renders derive from **ledger + git only** (no live forge reads): UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SSZ`), sorted keys, LF endings, no wall-clock in output — determinism is a property, not a hope.
 
 ### Claim lifecycle (assignment event, extended)
 
 | Op | Fields | Rule |
 |---|---|---|
-| claim | `owner`, `host`, `session`, `start_sha`, `claimed_at` | Required before the first active transition after BACKLOG (planning counts as working the story; pinned: the controller-enforced gate is CODING — see §Transition table). Refused if an open claim exists (unless override) |
+| claim | `owner`, `host`, `session`, `start_sha` **or** `start_shas` (multi-repo), `claimed_at` | Required before the first active transition after BACKLOG (planning counts as working the story; pinned: the controller-enforced gate is CODING — see §Transition table). Refused if an open claim exists (unless override) |
 | handover | `from`, `to`, `reason`, `flagged` (bool) | The only sanctioned transfer; abrupt takeover = flagged handover |
 | release | implicit at CLOSED; record persists | The durable ownership record |
 
@@ -308,17 +323,17 @@ Machine-readable form: `tools/ledger_schema.py` (pure validation, no I/O; the ap
 
 | Type | Required fields | Null-allowed fields (sibling `<field>_reason`) | Enums / type rules |
 |---|---|---|---|
-| `assignment` | `story_id`, `op` + per-op: claim → `owner`, `host`, `session`, `start_sha`, `claimed_at`; handover → `from`, `to`, `reason`, `flagged`; release → `owner` | — | `op` ∈ {claim, handover, release}; handover `flagged` is an explicit bool. "One open claim per story" + refusal semantics are CONTROLLER rules (S2), not schema rules |
+| `assignment` | `story_id`, `op` + per-op: claim → `owner`, `host`, `session`, `claimed_at` + exactly one of `start_sha` (single-repo) / `start_shas` (multi-repo map repo-id → 7–40 hex, non-empty); handover → `from`, `to`, `reason`, `flagged`; release → `owner` | — | `op` ∈ {claim, handover, release}; handover `flagged` is an explicit bool; claim takes exactly one of `start_sha`, `start_shas`. "One open claim per story" + refusal semantics are CONTROLLER rules (S2), not schema rules |
 | `dispatch` | `story_id`, `role`, `requested_model`, `reported_model`, `thinking_setting`, `session_id`, `parent_session_id`, `attempt`, `started_at`, `ended_at`, `outcome`, `prompt_version`, `worktree`, `model_unverified` | `reported_model`, `thinking_setting`, `session_id`, `parent_session_id`, `ended_at`, `outcome`, `worktree`, `requested_model` | `event_id` matches `<story>-<role>-<attempt>-<unix>`; `reported_model` null requires `model_unverified=true` |
 | `usage` | `dispatch_id`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `thinking_tokens`, `token_semantics`, `usage_source` | `cached_input_tokens`, `thinking_tokens`, `dispatch_id` | tokens-only — no cost fields (kit law) |
 | `stage` | `story_id`, `stage`, `started_at`, `ended_at`, `commit_sha`, `tests_passed`, `tests_failed`, `tests_skipped`, `tests_excluded`, `evidence_path` | `started_at`, `ended_at`, `commit_sha`, `tests_passed`, `tests_failed`, `tests_skipped`, `tests_excluded`, `evidence_path` | |
 | `finding` | `finding_id`, `story_id`, `source`, `reviewed_sha`, `introduced_sha`, `class`, `severity`, `disposition`, `logic_touched`, `overlap_id`, `fixer`, `fix_sha`, `validation`, `evidence_path` | `reviewed_sha`, `introduced_sha`, `overlap_id`, `fixer`, `fix_sha`, `validation`, `evidence_path`, `severity` | `source` ∈ {internal, external, human, orchestrator, script_gate}; `class` ∈ {mechanical, reasoning, contract, nit, design-invalidating}; `disposition` ∈ {accepted, dismissed, deferred, fixed, fix_in_revision, record_only}; `logic_touched` bool; nit law below |
 | `loop` | `story_id`, `stage`, `loop_n`, `class`, `root_cause_one_line` | — | `root_cause_one_line` non-empty string — tagged at the moment it happens, never backfilled |
 | `recovery` | `story_id`, `original_assignment`, `fallback_reason`, `actual_model`, `remaining_scope`, `consumed_loop_count`, `additional_cost`, `human_intervention` | `actual_model`, `remaining_scope`, `additional_cost`, `original_assignment` | |
-| `transition` | `story_id`, `from_state`, `to_state`, `requested_by`, `checks_run`, `check_results`, `approved_by` | `approved_by` | `checks_run` is an array of strings; `check_results` is an object |
+| `transition` | `story_id`, `from_state`, `to_state`, `requested_by`, `checks_run`, `check_results`, `approved_by` | `approved_by`, `repo` | `checks_run` is an array of strings; `check_results` is an object; `repo` non-null ⇒ per-repo sub-event (never changes the story state — §Workspace model) |
 | `human_gate` | `story_id`, `gate`, `question`, `asked_at`, `answered_at` | `answered_at`, `story_id` | `gate` ∈ {visual, merge, loop_cap, scope, safety, meta, avoidable, spec_freeze} |
 | `outcome` | `story_id`, `merged_sha`, `merged_at`, `live_proof_status`, `observation_end`, `escaped_defects`, `totals`, `recommendation` | `merged_sha`, `merged_at`, `live_proof_status`, `observation_end`, `escaped_defects`, `totals`, `recommendation` | |
-| `correction` | `story_id`, `contradicted_claim`, `corrected_value`, `source_citation`, `corrected_artifact` | `story_id` | |
+| `correction` | `story_id`, `contradicted_claim`, `corrected_value`, `source_citation`, `corrected_artifact` | `story_id`, `repo` | |
 | `deviation` | `story_id`, `contract_field`, `planned`, `actual`, `justification`, `approved_by` | `approved_by` | lane-skip deviations carry `contract_field = lane-skip:<role>` + human `approved_by` |
 | `review_context` | `story_id`, `review_role`, `reviewed_sha`, `base_sha`, `context_manifest_path`, `context_manifest_digest`, `prompt_version`, `dispatch_id`, `delivery_surface`, `requested_at` | `dispatch_id` | `review_role` ∈ {behavior_reviewer, contract_reviewer, external_review}; `delivery_surface` ∈ {dispatch-package, pr-full-diff}; SHAs full 40-hex; digest full SHA-256; path confined under `stories/<story_id>/` (no `..`) |
 | `review_attribution` | `story_id`, `finding_id`, `internal_context_event_id`, `external_context_event_id`, `classification`, `classified_by`, `evidence_path` | — | `classification` ∈ {MISSED_WITH_CONTEXT, CONTEXT_ABSENT, INTRODUCED_AFTER_INTERNAL}; joins below |
@@ -330,6 +345,7 @@ Rules:
 - **Review context is immutable**: full 40-character base/reviewed SHAs, a SHA-256 manifest digest, and a manifest path confined under `stories/<id>/`.
 - **Review-attribution joins**: `internal_context_event_id` must reference a `behavior_reviewer` review_context, `external_context_event_id` an `external_review` review_context, both of the same story; classifications other than INTRODUCED_AFTER_INTERNAL require identical `reviewed_sha` on both contexts; `finding_id` must reference an external-source finding of the same story.
 - **Corrections are events, never edits** — a contradicted claim gets a `correction` row citing its source; the ledger is append-only.
+- **Repo-tagged transition events are sub-events** — they never change the story state (story-level state = latest `to_state` among transition events without `repo`); they live on the per-repo ladder and corrections with repo scope fold into them (§Workspace model → Multi-repo ledger schema).
 
 ## Dispatch package (universal interface)
 

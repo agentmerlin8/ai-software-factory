@@ -123,13 +123,15 @@ def valid_recovery(eid: str = "recovery-1") -> dict:
 
 
 def valid_transition(eid: str = "transition-1", to: str = "GRILLED",
-                     frm: str = "BACKLOG") -> dict:
+                     frm: str = "BACKLOG",
+                     repo: str | None = None) -> dict:
     evt = env(eid, "transition")
     evt.update({"story_id": STORY, "from_state": frm, "to_state": to,
                 "requested_by": "orchestrator", "checks_run": ["story_md"],
                 "check_results": {"story_md": {"ok": True, "detail": "ok"}},
-                "approved_by": None})
+                "approved_by": None, "repo": repo})
     evt["approved_by_reason"] = "no human gate required"
+    evt["repo_reason"] = None if repo else "story-level transition"
     return evt
 
 
@@ -159,15 +161,18 @@ def valid_outcome(eid: str = "outcome-1") -> dict:
     return evt
 
 
-def valid_correction(eid: str = "correction-1") -> dict:
+def valid_correction(eid: str = "correction-1",
+                     repo: str | None = None) -> dict:
     evt = env(eid, "correction")
     evt.update({"story_id": STORY,
                 "contradicted_claim": "tests_passed=12",
                 "corrected_value": "tests_passed=10",
                 "source_citation": "ledger usage row 3",
-                "corrected_artifact": f"stories/{STORY}/state.md"})
+                "corrected_artifact": f"stories/{STORY}/state.md",
+                "repo": repo})
     for f in S.NULLABLE["correction"]:
         evt.setdefault(f + "_reason", None)
+    evt["repo_reason"] = None if repo else "story-level correction"
     return evt
 
 
@@ -306,6 +311,13 @@ class TestRequiredAndNullReason(unittest.TestCase):
         self.assertTrue(any("`story_id_reason` present but `story_id` is "
                             "not nullable" in e for e in errs), errs)
 
+    def test_reason_for_non_nullable_assignment_op_field_is_violation(self):
+        evt = valid_assignment(op="claim")
+        evt["owner_reason"] = "no reason allowed here"
+        errs = S.validate_event(evt)
+        self.assertTrue(any("`owner_reason` present but `owner` is not "
+                            "nullable" in e for e in errs), errs)
+
     def test_exempt_value_fields_never_flagged(self):
         evt = valid_recovery()  # carries fallback_reason as a value field
         self.assertEqual(S.validate_event(evt), [])
@@ -324,11 +336,13 @@ class TestAssignment(unittest.TestCase):
         errs = S.validate_event(evt)
         self.assertTrue(any("op 'seize' not in" in e for e in errs), errs)
 
-    def test_op_fields_required(self):
+    def test_claim_requires_exactly_one_start_pin(self):
         evt = valid_assignment(op="claim")
         del evt["start_sha"]
         errs = S.validate_event(evt)
-        self.assertIn("assignment: missing required field `start_sha`", errs)
+        self.assertIn("assignment: claim requires start_sha or start_shas "
+                      "(exactly one)", errs)
+        self.assertEqual(S.validate_event(valid_assignment(op="claim")), [])
 
     def test_handover_flagged_must_be_bool(self):
         evt = valid_assignment(op="handover", eid="a-h")

@@ -19,8 +19,13 @@ Core rules enforced here:
     fields (`blocked_reason`, `fallback_reason`, `root_cause_one_line`) are
     the value itself and are exempt from the sibling convention.
   * `assignment` is ONE event type with a per-op field set (claim ·
-    handover · release). "One open claim per story" and refusal semantics
-    are CONTROLLER rules (S2), not schema rules.
+    handover · release). A claim pins its start with EXACTLY ONE of
+    `start_sha` (single-repo) or `start_shas` (multi-repo map repo id →
+    7-40 hex, non-empty). "One open claim per story" and refusal
+    semantics are CONTROLLER rules (S2), not schema rules.
+  * Multi-repo: a `transition` event with a non-null `repo` is a per-repo
+    sub-event — it lives on the per-repo ladder (tools/multirepo.py) and
+    NEVER changes the story-level state (current_state excludes it).
   * A finding with class "nit" must carry logic_touched=false AND a
     verifying diff/commit (fix_sha) or validation evidence;
     logic_touched=true can never be class nit (schema-level ban).
@@ -50,7 +55,9 @@ EVENT_TYPES = (
 # controller (S2).
 ASSIGNMENT_OPS = ("claim", "handover", "release")
 ASSIGNMENT_OP_FIELDS: dict[str, tuple[str, ...]] = {
-    "claim": ("owner", "host", "session", "start_sha", "claimed_at"),
+    # claim's start pin is the exactly-one-of rule: start_sha | start_shas
+    # (validated in _claim_start_errors, not as a plain required field)
+    "claim": ("owner", "host", "session", "claimed_at"),
     "handover": ("from", "to", "reason", "flagged"),
     "release": ("owner",),
 }
@@ -134,12 +141,12 @@ NULLABLE: dict[str, frozenset[str]] = {
     "loop": frozenset(),
     "recovery": frozenset({"actual_model", "remaining_scope",
                            "additional_cost", "original_assignment"}),
-    "transition": frozenset({"approved_by"}),
+    "transition": frozenset({"approved_by", "repo"}),
     "human_gate": frozenset({"answered_at", "story_id"}),
     "outcome": frozenset({"merged_sha", "merged_at", "live_proof_status",
                           "observation_end", "escaped_defects", "totals",
                           "recommendation"}),
-    "correction": frozenset({"story_id"}),
+    "correction": frozenset({"story_id", "repo"}),
     "deviation": frozenset({"approved_by"}),
     "review_context": frozenset({"dispatch_id"}),
     "review_attribution": frozenset(),
@@ -168,10 +175,47 @@ STORY_ID_RE = re.compile(r"^STORY-\d{3}$")           # canonical form
 DISPATCH_ID_RE = re.compile(r"^.+-[a-z_]+-\d+-\d+$")  # <story>-<role>-<attempt>-<unix>
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+REPO_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")  # workspace binding id (pins, start_shas keys)
+PIN_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")   # pin SHAs (repo@sha[:path], start_shas values)
 
 # Value fields that ARE the reason — no `<field>_reason` sibling convention.
 _NULL_REASON_EXEMPT = {"blocked_reason", "fallback_reason",
                        "root_cause_one_line"}
+
+
+def _claim_start_errors(evt: dict[str, Any]) -> list[str]:
+    """Exactly-one-of `start_sha` | `start_shas` on a claim + map shape.
+
+    `start_sha` (single-repo) is the classic pin; `start_shas` is the
+    multi-repo map repo-id → 7-40 lowercase hex commit (non-empty). Each
+    refusal names the broken part. `start_sha` is deliberately NOT a plain
+    required field — this exactly-one rule replaces that check.
+    """
+    has_sha = "start_sha" in evt
+    has_shas = "start_shas" in evt
+    if not has_sha and not has_shas:
+        return ["assignment: claim requires start_sha or start_shas "
+                "(exactly one)"]
+    if has_sha and has_shas:
+        return ["assignment: claim takes exactly one of start_sha, "
+                "start_shas"]
+    if has_sha:
+        return []
+    shas = evt.get("start_shas")
+    if not isinstance(shas, dict):
+        return ["assignment: claim start_shas must be an object mapping "
+                "repo ids to commit SHAs"]
+    if not shas:
+        return ["assignment: claim start_shas must be non-empty"]
+    errs: list[str] = []
+    for repo_id, sha in shas.items():
+        if not isinstance(repo_id, str) or not REPO_ID_RE.fullmatch(repo_id):
+            errs.append(f"assignment: claim start_shas key {repo_id!r} "
+                        "is not a valid repo id")
+        if not isinstance(sha, str) or not PIN_SHA_RE.fullmatch(sha):
+            errs.append(f"assignment: claim start_shas[{repo_id!r}] value "
+                        "must be a 7-40 lowercase hex SHA")
+    return errs
 
 
 def utcnow() -> str:
@@ -222,10 +266,14 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
                 errs.append(f"{etype}: `{f}` has a value so `{reason_key}` "
                             "must be null")
     # any *_reason field for a NON-nullable required field is a violation
+    # (assignment op-fields also count as required fields here)
+    required_bases = set(REQUIRED.get(etype, ()))
+    if etype == "assignment" and evt.get("op") in ASSIGNMENT_OP_FIELDS:
+        required_bases |= set(ASSIGNMENT_OP_FIELDS[evt["op"]])
     for key in evt:
         if key.endswith("_reason") and key not in _NULL_REASON_EXEMPT:
             base = key[: -len("_reason")]
-            if base not in nullable and base in REQUIRED.get(etype, ()):
+            if base not in nullable and base in required_bases:
                 errs.append(f"{etype}: `{key}` present but `{base}` is not "
                             "nullable in this event type")
 
@@ -237,6 +285,8 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
         elif op == "handover" and not isinstance(evt.get("flagged"), bool):
             errs.append("assignment: handover `flagged` must be an explicit "
                         "boolean (abrupt takeover = flagged handover)")
+        elif op == "claim":
+            errs.extend(_claim_start_errors(evt))
     if etype == "dispatch":
         did = evt.get("event_id", "")
         if not DISPATCH_ID_RE.match(str(did)):
@@ -411,9 +461,14 @@ def events_for(events: list[dict], story_id: str,
 
 
 def current_state(events: list[dict], story_id: str) -> str | None:
-    """Latest to_state from transition events (None if never transitioned)."""
+    """Story-level state = latest to_state among transition events WITHOUT a
+    repo tag (None if never transitioned). Repo-tagged transition events are
+    per-repo sub-events (tools/multirepo.py) — they never change the story
+    state."""
     state = None
     for e in events_for(events, story_id, "transition"):
+        if e.get("repo"):
+            continue
         state = e["to_state"]
     return state
 

@@ -868,5 +868,84 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(S.validate_events([]), [])
 
 
+class TestMalformedRows(unittest.TestCase):
+    """C1 regression: non-dict ledger rows produce a NAMED refusal —
+    validate_event/validate_events never crash, and the read helpers
+    (current_state/events_for/latest_findings) skip them silently."""
+
+    def test_validate_event_non_dict_named_refusal(self):
+        for bad in (None, "x", 123, ["event"], 3.5):
+            with self.subTest(bad=bad):
+                errs = S.validate_event(bad)
+                self.assertEqual(
+                    errs,
+                    [f"malformed ledger row: {type(bad).__name__} "
+                     "(expected an object)"])
+
+    def test_validate_events_non_dict_rows_no_crash(self):
+        for rows in ([None], ["x"], [123], [None, "x", 123]):
+            with self.subTest(rows=rows):
+                errs = S.validate_events(rows)
+                self.assertEqual(len(errs), len(rows), errs)
+                for err in errs:
+                    self.assertTrue(
+                        err.startswith("malformed ledger row: "), err)
+
+    def test_validate_events_mixed_rows_still_validates_dicts(self):
+        errs = S.validate_events([None, valid_transition(eid="t1")])
+        self.assertEqual(errs, ["malformed ledger row: NoneType "
+                                "(expected an object)"])
+
+    def test_current_state_never_raises_on_malformed_rows(self):
+        # evidence from the review: a transition row missing `to_state`
+        # used to KeyError; non-dict rows used to AttributeError.
+        self.assertIsNone(
+            S.current_state([{"event": "transition", "story_id": STORY}],
+                            STORY))
+        ledger = [None, "x", 123, valid_transition(eid="t1", to="GRILLED")]
+        self.assertEqual(S.current_state(ledger, STORY), "GRILLED")
+
+    def test_events_for_skips_malformed_rows(self):
+        ledger = [None, "x", 123, valid_transition(eid="t1", to="GRILLED")]
+        self.assertEqual(len(S.events_for(ledger, STORY)), 1)
+        self.assertEqual(len(S.events_for(ledger, STORY, "transition")), 1)
+
+    def test_latest_findings_skips_malformed_rows(self):
+        ledger = [None, "x", 123, valid_finding(fid="F-1", eid="f1")]
+        latest = S.latest_findings(ledger)
+        self.assertEqual([f["finding_id"] for f in latest], ["F-1"])
+        self.assertEqual(S.latest_findings([None, "x", 123]), [])
+
+
+class TestClaimPinStrayReason(unittest.TestCase):
+    """C4 regression: a claim's start pin fields are non-nullable — a
+    `start_sha_reason`/`start_shas_reason` sibling alongside a VALUED pin
+    is refused with the standard stray-reason message."""
+
+    def test_claim_valued_start_sha_with_reason_refused(self):
+        evt = valid_assignment(op="claim", eid="c-sr-1")
+        evt["start_sha_reason"] = "pinned anyway"
+        errs = S.validate_event(evt)
+        self.assertIn("assignment: `start_sha_reason` present but "
+                      "`start_sha` is not nullable in this event type", errs)
+
+    def test_claim_valued_start_shas_with_reason_refused(self):
+        evt = valid_assignment(op="claim", eid="c-sr-2")
+        del evt["start_sha"]
+        evt["start_shas"] = {"app": "0" * 40}
+        evt["start_shas_reason"] = "pinned anyway"
+        errs = S.validate_event(evt)
+        self.assertIn("assignment: `start_shas_reason` present but "
+                      "`start_shas` is not nullable in this event type", errs)
+
+    def test_valid_claims_unchanged(self):
+        single = valid_assignment(op="claim", eid="c-sr-3")
+        self.assertEqual(S.validate_event(single), [])
+        multi = valid_assignment(op="claim", eid="c-sr-4")
+        del multi["start_sha"]
+        multi["start_shas"] = {"app": "abc1234", "contracts": "def5678"}
+        self.assertEqual(S.validate_event(multi), [])
+
+
 if __name__ == "__main__":
     unittest.main()

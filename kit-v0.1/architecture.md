@@ -111,7 +111,7 @@ limits = { wall = "…", runs = "…", budget = "…" }
 ### Multi-repo ledger schema (frozen)
 
 - **Pins**: `repo@sha[:path]` — `repo` is a workspace binding id (`^[a-z][a-z0-9-]*$`), `sha` is 7–40 lowercase hex, optional `:path` is a repo-relative path (no `..` segment, no leading `/`, non-empty after `:`). Resolution is an existence check in the bound repo's local checkout (`git cat-file -e <sha>^{commit}`) — never a fetch. Refusals are named: `malformed repo@sha pin: <pin> (<reason>)` (the reason names the broken part — missing @, bad repo id, bad sha, path escapes via `..`, absolute path, empty path) · `unknown repo '<id>' — not in the workspace binding` · `unresolvable pin: <repo>@<sha> (not found in <path>)`.
-- **Per-repo sub-events**: a `transition` event with a non-null `repo` (nullable under the sibling-reason law) is a per-repo local progress marker on the ladder `BUILD_GREEN → DRAFT_OPENED → FULL_TESTS_GREEN → READY_FOR_REVIEW → MERGED`. Sub-events **never change the story-level state** (story state = latest `to_state` among repo-less transition events). The fold is per-repo max on the ladder — order-independent, duplicates and backtracks are fine; repos with no sub-events are absent. A `correction` with a `repo` and a ladder `corrected_value` overrides that repo's folded value and flags it corrected; a non-ladder corrected value is ignored (corrected stays false) — whether a correction is correct is the controller's business.
+- **Per-repo sub-events**: a `transition` event with a non-null `repo` (nullable under the sibling-reason law) is a per-repo local progress marker on the ladder `BUILD_GREEN → DRAFT_OPENED → FULL_TESTS_GREEN → READY_FOR_REVIEW → MERGED`. Sub-events **never change the story-level state** (story state = latest `to_state` among repo-less transition events). The fold is per-repo max on the ladder — order-independent, duplicates and backtracks are fine; repos with no sub-events are absent. A `correction` with a `repo` and a ladder `corrected_value` overrides that repo's folded value and flags it corrected; a non-ladder corrected value is ignored (corrected stays false) — whether a correction is correct is the controller's business; a sub-event's `from_state` must be a story-level state (the ladder constraint applies to its `to_state`).
 - **Set-level completeness** — a set-level transition refuses on an incomplete set, naming every missing (repo, requirement); it never silently advances:
 
 | Target | Requirement |
@@ -182,7 +182,7 @@ Work artifacts (code) live on the story branch in each touched repo; the control
 | Tool | Responsibility | Notes |
 |---|---|---|
 | `controller.py` | Transition engine: validates every state change against ledger + git + gh; refuses with named checks; claim-lock enforcement; override consultation; claim/handover/override commands | Judgment-free |
-| `ledger_lib.py` | Event schema, validation (null+reason), append/read helpers | Schema is the contract |
+| `ledger_lib.py` | Event schema + validation (null+reason) + append/read helpers — the S2 port: the S1 schema/validation half ships as `ledger_schema.py`; the append/load I/O lands with the port | Schema is the contract |
 | `config_validator.py` | Workspace + environment config validation (`workspace.toml` + `environments/*`) | New in the kit (S1); named refusal classes (unknown key · malformed binding · malformed/unresolvable pin · inline secret · unknown gate profile); stdlib `tomllib` |
 | `gates/` | Mechanical pre-checks (plan gate, pre-review gate, digest gate) with fixtures | Run before any LLM review |
 | `make_context_bundle.py` | Deterministic context assembly: inline pinned inputs at base SHA into one bundle | Feeds dispatch packages |
@@ -242,7 +242,7 @@ BACKLOG → GRILLED → TEST_PLAN → SPEC_FROZEN → PLANNED → GATE_PASSED
 
 ### Transition table (extracted — current set)
 
-Required evidence keys are passed `k=v` on a transition request and persisted into the transition event's `check_results`; the controller refuses without them — it never invents values. Hard checks are controller-enforced; gate/artifact names refer to §Gate catalog and §Canonical layouts. Machine-readable form: `tools/state_machine.py` (`EVIDENCE_KEYS`, `CHECK_SUMMARY`).
+Required evidence keys are passed `k=v` on a transition request and persisted into the transition event's `check_results`; the controller refuses without them — it never invents values. Hard checks are controller-enforced; gate/artifact names refer to §Gate catalog and §Canonical layouts. Machine-readable form: `tools/state_machine.py` (`EVIDENCE_KEYS`, `CHECK_SUMMARY`, `EVIDENCE_FORMATS`).
 
 | To state | Required evidence keys | Hard checks (controller-enforced) | Gate / artifacts |
 |---|---|---|---|
@@ -321,13 +321,13 @@ Machine-readable form: `tools/ledger_schema.py` (pure validation, no I/O; the ap
 
 **Envelope** — required on EVERY event: `event_id`, `recorded_at` (UTC `...Z`), `provenance` ∈ {`live`, `backfilled`}, plus `event` (the type name).
 
-**The null+reason law (both directions).** A null-allowed field carries a sibling `<field>_reason`: a non-empty string when the field is null, and null whenever the field has a value — never invented zeros. A `<field>_reason` for a NON-nullable required field is itself a violation. Exempt value fields (the field IS the reason, no sibling): `blocked_reason`, `fallback_reason`, `root_cause_one_line`.
+**The null+reason law (both directions).** A null-allowed field carries a sibling `<field>_reason`: a non-empty string when the field is null, and null whenever the field has a value — never invented zeros — required for every null-allowed field whether the field is null or omitted (an omitted field behaves as null; the reason must then be non-empty). A `<field>_reason` for a NON-nullable required field is itself a violation. Exempt value fields (the field IS the reason, no sibling): `blocked_reason`, `fallback_reason`, `root_cause_one_line`.
 
 | Type | Required fields | Null-allowed fields (sibling `<field>_reason`) | Enums / type rules |
 |---|---|---|---|
 | `assignment` | `story_id`, `op` + per-op: claim → `owner`, `host`, `session`, `claimed_at` + exactly one of `start_sha` (single-repo) / `start_shas` (multi-repo map repo-id → 7–40 hex, non-empty); handover → `from`, `to`, `reason`, `flagged`; release → `owner` | — | `op` ∈ {claim, handover, release}; handover `flagged` is an explicit bool; claim takes exactly one of `start_sha`, `start_shas`. "One open claim per story" + refusal semantics are CONTROLLER rules (S2), not schema rules |
 | `dispatch` | `story_id`, `role`, `requested_model`, `reported_model`, `thinking_setting`, `session_id`, `parent_session_id`, `attempt`, `started_at`, `ended_at`, `outcome`, `prompt_version`, `worktree`, `model_unverified` | `reported_model`, `thinking_setting`, `session_id`, `parent_session_id`, `ended_at`, `outcome`, `worktree`, `requested_model` | `event_id` matches `<story>-<role>-<attempt>-<unix>`; `reported_model` null requires `model_unverified=true` |
-| `usage` | `dispatch_id`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `thinking_tokens`, `token_semantics`, `usage_source` | `cached_input_tokens`, `thinking_tokens`, `dispatch_id` | tokens-only — no cost fields (kit law) |
+| `usage` | `dispatch_id`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `thinking_tokens`, `token_semantics`, `usage_source` | `cached_input_tokens`, `thinking_tokens`, `dispatch_id` | the schema defines a tokens-only field set — no cost fields (kit law); extra-key rejection is controller-side (S2) |
 | `stage` | `story_id`, `stage`, `started_at`, `ended_at`, `commit_sha`, `tests_passed`, `tests_failed`, `tests_skipped`, `tests_excluded`, `evidence_path` | `started_at`, `ended_at`, `commit_sha`, `tests_passed`, `tests_failed`, `tests_skipped`, `tests_excluded`, `evidence_path` | |
 | `finding` | `finding_id`, `story_id`, `source`, `reviewed_sha`, `introduced_sha`, `class`, `severity`, `disposition`, `logic_touched`, `overlap_id`, `fixer`, `fix_sha`, `validation`, `evidence_path` | `reviewed_sha`, `introduced_sha`, `overlap_id`, `fixer`, `fix_sha`, `validation`, `evidence_path`, `severity` | `source` ∈ {internal, external, human, orchestrator, script_gate}; `class` ∈ {mechanical, reasoning, contract, nit, design-invalidating}; `disposition` ∈ {accepted, dismissed, deferred, fixed, fix_in_revision, record_only}; `logic_touched` bool; nit law below |
 | `loop` | `story_id`, `stage`, `loop_n`, `class`, `root_cause_one_line` | — | `root_cause_one_line` non-empty string — tagged at the moment it happens, never backfilled |
@@ -336,13 +336,15 @@ Machine-readable form: `tools/ledger_schema.py` (pure validation, no I/O; the ap
 | `human_gate` | `story_id`, `gate`, `question`, `asked_at`, `answered_at`, `decision`, `answered_by` | `answered_at`, `story_id`, `decision`, `answered_by` | `gate` ∈ {visual, merge, loop_cap, scope, safety, meta, avoidable, spec_freeze}; answered gates require `decision` ∈ {approved, rejected} and `answered_by` (the responding human); pending gates carry neither |
 | `outcome` | `story_id`, `merged_sha`, `merged_at`, `live_proof_status`, `observation_end`, `escaped_defects`, `totals`, `recommendation` | `merged_sha`, `merged_at`, `live_proof_status`, `observation_end`, `escaped_defects`, `totals`, `recommendation` | |
 | `correction` | `story_id`, `contradicted_claim`, `corrected_value`, `source_citation`, `corrected_artifact` | `story_id`, `repo` | |
-| `deviation` | `story_id`, `contract_field`, `planned`, `actual`, `justification`, `approved_by` | `approved_by` | lane-skip deviations carry `contract_field = lane-skip:<role>` + human `approved_by` |
+| `deviation` | `story_id`, `contract_field`, `planned`, `actual`, `justification`, `approved_by` | `approved_by` | lane-skip deviations carry `contract_field = lane-skip:<role>` + human `approved_by`; lane-skip approval is controller-enforced (S2) |
 | `review_context` | `story_id`, `review_role`, `reviewed_sha`, `base_sha`, `context_manifest_path`, `context_manifest_digest`, `prompt_version`, `dispatch_id`, `delivery_surface`, `requested_at` | `dispatch_id` | `review_role` ∈ {behavior_reviewer, contract_reviewer, external_review}; `delivery_surface` ∈ {dispatch-package, pr-full-diff}; SHAs full 40-hex; digest full SHA-256; path confined under `stories/<story_id>/` (no `..`) |
 | `review_attribution` | `story_id`, `finding_id`, `internal_context_event_id`, `external_context_event_id`, `classification`, `classified_by`, `evidence_path` | — | `classification` ∈ {MISSED_WITH_CONTEXT, CONTEXT_ABSENT, INTRODUCED_AFTER_INTERNAL}; joins below |
 
 Rules:
 
 - **Dispatch IDs are pre-spawn**: `<story>-<role>-<attempt>-<unix>`. Lifecycle: up to TWO rows share one event_id — pre-spawn (`ended_at` null) then completion (`ended_at` set), in that order; a backfilled dispatch may be a single ended row. More rows, a second completion (stale re-start), an orphan completion, or reversed order are errors. Non-dispatch event_ids are strictly unique.
+- **Dispatch IDs agree with their row**: the `event_id` must start with `<story>-<role>-<attempt>-` matching the row's own fields (a mismatched completion is refused).
+- Story ids use the canonical `STORY-NNN` form; sequence/alias rules are controller-side (S2).
 - **Nit law**: a fix that changes logic is NEVER class `nit` — nits require `logic_touched=false` AND verifying evidence (`fix_sha` or `validation`); `logic_touched=true` + `class=nit` is forbidden at schema level.
 - **Review context is immutable**: full 40-character base/reviewed SHAs, a SHA-256 manifest digest, and a manifest path confined under `stories/<id>/`.
 - **Review-attribution joins**: `internal_context_event_id` must reference a `behavior_reviewer` review_context, `external_context_event_id` an `external_review` review_context, both of the same story; classifications other than INTRODUCED_AFTER_INTERNAL require identical `reviewed_sha` on both contexts; `finding_id` must reference an external-source finding of the same story.
@@ -388,7 +390,7 @@ Twelve canonical dispatch roles (machine-readable form: `tools/role_catalog.py`)
 |---|---|---|---|---|
 | `context_acquisition` | Assemble the pinned, digest-validated context bundle for a story | T1 | T1 | T1 |
 | `decomposer` | Break an approved idea into sequenced, independently mergeable stories | T1 | T1 | T2 |
-| `test_plan_generator` | Author the story's test plan and grill records (DEV/QA) | T1 | T1 | T2 |
+| `test_plan_generator` | Author the story's test plan before code exists | T1 | T1 | T2 |
 | `planner` | Author the implementation plan (the implementation-plan author) | T2 | T2 | T3 |
 | `plan_reviewer` | Adversarially review the implementation plan against the spec | T2 | T2 | T3 |
 | `plan_reviewer_a` | Plan review lane A (independent reviewer, two-reviewer split) | T2 | T2 | T3 |
@@ -427,6 +429,8 @@ Two declarative layers, both pinned to **TOML** (stdlib `tomllib`; Python ≥ 3.
 |---|---|---|
 | `workspace.toml` | control home root | workspace identity, `factory` pin, `control_home` mode, repo bindings, policy, identity |
 | `environments/<name>.toml` | control home | runtime, dispatch mechanism/isolation, state paths, tier→model table, credential **references**, limits |
+
+Local checkouts resolve to workspace-relative sibling directories named after each binding id by default; `repos[].path` is the optional per-repo override. Mode 3 (primary-repo control home) is out of scope for v0.1 tooling and is not representable in this schema — such setups run as `in-repo` until v0.2.
 
 ### Frozen schema — `workspace.toml`
 
@@ -474,7 +478,8 @@ Machine-readable form: `tools/config_validator.py` (stdlib `tomllib`). This sect
 
 ### Validation rules
 
-- **Deferred placeholders**: a string value matching `<…>` stands for a value the operator substitutes at onboarding. Allowed in templates; each unresolved one is refused under `--strict` as `deferred placeholder not resolved: <dotted.path>`.
+- **Deferred placeholders**: the `<…>` rule applies to EVERY string-typed key — placeholders are figures for the operator to substitute. All are allowed in templates, and each unresolved one is refused under `--strict` as `deferred placeholder not resolved: <dotted.path>`. The “or deferred” markers in the tables call out where the shipped templates actually carry placeholders — they are examples, not an exhaustive list.
+- **Kind classification**: a file named `workspace.toml` validates as the workspace schema; any other file name validates as the environment schema.
 - **Pin grammar + resolution**: version tag (`^v?[0-9]+(\.[0-9]+)*([-+][A-Za-z0-9.-]+)?$`) or a 7–40 lowercase hex commit — anything else is `malformed pin`. Concrete pins must resolve against the factory repo given via `--repo` (hex: `git cat-file -e <sha>^{commit}`; tag: `git rev-parse --verify refs/tags/<tag>`); a miss is `unresolvable pin` and a concrete pin without `--repo` is refused (`pin resolution required`). Deferred pins never resolve.
 - **Inline secrets**: credential values are references only — `credentials.refs` entries must match `env:NAME` / `file:path` (or be deferred); secret-shaped keys (`api_key`, `access_key`, `secret`, `token`, `password`, `passwd`, `private_key`, `client_secret`, `*_token`, `*_secret` — case-insensitive) must hold a reference or a deferred placeholder, never a literal. A secret-shaped key that is also an unknown key reports **both** errors.
 - **Unknown keys refused**: any key outside the frozen tables fails as `unknown key: <path>` (nested paths dotted, array items `repos[<i>].<key>`).

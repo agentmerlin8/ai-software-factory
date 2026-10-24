@@ -49,8 +49,11 @@ PIN_SHA_RE = ledger_schema.PIN_SHA_RE
 def parse_pin(pin: str) -> dict:
     """Parse a `repo@sha[:path]` pin into {"repo", "sha", "path"} (path None
     when absent). Raises ValueError("malformed repo@sha pin: <pin> (<reason>)")
-    on any violation; the reason names the broken part: missing @, bad repo
-    id, bad sha, path escapes via '..', absolute path, empty path."""
+    on any violation; the reason names the broken part: non-string pin,
+    missing @, bad repo id, bad sha, path escapes via '..', absolute path,
+    empty path."""
+    if not isinstance(pin, str):
+        raise ValueError(f"malformed repo@sha pin: {pin!r} (not a string)")
     if "@" not in pin:
         raise ValueError(f"malformed repo@sha pin: {pin} (missing @)")
     repo_part, rest = pin.split("@", 1)
@@ -91,7 +94,9 @@ def resolve_pin(pin: str, repo_paths: dict[str, str]) -> list[str]:
     pass through unchanged; an unknown repo names the workspace binding; a
     sha absent from the bound repo's checkout names the pin and the
     checkout path. Resolution is a local existence check
-    (`git cat-file -e <sha>^{commit}`) — never a fetch.
+    (`git cat-file -e <sha>^{commit}`) — never a fetch. A missing/unusable
+    git binary means the sha cannot be verified — that is the same named
+    unresolvable refusal (never a crash, never a silent pass).
     """
     errs = validate_pin(pin)
     if errs:
@@ -101,11 +106,15 @@ def resolve_pin(pin: str, repo_paths: dict[str, str]) -> list[str]:
     checkout = repo_paths.get(repo)
     if checkout is None:
         return [f"unknown repo '{repo}' — not in the workspace binding"]
-    probe = subprocess.run(
-        ["git", "-C", checkout, "cat-file", "-e",
-         f"{parsed['sha']}^{{commit}}"],
-        capture_output=True, text=True,
-    )
+    try:
+        probe = subprocess.run(
+            ["git", "-C", checkout, "cat-file", "-e",
+             f"{parsed['sha']}^{{commit}}"],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        return [f"unresolvable pin: {repo}@{parsed['sha']} "
+                f"(not found in {checkout})"]
     if probe.returncode != 0:
         return [f"unresolvable pin: {repo}@{parsed['sha']} "
                 f"(not found in {checkout})"]
@@ -222,6 +231,11 @@ def set_completeness(events: list[dict], story_id: str,
     if rules is None:
         raise ValueError(f"target_state {target_state!r} is not a set-level "
                          f"state; expected one of {list(SET_LEVEL_RULES)}")
+    if not repos:
+        # An EMPTY declared set satisfies every "all repos" rule vacuously —
+        # that is a silent advance on a misconfigured story, so refuse.
+        return ["set-level transition refused: no declared repos for the "
+                "story"]
     errors: list[str] = []
     folded = fold_repo_status(events, story_id)
     min_state = rules["min_reached"]

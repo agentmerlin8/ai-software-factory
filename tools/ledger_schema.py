@@ -177,7 +177,8 @@ PROVENANCES = frozenset({"live", "backfilled"})
 
 # ------------------------------------------------------------- id formats ---
 
-STORY_ID_RE = re.compile(r"^STORY-\d{3}$")           # canonical form
+# canonical form — controller-enforced at S2 (validate-story-id); not asserted here
+STORY_ID_RE = re.compile(r"^STORY-\d{3}$")
 DISPATCH_ID_RE = re.compile(r"^.+-[a-z_]+-\d+-\d+$")  # <story>-<role>-<attempt>-<unix>
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -237,6 +238,9 @@ def utcnow() -> str:
 def validate_event(evt: dict[str, Any]) -> list[str]:
     """Return a list of schema errors ([] = valid). Pure function."""
     errs: list[str] = []
+    if not isinstance(evt, dict):
+        return [f"malformed ledger row: {type(evt).__name__} "
+                "(expected an object)"]
     etype = evt.get("event")
     if etype not in EVENT_TYPES:
         return [f"unknown event type {etype!r}"]
@@ -295,6 +299,11 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
     required_bases = set(REQUIRED.get(etype, ()))
     if etype == "assignment" and evt.get("op") in ASSIGNMENT_OP_FIELDS:
         required_bases |= set(ASSIGNMENT_OP_FIELDS[evt["op"]])
+        if evt["op"] == "claim":
+            # claim's exactly-one-of pin fields are required in practice —
+            # a `start_sha*_reason` sibling on a non-nullable pin is the
+            # same violation as on any other required field.
+            required_bases |= {"start_sha", "start_shas"}
     for key in evt:
         if key.endswith("_reason") and key not in _NULL_REASON_EXEMPT:
             base = key[: -len("_reason")]
@@ -431,6 +440,10 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
     seen_ids: set[str] = set()
     rows_by_id: dict[str, list[dict[str, Any]]] = {}
     for evt in events:
+        if not isinstance(evt, dict):
+            errs.append(f"malformed ledger row: {type(evt).__name__} "
+                        "(expected an object)")
+            continue
         errs.extend(validate_event(evt))
         eid = evt.get("event_id")
         if isinstance(eid, str):
@@ -470,13 +483,15 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
                         "be followed by a completion")
 
     context_by_id = {e.get("event_id"): e for e in events
-                     if e.get("event") == "review_context"}
+                     if isinstance(e, dict) and e.get("event") == "review_context"}
     # finding index keyed by (story_id, finding_id) — finding ids are only
     # unique WITHIN a story, so two stories may both carry an `F-1`.
     finding_by_id = {(e.get("story_id"), e.get("finding_id")): e
-                     for e in events if e.get("event") == "finding"}
+                     for e in events
+                     if isinstance(e, dict) and e.get("event") == "finding"}
     for evt in events:
-        if evt.get("event") != "review_attribution":
+        if not isinstance(evt, dict) or \
+                evt.get("event") != "review_attribution":
             continue
         internal = context_by_id.get(evt.get("internal_context_event_id"))
         external = context_by_id.get(evt.get("external_context_event_id"))
@@ -522,7 +537,8 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
 
 def events_for(events: list[dict], story_id: str,
                etype: str | None = None) -> list[dict]:
-    return [e for e in events if e.get("story_id") == story_id
+    return [e for e in events
+            if isinstance(e, dict) and e.get("story_id") == story_id
             and (etype is None or e.get("event") == etype)]
 
 
@@ -535,7 +551,7 @@ def current_state(events: list[dict], story_id: str) -> str | None:
     for e in events_for(events, story_id, "transition"):
         if e.get("repo"):
             continue
-        state = e["to_state"]
+        state = e.get("to_state")
     return state
 
 
@@ -548,6 +564,8 @@ def latest_findings(events: list[dict],
     order: list[tuple[str, str]] = []
     latest: dict[tuple[str, str], dict] = {}
     for event in events:
+        if not isinstance(event, dict):
+            continue
         if event.get("event") != "finding" or \
                 (story_id is not None and event.get("story_id") != story_id):
             continue

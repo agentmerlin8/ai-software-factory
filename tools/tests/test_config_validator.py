@@ -347,6 +347,16 @@ class TestPinResolution(unittest.TestCase):
             [self.ws_with_pin("<kit>"), "--repo", self.repo])
         self.assertEqual(code, 0, output)
 
+    def test_committed_fixture_bad_pin_unresolvable(self):
+        # The committed fixture (40 zeros) must be refused with the named
+        # unresolvable line when a real --repo checkout is provided.
+        path = fixture("bad_pin_unresolvable")
+        code, output = run_main([path, "--repo", self.repo])
+        self.assertEqual(code, 1, output)
+        self.assertTrue(any(e.startswith("  - unresolvable pin: "
+                                         + "0" * 40)
+                            for e in error_lines(output)), output)
+
 
 class TestCLI(unittest.TestCase):
     def test_no_files_is_usage_error(self):

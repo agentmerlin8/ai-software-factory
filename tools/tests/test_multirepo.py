@@ -11,6 +11,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from tools import ledger_schema as S
 from tools import multirepo as M
@@ -459,6 +460,67 @@ class TestLedgerSchemaIntegration(unittest.TestCase):
         self.assertEqual(S.current_state(ledger, STORY), "SPEC_FROZEN")
         self.assertEqual(S.current_state(
             [sub_event("s1", "app", "MERGED")], STORY), None)
+
+
+class TestPinHelperHardening(unittest.TestCase):
+    """C2 regression: the pin helpers refuse where they used to crash."""
+
+    def test_parse_pin_non_string_raises_named_valueerror(self):
+        for bad in (123, None, ["app@abc1234"], 3.5):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError) as ctx:
+                    M.parse_pin(bad)
+                self.assertEqual(
+                    str(ctx.exception),
+                    f"malformed repo@sha pin: {bad!r} (not a string)")
+
+    def test_validate_pin_non_string_named_refusal(self):
+        self.assertEqual(M.validate_pin(123),
+                         ["malformed repo@sha pin: 123 (not a string)"])
+        self.assertEqual(M.validate_pin(None),
+                         ["malformed repo@sha pin: None (not a string)"])
+
+    def test_resolve_pin_non_string_passthrough(self):
+        self.assertEqual(M.resolve_pin(123, {"app": "/tmp/none"}),
+                         ["malformed repo@sha pin: 123 (not a string)"])
+
+    def test_resolve_pin_git_missing_is_named_unresolvable(self):
+        # git absent (or unusable) = the sha cannot be verified ⇒ the same
+        # named unresolvable refusal, never a crash, never a silent pass.
+        with mock.patch("tools.multirepo.subprocess.run",
+                        side_effect=FileNotFoundError("git")):
+            errs = M.resolve_pin("app@" + "a" * 40, {"app": "/some/checkout"})
+        self.assertEqual(errs, ["unresolvable pin: app@" + "a" * 40 +
+                                " (not found in /some/checkout)"])
+
+
+class TestSetCompletenessEmptyRepos(unittest.TestCase):
+    """C3 regression: an EMPTY declared-repo set never silently passes."""
+
+    def test_empty_repos_refused_at_every_set_level(self):
+        for target in list(M.SET_LEVEL_RULES):
+            with self.subTest(target=target):
+                got = M.set_completeness([], STORY, [], target,
+                                         proof_evidence="evidence/live.md")
+                self.assertEqual(got, ["set-level transition refused: no "
+                                       "declared repos for the story"])
+
+    def test_empty_repos_refused_even_with_complete_sub_events(self):
+        events = load_jsonl("subevents_merged.jsonl")
+        got = M.set_completeness(events, STORY, [], "MERGED")
+        self.assertEqual(got, ["set-level transition refused: no declared "
+                               "repos for the story"])
+
+    def test_non_empty_repos_behavior_unchanged(self):
+        events = load_jsonl("subevents_complete_ready.jsonl")
+        self.assertEqual(M.set_completeness(events, STORY,
+                                            ["app", "contracts"],
+                                            "MERGE_ELIGIBLE"), [])
+
+    def test_non_set_level_target_still_raises_before_empty_check(self):
+        with self.assertRaises(ValueError) as ctx:
+            M.set_completeness([], STORY, [], "CODING")
+        self.assertIn("CODING", str(ctx.exception))
 
 
 if __name__ == "__main__":

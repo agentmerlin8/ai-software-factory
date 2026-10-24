@@ -200,6 +200,10 @@ def _claim_start_errors(evt: dict[str, Any]) -> list[str]:
         return ["assignment: claim takes exactly one of start_sha, "
                 "start_shas"]
     if has_sha:
+        sha = evt.get("start_sha")
+        if not isinstance(sha, str) or not PIN_SHA_RE.fullmatch(sha):
+            return ["assignment: claim start_sha must be a 7-40 lowercase "
+                    "hex SHA"]
         return []
     shas = evt.get("start_shas")
     if not isinstance(shas, dict):
@@ -235,6 +239,13 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
     for f in ("event_id", "recorded_at", "provenance"):
         if not evt.get(f):
             errs.append(f"{etype}: missing envelope field `{f}`")
+    recorded_at = evt.get("recorded_at")
+    if recorded_at:
+        try:
+            datetime.strptime(str(recorded_at), "%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, TypeError):
+            errs.append(f"{etype}: recorded_at must be a UTC timestamp "
+                        "(YYYY-MM-DDTHH:MM:SSZ)")
     if evt.get("provenance") and evt["provenance"] not in PROVENANCES:
         errs.append(f"{etype}: provenance must be live|backfilled")
 
@@ -247,6 +258,9 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
     for f in required:
         if f not in evt:
             errs.append(f"{etype}: missing required field `{f}`")
+        elif evt[f] is None and f not in NULLABLE[etype]:
+            errs.append(f"{etype}: required field `{f}` must not be null "
+                        "(not nullable in this event type)")
 
     # null ⇄ reason convention, both directions
     nullable = NULLABLE[etype]
@@ -323,7 +337,9 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
             errs.append(f"human_gate: gate {evt.get('gate')!r} not in "
                         f"{sorted(HUMAN_GATE_KINDS)}")
     if etype == "transition":
-        if not isinstance(evt.get("checks_run"), list):
+        checks_run = evt.get("checks_run")
+        if not isinstance(checks_run, list) or \
+                not all(isinstance(c, str) for c in checks_run):
             errs.append("transition: checks_run must be an array of strings")
         if not isinstance(evt.get("check_results"), dict):
             errs.append("transition: check_results must be an object")
@@ -395,6 +411,10 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
                     errs.append(f"duplicate event_id {eid!r}")
                 seen_ids.add(eid)
     for eid, rows in rows_by_id.items():
+        if len({r.get("event") for r in rows}) > 1:
+            errs.append(f"duplicate event_id {eid!r} (spans multiple event "
+                        "types)")
+            continue
         if rows[0].get("event") != "dispatch":
             continue
         if len(rows) > 2:
@@ -405,6 +425,11 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
         if len(ended) > 1:
             errs.append(f"dispatch {eid} re-started after end "
                         "(stale-notification class)")
+        elif len(rows) == 1 and rows[0].get("ended_at") and \
+                rows[0].get("provenance") != "backfilled":
+            errs.append(f"dispatch {eid} single completed row must be "
+                        "provenance=backfilled (a live dispatch requires "
+                        "its pre-spawn row)")
         elif len(rows) == 2 and not rows[1].get("ended_at"):
             errs.append(f"dispatch {eid} second row lacks ended_at — a "
                         "pre-spawn row may only be followed by its "

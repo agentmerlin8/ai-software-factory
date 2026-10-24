@@ -272,6 +272,25 @@ class TestEnvelope(unittest.TestCase):
         errs = S.validate_event(evt)
         self.assertIn("loop: missing envelope field `recorded_at`", errs)
 
+    def test_recorded_at_must_be_utc_timestamp(self):
+        for bad in ("not-a-date", 123, "2026-10-24 00:00:00",
+                    "2026-10-24T00:00:00+00:00"):
+            evt = valid_loop()
+            evt["recorded_at"] = bad
+            errs = S.validate_event(evt)
+            self.assertIn("loop: recorded_at must be a UTC timestamp "
+                          "(YYYY-MM-DDTHH:MM:SSZ)", errs)
+
+    def test_recorded_at_valid_timestamp_ok(self):
+        self.assertEqual(S.validate_event(valid_loop()), [])
+
+    def test_recorded_at_falsy_reports_missing_only(self):
+        evt = valid_loop()
+        evt["recorded_at"] = ""
+        errs = S.validate_event(evt)
+        self.assertIn("loop: missing envelope field `recorded_at`", errs)
+        self.assertFalse(any("UTC timestamp" in e for e in errs), errs)
+
 
 class TestRequiredAndNullReason(unittest.TestCase):
     def test_missing_required_field(self):
@@ -322,6 +341,24 @@ class TestRequiredAndNullReason(unittest.TestCase):
         evt = valid_recovery()  # carries fallback_reason as a value field
         self.assertEqual(S.validate_event(evt), [])
 
+    def test_non_nullable_required_field_null_rejected(self):
+        evt = valid_assignment(op="claim")
+        evt["owner"] = None
+        errs = S.validate_event(evt)
+        self.assertIn("assignment: required field `owner` must not be null "
+                      "(not nullable in this event type)", errs)
+
+    def test_non_nullable_usage_input_tokens_null_rejected(self):
+        evt = valid_usage()
+        evt["input_tokens"] = None
+        errs = S.validate_event(evt)
+        self.assertIn("usage: required field `input_tokens` must not be "
+                      "null (not nullable in this event type)", errs)
+
+    def test_nullable_required_field_null_with_reason_ok(self):
+        evt = valid_dispatch(ended=False)  # ended_at null + reason
+        self.assertEqual(S.validate_event(evt), [])
+
 
 class TestAssignment(unittest.TestCase):
     def test_missing_op(self):
@@ -350,6 +387,21 @@ class TestAssignment(unittest.TestCase):
         errs = S.validate_event(evt)
         self.assertTrue(any("`flagged` must be an explicit boolean" in e
                             for e in errs), errs)
+
+    def test_claim_start_sha_must_be_hex_sha(self):
+        for bad in (None, "", "not-a-sha", "ABCDEF1", "0" * 41, 12345):
+            evt = valid_assignment(op="claim", eid=f"cs-{abs(hash(str(bad)))}")
+            evt["start_sha"] = bad
+            errs = S.validate_event(evt)
+            self.assertIn("assignment: claim start_sha must be a 7-40 "
+                          "lowercase hex SHA", errs)
+
+    def test_claim_start_sha_valid_passes(self):
+        for good in ("0" * 40, "abc1234", "deadbeef" * 5):
+            evt = valid_assignment(op="claim",
+                                   eid=f"cs-ok-{abs(hash(good))}")
+            evt["start_sha"] = good
+            self.assertEqual(S.validate_event(evt), [])
 
 
 class TestDispatch(unittest.TestCase):
@@ -431,6 +483,13 @@ class TestOtherTypes(unittest.TestCase):
         self.assertIn("transition: checks_run must be an array of strings",
                       errs)
         self.assertIn("transition: check_results must be an object", errs)
+
+    def test_transition_checks_run_elements_must_be_strings(self):
+        evt = valid_transition()
+        evt["checks_run"] = [None, 42]
+        errs = S.validate_event(evt)
+        self.assertIn("transition: checks_run must be an array of strings",
+                      errs)
 
     def test_loop_empty_root_cause(self):
         evt = valid_loop()
@@ -526,6 +585,21 @@ class TestLedgerInvariants(unittest.TestCase):
         evt = valid_dispatch()
         evt["provenance"] = "backfilled"
         self.assertEqual(S.validate_events([evt]), [])
+
+    def test_single_live_completed_dispatch_rejected(self):
+        errs = S.validate_events([valid_dispatch()])  # ended + live
+        self.assertTrue(any("single completed row must be "
+                            "provenance=backfilled" in e for e in errs), errs)
+
+    def test_single_live_in_flight_dispatch_ok(self):
+        self.assertEqual(S.validate_events([valid_dispatch(ended=False)]), [])
+
+    def test_mixed_event_types_sharing_id_rejected(self):
+        loop = valid_loop(eid="shared-1")
+        dispatch = valid_dispatch(eid="shared-1")
+        errs = S.validate_events([loop, dispatch])
+        self.assertTrue(any("duplicate event_id 'shared-1' (spans multiple "
+                            "event types)" in e for e in errs), errs)
 
     # -- review_attribution joins
     def _join_ledger(self, **overrides) -> list[dict]:

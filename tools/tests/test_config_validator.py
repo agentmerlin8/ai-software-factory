@@ -152,6 +152,17 @@ class TestWorkspaceFailures(unittest.TestCase):
                       "  - inline secret: api_key must be a reference, "
                       "never a literal"])
 
+    def test_optional_section_wrong_type_refused(self):
+        for section, value in (("policy", '"strict"'), ("board", "[]"),
+                               ("identity", "false")):
+            doc = f"{section} = {value}\n" + WS_BASE
+            code, output = run_main([write_tmp(doc, "workspace.toml")])
+            self.assertEqual(code, 1, (section, output))
+            self.assertIn(f"  - bad type: {section} expected table, got "
+                          + {"policy": "str", "board": "array",
+                             "identity": "bool"}[section],
+                          error_lines(output))
+
 
 class TestEnvironmentFailures(unittest.TestCase):
     def _refuse(self, name: str, messages: list[str]) -> None:
@@ -197,6 +208,58 @@ class TestEnvironmentFailures(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("  - bad type: limits.runs expected int, got bool",
                       error_lines(output))
+
+    def test_env_optional_section_wrong_type_refused(self):
+        for section, value, got in (("credentials", '"plain-secret"', "str"),
+                                    ("state", "false", "bool"),
+                                    ("limits", "[]", "array")):
+            doc = f"{section} = {value}\n" + ENV_BASE
+            code, output = run_main([write_tmp(doc)])
+            self.assertEqual(code, 1, (section, output))
+            errors = error_lines(output)
+            self.assertIn(f"  - bad type: {section} expected table, "
+                          f"got {got}", errors)
+            # children never examined: no phantom child errors
+            self.assertFalse(any(f"{section}." in e for e in errors), errors)
+
+    def test_env_credentials_wrong_type_bypasses_nothing(self):
+        # a str credentials must NOT silently skip the refs+secret walk
+        code, output = run_main(
+            [write_tmp('credentials = "plain-secret"\n' + ENV_BASE)])
+        self.assertEqual(code, 1)
+        self.assertIn("  - bad type: credentials expected table, got str",
+                      error_lines(output))
+
+    def test_strict_deferred_array_elements(self):
+        doc = ENV_BASE + '[credentials]\nrefs = ["<credential-ref>"]\n'
+        path = write_tmp(doc)
+        code, output = run_main(["--strict", path])
+        self.assertEqual(code, 1)
+        self.assertIn("  - deferred placeholder not resolved: "
+                      "credentials.refs[0]", error_lines(output))
+        # default (non-strict) mode still accepts the template placeholder
+        code, output = run_main([path])
+        self.assertEqual(code, 0, output)
+
+    def test_strict_deferred_workspace_approvers(self):
+        doc = WS_BASE + '[identity]\napprovers = ["<github-login>"]\n'
+        path = write_tmp(doc, "workspace.toml")
+        code, output = run_main(["--strict", path])
+        self.assertEqual(code, 1)
+        self.assertIn("  - deferred placeholder not resolved: "
+                      "identity.approvers[0]", error_lines(output))
+        code, output = run_main([path])
+        self.assertEqual(code, 0, output)
+
+    def test_strict_deferred_nested_in_arrays(self):
+        doc = 'extra = [{ pin = "<kit>" }, ["<x>"]]\n' + ENV_BASE
+        code, output = run_main(["--strict", write_tmp(doc)])
+        self.assertEqual(code, 1)
+        errors = error_lines(output)
+        self.assertIn("  - deferred placeholder not resolved: "
+                      "extra[0].pin", errors)
+        self.assertIn("  - deferred placeholder not resolved: "
+                      "extra[1][0]", errors)
 
     def test_two_primaries(self):
         doc = WS_BASE + ('[[repos]]\nid = "web"\nrole = "primary"\n'

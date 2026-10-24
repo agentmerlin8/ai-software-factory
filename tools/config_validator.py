@@ -291,6 +291,9 @@ def validate_workspace(doc: dict, *, strict: bool = False) -> list[str]:
 
     # board
     board = doc.get("board")
+    if "board" in doc and not isinstance(board, dict):
+        errs.append(bad_type("board", "table", board))
+        board = None
     if isinstance(board, dict) and "project_id" in board:
         pid = board["project_id"]
         if not isinstance(pid, str):
@@ -302,6 +305,9 @@ def validate_workspace(doc: dict, *, strict: bool = False) -> list[str]:
 
     # policy
     policy = doc.get("policy")
+    if "policy" in doc and not isinstance(policy, dict):
+        errs.append(bad_type("policy", "table", policy))
+        policy = None
     if isinstance(policy, dict) and "gates" in policy:
         gates = policy["gates"]
         if not isinstance(gates, str):
@@ -313,6 +319,9 @@ def validate_workspace(doc: dict, *, strict: bool = False) -> list[str]:
     # identity (fail closed: an empty allowlist means human-approved
     # actions refuse — controller-side, S2)
     identity = doc.get("identity")
+    if "identity" in doc and not isinstance(identity, dict):
+        errs.append(bad_type("identity", "table", identity))
+        identity = None
     if isinstance(identity, dict) and "approvers" in identity:
         approvers = identity["approvers"]
         if not isinstance(approvers, list):
@@ -384,6 +393,9 @@ def validate_environment(doc: dict, *, strict: bool = False) -> list[str]:
 
     # state
     state = doc.get("state")
+    if "state" in doc and not isinstance(state, dict):
+        errs.append(bad_type("state", "table", state))
+        state = None
     if isinstance(state, dict):
         for key in ("agent_home", "transcripts"):
             if key in state:
@@ -423,6 +435,9 @@ def validate_environment(doc: dict, *, strict: bool = False) -> list[str]:
 
     # credentials (references only)
     creds = doc.get("credentials")
+    if "credentials" in doc and not isinstance(creds, dict):
+        errs.append(bad_type("credentials", "table", creds))
+        creds = None
     if isinstance(creds, dict) and "refs" in creds:
         refs = creds["refs"]
         if not isinstance(refs, list):
@@ -441,6 +456,9 @@ def validate_environment(doc: dict, *, strict: bool = False) -> list[str]:
 
     # limits
     limits = doc.get("limits")
+    if "limits" in doc and not isinstance(limits, dict):
+        errs.append(bad_type("limits", "table", limits))
+        limits = None
     if isinstance(limits, dict):
         if "wall" in limits:
             wall = limits["wall"]
@@ -497,7 +515,13 @@ def _walk_deferred(value: Any, path: str, errs: list[str]) -> None:
             _walk_deferred(sub, sub_path, errs)
     elif isinstance(value, list):
         for i, item in enumerate(value):
-            _walk_deferred(item, f"{path}[{i}]", errs)
+            item_path = f"{path}[{i}]"
+            if isinstance(item, str):
+                if is_deferred(item):
+                    errs.append(f"deferred placeholder not resolved: "
+                                f"{item_path}")
+            else:
+                _walk_deferred(item, item_path, errs)
 
 
 # --------------------------------------------------------- pin resolution ---

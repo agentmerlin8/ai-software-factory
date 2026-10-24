@@ -1,0 +1,22 @@
+name: kit-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  kit-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'   # the documented floor (stdlib tomllib)
+      - name: Control-plane tests
+        run: python3 -m unittest
+      - name: Validate workspace + environment templates
+        run: >-
+          python3 tools/config_validator.py
+          templates/workspace/workspace.toml
+          templates/workspace/environments/local.toml
+          templates/workspace/environments/github.toml

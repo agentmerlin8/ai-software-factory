@@ -52,16 +52,16 @@ v0.2 adapters (`claude-code`, `codex`, `api-direct`); reference-product adoption
 
 The reference's bounded queue — **artifact validation** (contract item 7) next, then the gated launch increment — continues on its own track. The seam is the **per-environment dispatch mechanism** that environments drive; it no longer gates the kit's acceptance — the live hermes leg (C2, ratified) runs locally on the standard dispatch mechanism, with the sealed re-run following whenever the launch increment is authorized.
 
-## Owner calls (C1–C2 ratified 2026-10-23; C3 open)
+## Owner calls (C1–C3 ratified 2026-10-23 — all closed)
 
 | # | Call | Recommendation | Why |
 |---|---|---|---|
 | C1 | Config format | **TOML — ✅ ratified 2026-10-23** (`tomllib`, Python ≥ 3.11) | the only format satisfying the stdlib law; YAML would need a non-stdlib dependency or a hand-rolled parser (forbidden) |
 | C2 | Live-parity measurement | **✅ ratified 2026-10-23 (pragmatic path)** — both legs in D-1 + mechanical contract shape (required paths + sections); the live hermes leg runs locally through the standard dispatch mechanism once S4 ships ("live dispatch, non-sealed mechanism"); sealed-mechanism re-run when launch is authorized | makes FR-3's parity real, not tautological; decouples the kit's sign-off from execution-spending decisions |
-| C3 | Acceptance targets | Keep v0.1 criteria: `benchmark-app` dress rehearsal + handover drill; the from-scratch fresh-repo test-out **execution** gates v0.1.x hardening (S3 ships the scripts — confirm this split, or pull the execution into v0.1) | the reference product's adoption stays a separate, later migration |
+| C3 | Acceptance targets | **✅ ratified 2026-10-23 (split kept)** — v0.1 criteria: `benchmark-app` dress rehearsal + handover drill + conformance (verify green / precise FAILs) + test-out scripts shipped (smoke on `benchmark-app`); the from-scratch fresh-repo test-out is the **v0.1.x hardening item #1** | the reference product's adoption stays a separate, later migration |
 
 ## How the build runs
 
 - Work items: issues in this repo; **each slice lands as a reviewed PR** — bounded increments, independent fresh-context review before the merge gate, owner merges.
 - Every increment states its own explicit exclusions (what it deliberately does not do) — the same discipline as the reference's bounded queue.
-- Definition of done for the program: kit onboards a fresh repo (from-scratch test-out — the v0.1.x hardening gate); one story runs idea → merged PR via the runbook (human leg; hermes leg when launch is authorized); handover drill passes; every render/provenance check clean. Then the reference product is adopted (controlled), and the factory builds its products.
+- Definition of done for the program: kit onboards a fresh repo (from-scratch test-out — the v0.1.x hardening gate, its first item); one story runs idea → merged PR via the runbook (human leg; hermes leg when launch is authorized); handover drill passes; every render/provenance check clean. Then the reference product is adopted (controlled), and the factory builds its products.

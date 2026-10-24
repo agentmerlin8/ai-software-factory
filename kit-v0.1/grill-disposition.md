@@ -60,10 +60,11 @@
 | D11 | Render byte contract | RESOLVED — ledger+git only; ISO-8601 UTC; sorted keys; LF; no wall-clock |
 | D12 | Live parity in v0.1 | RESOLVED (C2, ratified 2026-10-23) — both legs in D-1 + mechanical contract shape; the live hermes leg runs locally (non-sealed, labeled as such); sealed re-run when launch is authorized |
 
-## Owner ratification items (C1–C2 ✅; C3 open)
+## Owner ratification items (C1–C3 ✅ — all ratified 2026-10-23)
 
 - **C1** — config format = TOML — **✅ ratified 2026-10-23.**
 - **C2** — live-parity measurement (pragmatic path: one real local dispatch, labeled non-sealed; sealed re-run when authorized) — **✅ ratified 2026-10-23.**
-- **C3** — acceptance targets (test-out split: scripts in v0.1 / from-scratch execution v0.1.x) — open.
+- **C3** — acceptance targets (test-out split kept: scripts in v0.1; from-scratch run = v0.1.x item #1) — **✅ ratified 2026-10-23.**
+- **Ruleset-flip evidence standard** — applied as recommended (never "protected" until the `active` ruleset reads back; staged/unreadable renders "staged, not enforcing") — see readiness C-3 and `architecture.md` §Ledger durability (item 5).
 
 See `build-plan.md` §Owner calls.

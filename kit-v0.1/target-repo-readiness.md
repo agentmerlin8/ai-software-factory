@@ -26,7 +26,7 @@ Mode-aware applicability: control-home checks (kit install, ledger, config, kick
 | C-7 | Kit installed under `factory/` per the canonical installed layout (runbook, tools, gates, ledger seed, process, agents, adapters, templates, locks) | The process lives here | `factory/runbook.md` present; `factory/tools/` entry points run under python3 |
 | C-8 | Empty, schema-valid ledger seeded (`factory/ledger/events.jsonl`) + renders pass | Source of truth exists and renders clean | `render_state --check`, `render_dashboard --check`, ledger validation |
 | C-9 | Toolchain present: `python3` (stdlib), `git`, `gh` | Control plane baseline | `command -v` trio + versions |
-| C-10 | Config present and parsed: `workspace.toml` (+ ≥1 resolvable `environments/*.toml`) with canonical paths, board/project id, default branch, identity | Tools are path/project-parameterized — no hardcoding | Config parsed by verify; schemas validated |
+| C-10 | Config present and parsed: `workspace.toml` (+ ≥1 resolvable `environments/*.toml`) with canonical paths, board/project id, default branch, identity (human-gate approver allowlist) | Tools are path/project-parameterized — no hardcoding | Config parsed by verify; schemas validated against the §Configuration frozen tables (`config_validator.py`) |
 | C-11 | `factory/KICKOFF.md` (cold-start template) + `factory/PREFLIGHT.md` (verify output report; render-exempt) present | Cold-start discipline | Files exist; preflight re-runs |
 | C-12 | Secrets posture documented: where creds live, what is never committed, how a fresh machine gets them | Locked-down portability | Secrets doc present; `.gitignore` sane |
 | C-13 | Test environment runnable (project's own: docker compose, test DB, etc.) — or an explicit "manual" declaration; **Mode 2: per binding** — control home and every bound target repo | The coder's exit condition is build+tests green | Project-defined command, executed once by verify with the project's health check; may PASS via recorded manual attest or cached last-run (full execution is drill-only) |
@@ -37,8 +37,8 @@ Mode-aware applicability: control-home checks (kit install, ledger, config, kick
 | # | Check | Why | Verify method |
 |---|---|---|---|
 | W-1 | Control home exists as a **dedicated workspace repo**, created from the kit workspace template (**Mode 2 only**; Mode 1 uses the in-repo layout — no separate repo) | Multi-repo default | Repo + template files present |
-| W-2 | `workspace.toml` valid: factory pin resolvable, repo bindings listed with roles | Workspace identity | Schema-validate + pin resolve |
-| W-3 | `environments/` present; every declared environment file valid and resolvable (credential references named; no inline secrets) | Execution declared per environment | Schema-validate; credential refs checked for presence only — values never read |
+| W-2 | `workspace.toml` valid: factory pin resolvable, repo bindings listed with roles | Workspace identity | Schema-validate (`config_validator.py`; §Configuration frozen tables) + pin resolve — concrete pins must resolve |
+| W-3 | `environments/` present; every declared environment file valid and resolvable (credential references named; no inline secrets) | Execution declared per environment | Schema-validate (§Configuration frozen tables — unknown keys and inline secrets refused); credential refs checked for presence only — values never read |
 | W-4 | Every bound target repo reachable with required scopes; branch conventions available (`story/<id>-<slug>`) | Multi-repo mechanics depend on it | `gh repo view` per binding |
 | W-5 | Ledger seeded at the control home (`factory/ledger/events.jsonl`); renders pass | Source of truth exists | Ledger validation + render `--check` |
 | W-6 | Cross-repo contract-block template present for story specs (pinned interface owned by the provider repo) | Multi-repo story quality | Template exists |

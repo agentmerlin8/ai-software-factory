@@ -94,6 +94,8 @@ Machine 1 works a story to mid-flight → push. Machine 2 (fresh clone) resumes 
 ```bash
 # control-plane unit + integration suite
 python3 -m unittest discover -s factory/tools -p 'test_*.py'
+# kit repo (this distribution): the suite lives at tools/tests — run from the root:
+# python3 -m unittest
 
 # gate fixtures
 python3 factory/gates/pre_review_gate.py plan <story-dir>

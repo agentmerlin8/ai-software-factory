@@ -85,7 +85,7 @@ An environment resolves *how* work executes; it never changes the process. Per-e
 
 ```toml
 # environments/local.toml (illustrative)
-runtime = "hermes"                  # hermes | copilot-cli | api-direct | human | …
+runtime = "hermes"                  # hermes | human | … (v0.2 adds claude-code · codex · api-direct)
 dispatch = { mechanism = "delegate_task", isolation = "per-invocation" }
 state = { agent_home = "~/.hermes", transcripts = "<path>", usage = "harvest" }
 models = { T1 = "…", T2 = "…", T3 = "…" }
@@ -106,7 +106,7 @@ limits = { wall = "…", runs = "…", budget = "…" }
 - **State**: story-level states unchanged; per-repo detail rides as sub-events (`BUILD_GREEN{repo}`, `DRAFT_OPENED{repo}`, `MERGED{repo}`). Set-level transitions refuse until the set is complete — the refusal names every missing (repo, requirement) and never silently advances (§Multi-repo ledger schema below): `MERGE_ELIGIBLE` = all PRs review-closed + green; `MERGED` = all merges done; `LIVE_PROVEN` = cross-repo end-to-end proof.
 - **Merge order**: expand-first — the contract owner merges first, consumers follow; reverts run in reverse. Recorded in the plan.
 - **Closeout**: workspace-level PROVENANCE joins idea → decisions → dispatches (per repo) → evidence → PR set → merge set → proof. Each PR body references the workspace story.
-- **Local resolution**: each environment records where bound repos are checked out locally (workspace-relative sibling paths by default, plus an optional `repos[].path` override key); the exact convention freezes with T2/T3.
+- **Local resolution**: each environment records where bound repos are checked out locally (workspace-relative sibling paths by default, plus an optional `repos[].path` override key); the convention is frozen (§Configuration: sibling-directory default + the `repos[].path` override).
 
 ### Multi-repo ledger schema (frozen)
 
@@ -194,6 +194,8 @@ Work artifacts (code) live on the story branch in each touched repo; the control
 | `metrics_report.py` | Per-story token/loop reconciliation (baseline optional in v0.1: null+reason when absent); unrouted-dispatch census | |
 | `render_state.py`, `render_dashboard.py`, `render_provenance.py` | Generated renders (never hand-edited); `--check` modes | |
 | `sync_board.py` | GitHub Projects v2 Stage writes (explicit, never inferred) | Project id from config |
+
+Prep-tool terms (defined inline): the **hard-read gate block** (`dispatch_prep`) is the generated allowed-reads list + STOP rule — built from the plan manifest and the named-test inventory — that the child reads INSTEAD of exploring (nothing outside the block is read). The **verify-pack** (`plan_prep`) is a paste-ready "ALREADY VERIFIED" block of mechanically extracted facts at path:line granularity that the planner cites instead of re-verifying from prose.
 
 **Port rules:** keep behavior; genericize names (no product-specific component/file/test names); drop runtime-specific code paths (runtime-config writes, runtime-DB harvests → replaced per FR-9/FR-10); stdlib only.
 

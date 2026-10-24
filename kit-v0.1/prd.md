@@ -1,11 +1,11 @@
 # PRD: Factory Kit v0.1
 
-> Status: DRAFT — context bundle (pre-grill). Drafted 2026-09-28.
+> Status: DRAFT — direction folded 2026-10-23 (workspace model, environments, single-writer; see `architecture.md`, `build-plan.md`, `grill-disposition.md`). Drafted 2026-09-28.
 > Scope of this release: v0.1 ("the dress rehearsal build"), per the project vision.
 
 ## Executive Summary
 
-The Factory Kit makes the software factory's process, agents, and control plane fully portable. They live **in the target repository**, run on nothing but `git` + `gh` + `python3` (plus the project's own toolchain), and can be executed by a **human operator or any AI orchestrator**.
+The Factory Kit makes the software factory's process, agents, and control plane fully portable. They live **in the target repository (single-repo) or in the project's workspace control home (multi-repo)**, run on nothing but `git` + `gh` + `python3` (plus the project's own toolchain), and can be executed by a **human operator or any AI orchestrator**.
 
 v0.1 ships: the kit skeleton, the universal **dispatch-package** interface, the deterministic **control plane** (ledger, controller, gates, prep, renders), two execution **adapters** (`human`, `hermes`), the complete **idea → completed PR runbook**, and a **dress rehearsal** proving the whole path end-to-end on a real target repo, plus a **two-machine handover drill**.
 
@@ -27,7 +27,7 @@ The fix is structural, not a feature: move the process into the repo, define a r
 
 ## Goals
 
-- **G1** — The factory's agents, process, and control plane live in the kit repo and in every onboarded target repo. No runtime is required to *hold* the process.
+- **G1** — The factory's agents, process, and control plane live in the kit repo and in every onboarded project's control home (the target repo in Mode 1; a dedicated workspace repo in Mode 2). No runtime is required to *hold* the process.
 - **G2** — A human with an editor, a shell, and git push access can take an idea to a completed PR by following the runbook — dispatching role work to any AI chat (or executing review steps themselves).
 - **G3** — Any AI orchestrator (any product) can execute the same process by following the same runbook and consuming the same dispatch packages.
 - **G4** — The kit proves itself: end-to-end dress rehearsal on a real target repo, plus a two-machine handover drill.
@@ -47,7 +47,7 @@ The fix is structural, not a feature: move the process into the repo, define a r
 
 ### FR-1 — Kit structure and single-source process
 
-The kit ships as: `agents/` (role packages), `process/` (process rules), `tools/` (control plane), `adapters/` (execution bindings), `runbook.md`, `onboarding/`. Process rules live **in the repo**, versioned with the code.
+The kit ships as: `agents/` (role packages), `process/` (process rules), `tools/` (control plane), `adapters/` (execution bindings), `templates/` (workspace + story + config templates), `runbook.md`, `onboarding/`. Process rules live **in the repo**, versioned with the code.
 
 - [ ] A fresh clone of a kit-onboarded repo contains every rule needed to run the process, with no reference to any external skill system as a requirement.
 - [ ] `process/` documents are the single source; no process rule exists only in an agent runtime.
@@ -61,7 +61,7 @@ The kit ships as: `agents/` (role packages), `process/` (process rules), `tools/
 
 ### FR-3 — Dispatch packages are the universal interface
 
-The kit generates, for **every role dispatch**, one self-contained markdown package: role instruction, pinned inputs (at a recorded SHA), expected outputs, stop rules, and the resume preamble. The same package is consumed by an adapter (fed to an agent) or pasted by a human into any AI chat.
+The kit generates, for **every role dispatch**, one self-contained markdown package with six sections: header, role instruction, pinned inputs (at a recorded SHA), expected outputs, stop rules, and the resume preamble. One assembler owns the final package file; prep tools produce its inputs. The same package is consumed by an adapter (fed to an agent) or pasted by a human into any AI chat.
 
 - [ ] **Given** an approved story at PLANNED, **when** the operator runs the package generator, **then** a single file is produced that includes the role instruction, every input pinned by SHA, the expected output paths, and explicit stop rules.
 - [ ] **Given** the same package, **when** it is executed by the `human` adapter (paste into a chat) and by the `hermes` adapter (subagent dispatch), **then** both produce artifacts at the same paths with the same contract shape (parity check).
@@ -75,7 +75,7 @@ The control plane (controller, ledger library, gates, prep scripts, renderers, b
 
 ### FR-5 — Event ledger and state machine
 
-`factory/ledger/events.jsonl` is the single source of truth: append-only, UTC-timestamped, schema-validated (missing values are `null` + reason — never invented zeros; corrections are events, never edits). The 16-state story machine is enforced against the ledger + git + GitHub. `state.md`, `DASHBOARD.md`, and `PROVENANCE.md` are **generated** renders.
+`factory/ledger/events.jsonl` is the single source of truth: append-only, UTC-timestamped, schema-validated (missing values are `null` + reason — never invented zeros; corrections are events, never edits). The story state machine (ported as-is from the reference — currently 19 pipeline states + BLOCKED; the exact set lands with the T1 extraction) is enforced against the ledger + git + GitHub. `state.md`, `DASHBOARD.md`, and `PROVENANCE.md` are **generated** renders.
 
 - [ ] **Given** a ledger and a story, **when** the renderers run, **then** generated files match the ledger byte-for-byte (check mode passes).
 - [ ] **Given** any event with a missing field, **when** validation runs, **then** it is rejected unless a sibling `<field>_reason` is present and non-empty.
@@ -97,7 +97,7 @@ A versioned file `factory/locks/OVERRIDE` (template `OVERRIDE.example`) with `sc
 
 ### FR-8 — Execution adapters
 
-An adapter declares: prerequisites, how to execute a dispatch package, how usage is reported, and identity conventions. v0.1 ships `human` (operator pastes package into any AI chat, commits artifacts) and `hermes` (subagent dispatch with per-role model application). Interfaces are defined so `claude-code`, `codex`, and `api-direct` (OpenAI-compatible — the locked-down path) drop in at v0.2.
+An adapter declares its contract in `adapters/<name>/adapter.toml` (machine-readable: prerequisites, tier→model table, usage reporting, identity convention) plus a `README.md`. v0.1 ships `human` (operator pastes package into any AI chat, commits artifacts) and `hermes` (dispatch with per-role model application). Interfaces are defined so `claude-code`, `codex`, and `api-direct` (OpenAI-compatible — the locked-down path) drop in at v0.2.
 
 - [ ] **Given** the adapters directory, **when** a new adapter is authored, **then** it can be added without changing control-plane code (interface constraint test).
 
@@ -115,14 +115,14 @@ Usage is **executor-reported**: adapters that can harvest tokens do so; executor
 
 ### FR-11 — Onboarding and target-repo readiness
 
-`onboarding/onboard.sh` installs the kit into a target repo (idempotent, never overwrites). v0.1 ships the **Target-Repo Readiness Checklist** and an **onboard verify** mode: per-check PASS/FAIL, fail-closed, non-zero exit, CI-gateable. Checks are **adapter-aware** (checks like "coding agent assignable" belong to one optional adapter, not to the core). v0.1.x hardens this with a fresh-repo test-out.
+Onboarding is deterministic scripts (python3, stdlib) plus a guided session: `onboard <repo>` preflight → inspect → propose → apply (idempotent, never overwrites) → verify. v0.1 ships the **Target-Repo Readiness Checklist** (target + workspace-level checks) and an **onboard verify** mode: per-check PASS/FAIL, fail-closed, non-zero exit, CI-gateable. Checks are **adapter-aware** (checks like "coding agent assignable" belong to one optional adapter, not to the core). v0.1.x hardens this with a fresh-repo test-out.
 
 - [ ] **Given** a target repo missing a prerequisite (e.g. no board or no labels), **when** verify mode runs, **then** it reports the specific missing prerequisite as FAIL and exits non-zero.
 - [ ] **Given** a compliant fresh repo, **when** onboard + verify run, **then** all checks PASS and the repo can immediately start the runbook.
 
 ### FR-12 — Human gates only
 
-The only human touchpoints in a run: Storybook approvals (for UI stories), the merge gate, and escalations (2 failed loops). "Completed PR" = MERGE_ELIGIBLE with evidence → human merges → live-proven → closeout with provenance rendered. Any other question to a human during a run is a process defect and is logged as such.
+The only human touchpoints in a run: Storybook approvals (for UI stories), the merge gate, and escalations (2 failed loops). "Completed PR" = MERGE_ELIGIBLE with evidence → human merges → live-proven → closeout with provenance rendered. Any other question to a human during a run is a process defect, logged as a `finding` event with the defect flag.
 
 - [ ] **Given** a story reaching MERGE_ELIGIBLE, **when** the operator requests merge eligibility, **then** the controller verifies tested SHA == head SHA, findings dispositioned, threads resolved, and a recorded human merge decision.
 
@@ -130,7 +130,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 - **NFR-1 No services** — control plane runs with `python3` (stdlib), `git`, `gh`. No databases, no daemons, no second remote.
 - **NFR-2 Determinism** — same inputs → same outputs for every control-plane command and generator; renders are regenerable.
-- **NFR-3 Portability** — Linux and macOS; no root required; works inside devcontainers and locked-down networks where only the repo travels.
+- **NFR-3 Portability** — Linux and macOS; no root required; works inside devcontainers and locked-down networks where only the repo travels (the process definition travels in git; execution still needs GitHub — `api-direct` (v0.2) addresses restricted **model-provider access** for locked-down environments; it does not remove the GitHub dependency).
 - **NFR-4 Fail-closed** — every check refuses on ambiguity and names the problem.
 - **NFR-5 Honest records** — null + reason; corrections are events; no invented zeros; override and adjudication always visible.
 - **NFR-6 Token economy** — dispatch packages inline their inputs (bundle pattern); every dispatch lifecycle closes with a usage row.
@@ -138,7 +138,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 ## Out of Scope (v0.1)
 
 - Adapters beyond `human` and `hermes` (deferred to v0.2).
-- True concurrent story scheduling (prevented by the lock; revisit per reference-spec §7 policy).
+- Concurrent execution of multiple stories is allowed but uncoordinated in v0.1; per-story serialization is enforced by the claim lock (revisit per reference policy).
 - Autonomous merge (human gate stays; opt-in policy only, if ever).
 - Hash-chained tamper-evidence (v0.2 trigger-based).
 - Central warehouse / cross-project rollups (derived-only, later).
@@ -151,7 +151,7 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 - [ ] **Handover drill** (two machines, fresh clone): (a) transition refused without claim, (b) cooperative handover passes, (c) abrupt takeover flagged and passes, (d) override path exercised and annotated — all four recorded.
 - [ ] Control-plane test suite ported and green (python3 + git + gh only).
 - [ ] Runbook completes with no unanswered steps — validated by a cold read from a fresh clone.
-- [ ] Zero imports of any agent-runtime SDK in `tools/`; dispatch parity between `human` and `hermes` adapters on the dress-rehearsal story.
+- [ ] Zero imports of any agent-runtime SDK in `tools/`; dispatch parity between `human` and `hermes` adapters on the dress-rehearsal story (the live `hermes` leg runs locally through the standard dispatch mechanism — recorded as exactly that, never as the sealed mechanism; the sealed re-run follows when launch is authorized).
 - [ ] Onboard verify runs green against the benchmark-app and reports precise failures on a deliberately non-compliant repo.
 
 ## Assumptions
@@ -163,12 +163,10 @@ The only human touchpoints in a run: Storybook approvals (for UI stories), the m
 
 ## Dependencies
 
-- `git`, `gh` CLI (auth scopes per onboarding), `python3` (stdlib only).
+- `git`, `gh` CLI (auth scopes per onboarding), `python3` ≥ 3.11 (stdlib only; `tomllib` for config parsing — see `architecture.md` §Configuration).
 - GitHub: repo, labels, issue forms, Projects v2 board.
 - For the `hermes` adapter: a Hermes runtime with `delegate_task`; for the `human` adapter: any AI chat and a git identity.
 
 ## Open Items (for grill)
 
-- Exact dispatch-package section schema (draft in architecture doc).
-- Where the runbook's state names converge with the reference 16-state machine (port as-is vs. trim).
-- Verify-mode check registry format for adapter-aware checks.
+All 2026-09-28 grill findings are dispositioned in `grill-disposition.md`; the owner calls (C1 — config format — ratified 2026-10-23) and the first build slice are in `build-plan.md`.

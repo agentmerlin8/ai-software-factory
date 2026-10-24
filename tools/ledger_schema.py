@@ -538,6 +538,16 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
             errs.append(f"dispatch {eid} completion row precedes its "
                         "pre-spawn row — only pre-spawn (ended_at null) may "
                         "be followed by a completion")
+        elif len(rows) == 2:
+            # Legal pre-spawn + completion pair: the completion must not
+            # rewrite a concrete routing decision made pre-spawn — otherwise
+            # a model substitution would validate as verified execution.
+            pre_req = rows[0].get("requested_model")
+            comp_req = rows[1].get("requested_model")
+            if pre_req is not None and comp_req != pre_req:
+                errs.append(f"dispatch {eid}: completion must preserve the "
+                            f"pre-spawn requested_model (was {pre_req!r}, "
+                            f"got {comp_req!r})")
 
     context_by_id = {e.get("event_id"): e for e in valid_rows
                      if e.get("event") == "review_context"}

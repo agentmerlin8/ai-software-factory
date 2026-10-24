@@ -807,6 +807,57 @@ class TestLedgerInvariants(unittest.TestCase):
     def test_single_live_in_flight_dispatch_ok(self):
         self.assertEqual(S.validate_events([valid_dispatch(ended=False)]), [])
 
+    def test_completion_may_not_rewrite_prespawn_requested_model(self):
+        # Copilot round 9 (HIGH): pre-spawn requested_model="model-x",
+        # completion requested_model="model-y" with reported_model="model-y"
+        # and model_unverified=false used to validate as [] — the row-local
+        # mismatch check compared against the REWRITTEN request, so a model
+        # substitution read as verified execution.
+        pre = valid_dispatch(ended=False)
+        comp = valid_dispatch(ended=True)
+        comp["requested_model"] = "model-y"
+        comp["reported_model"] = "model-y"
+        comp["model_unverified"] = False
+        errs = S.validate_events([pre, comp])
+        self.assertEqual(errs, [
+            "dispatch " + pre["event_id"] + ": completion must preserve the "
+            "pre-spawn requested_model (was 'model-x', got 'model-y')"])
+
+    def test_completion_preserving_requested_model_ok(self):
+        pre = valid_dispatch(ended=False)
+        comp = valid_dispatch(ended=True)  # same requested_model="model-x"
+        self.assertEqual(S.validate_events([pre, comp]), [])
+
+    def test_null_prespawn_requested_model_imposes_no_constraint(self):
+        pre = valid_dispatch(ended=False)
+        pre["requested_model"] = None
+        comp = valid_dispatch(ended=True)
+        comp["requested_model"] = "model-y"
+        comp["reported_model"] = "model-y"
+        comp["model_unverified"] = False
+        errs = S.validate_events([pre, comp])
+        self.assertFalse(any("preserve the pre-spawn requested_model" in e
+                             for e in errs), errs)
+
+    def test_single_backfilled_dispatch_requested_model_unchanged(self):
+        # a single backfilled ended row has no pre-spawn row to preserve
+        # from — any concrete requested_model is fine.
+        evt = valid_dispatch()
+        evt["provenance"] = "backfilled"
+        evt["requested_model"] = "model-y"
+        evt["reported_model"] = "model-y"
+        self.assertEqual(S.validate_events([evt]), [])
+
+    def test_pair_reported_differs_with_unverified_flag_ok(self):
+        # requested preserved, reported differs but flagged unverified:
+        # row-local mismatch check already permits this — no preservation
+        # error and no double-error noise.
+        pre = valid_dispatch(ended=False)
+        comp = valid_dispatch(ended=True)
+        comp["reported_model"] = "model-y"
+        comp["model_unverified"] = True
+        self.assertEqual(S.validate_events([pre, comp]), [])
+
     def test_mixed_event_types_sharing_id_rejected(self):
         # Both rows are individually VALID but share one event_id across
         # event types. (F5 validate-then-exclude: a rejected row no longer

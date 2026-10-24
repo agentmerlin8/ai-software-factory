@@ -397,6 +397,12 @@ def validate_event(evt: dict[str, Any]) -> list[str]:
         elif evt.get("decision") is not None or evt.get("answered_by") is not None:
             errs.append("human_gate: a pending gate must not carry "
                         "decision/answered_by")
+    if etype in ("transition", "correction"):
+        repo = evt.get("repo")
+        if repo is not None and not (isinstance(repo, str)
+                                     and REPO_ID_RE.fullmatch(repo)):
+            errs.append(f"{etype}: repo must be a binding-id slug "
+                        "(^[a-z][a-z0-9-]*$) or null")
     if etype == "transition":
         checks_run = evt.get("checks_run")
         if not isinstance(checks_run, list) or \
@@ -506,20 +512,22 @@ def validate_events(events: list[dict[str, Any]]) -> list[str]:
             errs.append(f"dispatch {eid} has {len(rows)} rows — lifecycle is "
                         "at most pre-spawn + completion")
             continue
-        ended = [r for r in rows if r.get("ended_at")]
+        # Explicit null checks: a falsey non-null ended_at (e.g. "") still
+        # counts as a completion — pre-spawn means ended_at IS None.
+        ended = [r for r in rows if r.get("ended_at") is not None]
         if len(ended) > 1:
             errs.append(f"dispatch {eid} re-started after end "
                         "(stale-notification class)")
-        elif len(rows) == 1 and rows[0].get("ended_at") and \
+        elif len(rows) == 1 and rows[0].get("ended_at") is not None and \
                 rows[0].get("provenance") != "backfilled":
             errs.append(f"dispatch {eid} single completed row must be "
                         "provenance=backfilled (a live dispatch requires "
                         "its pre-spawn row)")
-        elif len(rows) == 2 and not rows[1].get("ended_at"):
+        elif len(rows) == 2 and rows[1].get("ended_at") is None:
             errs.append(f"dispatch {eid} second row lacks ended_at — a "
                         "pre-spawn row may only be followed by its "
                         "completion")
-        elif len(rows) == 2 and rows[0].get("ended_at"):
+        elif len(rows) == 2 and rows[0].get("ended_at") is not None:
             errs.append(f"dispatch {eid} completion row precedes its "
                         "pre-spawn row — only pre-spawn (ended_at null) may "
                         "be followed by a completion")

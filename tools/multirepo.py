@@ -166,10 +166,12 @@ def sub_events(events: list[dict], story_id: str,
     for e in events:
         if not isinstance(e, dict):
             continue
-        if e.get("event") != "transition" or e.get("story_id") != story_id \
-                or not e.get("repo"):
+        if e.get("event") != "transition" or e.get("story_id") != story_id:
             continue
-        if repo is None or e["repo"] == repo:
+        repo_val = e.get("repo")
+        if not isinstance(repo_val, str) or not repo_val:
+            continue  # non-string/empty repo rows are skipped, never folded
+        if repo is None or repo_val == repo:
             result.append(e)
     return result
 
@@ -189,12 +191,13 @@ def fold_repo_status(events: list[dict], story_id: str) -> dict[str, dict]:
     """
     folded: dict[str, dict] = {}
     for e in events:
-        if not isinstance(e, dict) or e.get("story_id") != story_id \
-                or not e.get("repo"):
+        if not isinstance(e, dict) or e.get("story_id") != story_id:
             continue
+        repo = e.get("repo")
+        if not isinstance(repo, str) or not repo:
+            continue  # non-string/empty repo rows are skipped, never folded
         etype = e.get("event")
         if etype == "transition":
-            repo = e["repo"]
             entry = folded.setdefault(
                 repo, {"reached": None, "sub_events": 0, "corrected": False})
             entry["sub_events"] += 1

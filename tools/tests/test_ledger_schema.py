@@ -1139,5 +1139,35 @@ class TestValidateThenExclude(unittest.TestCase):
         self.assertFalse(any("re-started after end" in e for e in errs), errs)
 
 
+class TestDispatchLifecycleExplicitNulls(unittest.TestCase):
+    """Lifecycle pre-spawn/completion tests use EXPLICIT null checks: a
+    falsey non-null ended_at (e.g. "") is a completion, never a pre-spawn
+    masquerade."""
+
+    def test_empty_string_ended_row_then_completion_is_restart(self):
+        first = valid_dispatch(ended=False)
+        first["ended_at"] = ""            # falsey but NON-null → completion
+        first["ended_at_reason"] = None
+        second = valid_dispatch(ended=True)
+        errs = S.validate_events([first, second])
+        self.assertTrue(any("re-started after end" in e for e in errs), errs)
+
+    def test_single_empty_string_ended_live_row_needs_backfill(self):
+        evt = valid_dispatch(ended=True)
+        evt["ended_at"] = ""              # falsey but NON-null → completed
+        evt["ended_at_reason"] = None
+        errs = S.validate_events([evt])   # provenance=live
+        self.assertTrue(any("single completed row must be "
+                            "provenance=backfilled" in e for e in errs), errs)
+
+    def test_valid_prespawn_none_plus_completion_still_passes(self):
+        errs = S.validate_events([valid_dispatch(ended=False),
+                                  valid_dispatch(ended=True)])
+        self.assertEqual(errs, [])
+
+    def test_single_in_flight_none_still_legal(self):
+        self.assertEqual(S.validate_events([valid_dispatch(ended=False)]), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -589,5 +589,73 @@ class TestSetCompletenessEmptyRepos(unittest.TestCase):
         self.assertIn("CODING", str(ctx.exception))
 
 
+class TestRepoSlugValidation(unittest.TestCase):
+    """Non-null `repo` on transition/correction must be a binding-id slug
+    (^[a-z][a-z0-9-]*$); fold/sub_events must SKIP non-string repo rows
+    instead of raising."""
+
+    def test_transition_repo_list_named_error(self):
+        evt = story_transition("t1", "GRILLED", repo="app")
+        evt["repo"] = ["app"]
+        errs = S.validate_event(evt)
+        self.assertTrue(any("transition: repo must be a binding-id slug "
+                            "(^[a-z][a-z0-9-]*$) or null" in e
+                            for e in errs), errs)
+
+    def test_transition_repo_empty_string_named_error(self):
+        evt = story_transition("t1", "GRILLED", repo="app")
+        evt["repo"] = ""
+        evt["repo_reason"] = None
+        errs = S.validate_event(evt)
+        self.assertTrue(any("transition: repo must be a binding-id slug" in e
+                            for e in errs), errs)
+
+    def test_correction_repo_list_named_error(self):
+        evt = correction("c1", "app", "MERGED")
+        evt["repo"] = ["app"]
+        errs = S.validate_event(evt)
+        self.assertTrue(any("correction: repo must be a binding-id slug "
+                            "(^[a-z][a-z0-9-]*$) or null" in e
+                            for e in errs), errs)
+
+    def test_correction_repo_empty_string_named_error(self):
+        evt = correction("c1", "app", "MERGED")
+        evt["repo"] = ""
+        evt["repo_reason"] = None
+        errs = S.validate_event(evt)
+        self.assertTrue(any("correction: repo must be a binding-id slug" in e
+                            for e in errs), errs)
+
+    def test_valid_slug_still_ok(self):
+        self.assertEqual(
+            S.validate_event(story_transition("t1", "GRILLED",
+                                              repo="app-2")), [])
+        self.assertEqual(S.validate_event(correction("c1", "app", "MERGED")),
+                         [])
+
+    def test_null_repo_with_reason_still_ok(self):
+        self.assertEqual(S.validate_event(story_transition("t1", "GRILLED")),
+                         [])
+        self.assertEqual(S.validate_event(correction("c1", None, "X")), [])
+
+    def test_sub_events_skips_non_string_repo(self):
+        bad = story_transition("t1", "MERGED", repo="app")
+        bad["repo"] = ["app"]
+        good = story_transition("t2", "BUILD_GREEN", repo="app")
+        got = M.sub_events([bad, good], STORY)
+        self.assertEqual(got, [good])
+
+    def test_fold_skips_non_string_repo_row(self):
+        bad = story_transition("t1", "BUILD_GREEN", repo="app")
+        bad["repo"] = ["app"]
+        bad_corr = correction("c1", "app", "MERGED")
+        bad_corr["repo"] = ""
+        good = story_transition("t2", "BUILD_GREEN", repo="app")
+        folded = M.fold_repo_status([bad, bad_corr, good], STORY)  # no raise
+        self.assertEqual(folded, {"app": {"reached": "BUILD_GREEN",
+                                          "sub_events": 1,
+                                          "corrected": False}})
+
+
 if __name__ == "__main__":
     unittest.main()

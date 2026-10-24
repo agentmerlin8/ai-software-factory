@@ -580,6 +580,8 @@ def validate_path(path: str | Path, *, strict: bool = False,
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return (["malformed TOML: file is not valid UTF-8"], False)
     except OSError as exc:
         return ([f"unreadable file: {exc}"], False)
     try:

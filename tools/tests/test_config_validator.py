@@ -449,5 +449,39 @@ class TestCLI(unittest.TestCase):
         self.assertTrue(any(line.startswith("FAIL ") for line in output))
 
 
+def write_tmp_bytes(data: bytes, name: str = "env.toml") -> Path:
+    path = Path(tempfile.mkdtemp(prefix="cv-")) / name
+    path.write_bytes(data)
+    return path
+
+
+class TestInvalidUtf8(unittest.TestCase):
+    """An invalid-UTF-8 config file is a NAMED malformed-TOML refusal —
+    never a UnicodeDecodeError traceback out of the CLI."""
+
+    def test_invalid_utf8_named_refusal(self):
+        bad = write_tmp_bytes(b'x = "\xff"')
+        code, output = run_main([bad])  # must not raise
+        self.assertEqual(code, 1)
+        self.assertIn("  - malformed TOML: file is not valid UTF-8",
+                      error_lines(output))
+        self.assertNotIn("Traceback", "\n".join(output))
+
+    def test_invalid_utf8_does_not_block_other_files(self):
+        bad = write_tmp_bytes(b'x = "\xff\xfe\x00"')
+        code, output = run_main([bad, fixture("good_env_minimal")])
+        self.assertEqual(code, 1)
+        self.assertTrue(any(line.startswith("OK ") for line in output), output)
+        self.assertTrue(any(line.startswith("FAIL ") for line in output),
+                        output)
+        self.assertIn("  - malformed TOML: file is not valid UTF-8",
+                      error_lines(output))
+
+    def test_valid_utf8_file_unaffected(self):
+        code, output = run_main([fixture("good_env_minimal")])
+        self.assertEqual(code, 0)
+        self.assertTrue(any(line.startswith("OK ") for line in output), output)
+
+
 if __name__ == "__main__":
     unittest.main()

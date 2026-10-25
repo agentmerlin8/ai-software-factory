@@ -193,11 +193,29 @@ def _env_path(ws: Path, arg: str) -> Path:
 
 def _validate_env(path: Path, strict: bool) -> tuple[dict, list[str]]:
     """Validate one environment file via config_validator (exact
-    messages); returns (doc or {} on findings, findings)."""
-    errs, parsed = CV.validate_path(path, strict=strict)
-    if not parsed or errs:
+    messages); returns (doc or {} on findings, findings).
+
+    R13-N3: the schema is selected EXPLICITLY — `environment` — never by
+    basename. `CV.validate_path` picks the schema from the FILENAME, so
+    an environment file named `workspace.toml` would be validated
+    against the workspace schema (a valid environment rejected, an
+    empty workspace doc accepted). Parse/IO error messages mirror
+    validate_path's exactly; the workspace commands keep their own
+    explicit selection."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return {}, ["malformed TOML: file is not valid UTF-8"]
+    except OSError as exc:
+        return {}, [f"unreadable file: {exc}"]
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        return {}, [f"malformed TOML: {exc}"]
+    errs = CV.validate_document(doc, "environment", strict=strict)
+    if errs:
         return {}, errs
-    return _read_doc(path), []
+    return doc, []
 
 
 def _kv(table: dict | None, keys: tuple[str, ...]) -> str:

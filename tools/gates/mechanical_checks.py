@@ -74,6 +74,91 @@ def _segments(tokens: list[str]) -> list[list[str]]:
     return segs
 
 
+def _operator_spans(raw: str) -> list[tuple[int, int, str]]:
+    """Quote-aware scan of the RAW command for UNQUOTED shell operators
+    (`&&`, `||`, `;`, `|`, lone `&`) REGARDLESS of surrounding whitespace
+    — shlex keeps a glued `ok&&false` as ONE token, so the chain scan
+    must run on the raw text. Mirrors shlex quoting: single quotes
+    preserve everything, a backslash outside single quotes escapes the
+    next character (also inside double quotes, so `\\"` never closes
+    early). Operators inside quotes produce no span and stay legal.
+    Returns (start, end, operator) spans in text order."""
+    spans: list[tuple[int, int, str]] = []
+    i, n, quote = 0, len(raw), None
+    while i < n:
+        c = raw[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+            i += 1
+            continue
+        if c == "\\":
+            i += 2  # escaped next character (outside single quotes)
+            continue
+        if quote == '"':
+            if c == '"':
+                quote = None
+            i += 1
+            continue
+        if c in "'\"":
+            quote = c
+            i += 1
+            continue
+        if raw.startswith("&&", i):
+            spans.append((i, i + 2, "&&"))
+            i += 2
+            continue
+        if raw.startswith("||", i):
+            spans.append((i, i + 2, "||"))
+            i += 2
+            continue
+        if raw.startswith("$(", i):
+            spans.append((i, i + 2, "$("))
+            i += 2
+            continue
+        if c in ";|&><`":
+            spans.append((i, i + 1, c))
+            i += 1
+            continue
+        i += 1
+    return spans
+
+
+def _separate_operators(raw: str,
+                        spans: list[tuple[int, int, str]]) -> str:
+    """Pad every UNQUOTED `&&` span with whitespace so a glued chain
+    (`ok&&false`) tokenizes EXACTLY like its spaced form — the shlex
+    token stream then carries `&&` as its own segment separator and the
+    glued form receives the same chain treatment. Quoted content is
+    byte-identical afterwards."""
+    parts: list[str] = []
+    prev = 0
+    for start, end, op in spans:
+        if op != "&&":
+            continue
+        parts.append(raw[prev:start])
+        parts.append(f" {op} ")
+        prev = end
+    parts.append(raw[prev:])
+    return "".join(parts)
+
+
+def _split_tokens(raw: str) -> list[str]:
+    """shlex tokens with quote-aware glued-operator separation."""
+    return shlex.split(_separate_operators(raw, _operator_spans(raw)))
+
+
+def _runner_target_paths(runner: str, target: str) -> list[str]:
+    """Declared runner-specific target parsing: a `pytest` target may be
+    a NODE ID (`file.py::class::test`) — existence-check the FILE
+    portion only (the node suffix is not a filesystem path). The
+    ORIGINAL target is preserved for execution; this only selects what
+    gets existence-checked. Other runners check the target verbatim."""
+    if runner == "pytest" and "::" in target:
+        return [target.split("::", 1)[0]]
+    return [target]
+
+
 def _cd_under_root(cwd: Path, arg: str, root: Path) -> Path | None:
     """Resolve one `cd` argument against cwd, mirroring
     parse_test_command's cd rules EXACTLY (relative-only, must stay under
@@ -85,6 +170,10 @@ def _cd_under_root(cwd: Path, arg: str, root: Path) -> Path | None:
     candidate = (cwd / arg).resolve()
     base = root.resolve()
     if base not in (candidate, *candidate.parents):
+        return None
+    if not candidate.is_dir():
+        # R13-N2: the effective dir advances ONLY on a validated cd —
+        # a target that does not exist cannot succeed at run time.
         return None
     return candidate
 
@@ -114,7 +203,7 @@ def check_bare_runners(contract: dict, root: Path, runners: list[str],
             continue
         cmd = raw.strip()
         try:
-            tokens = shlex.split(cmd)
+            tokens = _split_tokens(cmd)
         except ValueError as e:
             fail(f"unparsable verify command {cmd!r}: {e}")
             continue
@@ -146,10 +235,16 @@ def check_bare_runners(contract: dict, root: Path, runners: list[str],
                      f"{cmd!r}")
                 continue
             for target in positional:
-                if ("/" in target or "." in target) and \
-                        not (cwd / target).exists():
-                    fail(f"verify command names nonexistent target path "
-                         f"{target!r}: {cmd!r}")
+                # R13-N4: runner-specific target parsing — a pytest node
+                # id (`file.py::class::test`) existence-checks its FILE
+                # portion only; the ORIGINAL target is preserved for
+                # execution (this selects what gets checked, never what
+                # gets run). Under-root rules unchanged.
+                for check_path in _runner_target_paths(seg[0], target):
+                    if ("/" in check_path or "." in check_path) and \
+                            not (cwd / check_path).exists():
+                        fail(f"verify command names nonexistent target path "
+                             f"{target!r}: {cmd!r}")
 
 
 # ----------------------------------------------------- pinned commands ----
@@ -180,13 +275,14 @@ def parse_test_command(raw: str, root: Path,
     rewriting it. Safe-syntax refusal: pipes, redirects, command
     substitution and backgrounding reject (a single `&&` chain of
     export/cd/env-prefix + ONE external command is the accepted shape).
+    R13-N1: the operator scan runs over the RAW text, quote-aware and
+    WHITESPACE-INDEPENDENT — a glued `ok&&false` is a chain (rejected by
+    the segment rules below), while operators inside quotes stay legal.
     Returns None when the command holds no external segment."""
-    if any(token in raw for token in ("|", ";", ">", "<", "`", "$(", "&")):
-        if "&&" not in raw or any(token in raw.replace("&&", "")
-                                  for token in ("|", ";", ">", "<", "`",
-                                                 "$(", "&")):
-            raise ValueError(f"unsafe verify command syntax: {raw!r}")
-    tokens = shlex.split(raw)
+    spans = _operator_spans(raw)
+    if any(op != "&&" for _s, _e, op in spans):
+        raise ValueError(f"unsafe verify command syntax: {raw!r}")
+    tokens = _split_tokens(raw)
     segments = _segments(tokens)
     env = dict(base_env or os.environ)
     cwd = root
@@ -219,6 +315,14 @@ def parse_test_command(raw: str, root: Path,
             if root.resolve() not in (candidate, *candidate.parents):
                 raise ValueError(
                     f"verify command cd escapes repository: {raw!r}")
+            # R13-N2: EVERY cd target is validated before the effective
+            # dir advances — a target that does not exist as a directory
+            # cannot succeed, so the chain is rejected as a whole (a
+            # non-advancing `cd missing` must not silently pass).
+            if not candidate.is_dir():
+                raise ValueError(
+                    f"verify command cd names nonexistent directory: "
+                    f"{raw!r}")
             cwd = candidate
             continue
         while segment and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*",
@@ -276,7 +380,25 @@ def check_verify_commands(contract: dict, root: Path,
         parsed.append((raw, *value))
     if not parsed:
         return
-    injected = {r.get("command"): r for r in (injected_results or [])}
+    # R13-N5: validate EACH injected result row BEFORE building the
+    # lookup — `command` must be present AND a string, or the row is a
+    # named rejection (the one-to-one evidence match must never silently
+    # skip a malformed row).
+    for index, row in enumerate(injected_results or []):
+        if not isinstance(row, dict):
+            fail(f"invalid injected command result at index {index}: "
+                 "row must be a mapping")
+            continue
+        if "command" not in row:
+            fail(f"invalid injected command result at index {index}: "
+                 "missing string `command` key")
+            continue
+        if not isinstance(row["command"], str):
+            fail(f"invalid injected command result at index {index}: "
+                 f"command must be a string (got "
+                 f"{type(row['command']).__name__})")
+    injected = {r["command"]: r for r in (injected_results or [])
+                if isinstance(r, dict) and isinstance(r.get("command"), str)}
     if injected_results is not None:
         if len(injected) != len(injected_results):
             fail("duplicate injected command result")

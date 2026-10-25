@@ -306,6 +306,58 @@ class EnvShowTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("unknown key: unknown_key", out.splitlines())
 
+    def test_env_named_workspace_toml_uses_environment_schema(self) -> None:
+        """R13-N3: the env commands select the schema EXPLICITLY — a
+        VALID environment file named `workspace.toml` is accepted by the
+        environment schema (basename selection would have validated it
+        as a workspace doc and rejected it)."""
+        with tempfile.TemporaryDirectory(prefix="t7-env-") as tmp:
+            ws = Path(tmp)
+            shutil.copyfile(GOOD / "environments" / "local.toml",
+                            ws / "workspace.toml")
+            rc, out = ws_run(ws, "env", "show", "workspace.toml")
+            self.assertEqual(rc, 0, out)
+            self.assertIn("runtime: hermes", out.splitlines())
+            rc, _ = ws_run(ws, "env", "resolve", "workspace.toml")
+            self.assertIn(rc, (0, 1))  # 1 only for missing credential refs
+            rc, out = ws_run(ws, "env", "resolve", "workspace.toml",
+                             "--json")
+            data = json.loads(out) if out.strip().startswith("{") else {}
+            self.assertEqual(data.get("models", {}).get("T1"), "model-a")
+
+    def test_env_command_rejects_workspace_doc(self) -> None:
+        """R13-N3: a WORKSPACE doc handed to an env command gets the
+        ENVIRONMENT-schema rejection (never basename-selected), so an
+        empty doc named `workspace.toml` cannot pass as an environment."""
+        with tempfile.TemporaryDirectory(prefix="t7-env-") as tmp:
+            ws = Path(tmp)
+            shutil.copyfile(GOOD / "workspace.toml", ws / "workspace.toml")
+            rc, out = ws_run(ws, "env", "show", "workspace.toml")
+            self.assertEqual(rc, 1)
+            lines = out.splitlines()
+            self.assertIn("missing required key: runtime", lines)
+            self.assertIn("missing required table: dispatch", lines)
+            self.assertIn("missing required table: models", lines)
+            # an empty doc under the environment schema also rejects
+            (ws / "empty.toml").write_text("", encoding="utf-8")
+            rc, out = ws_run(ws, "env", "show", "empty.toml")
+            self.assertEqual(rc, 1)
+            self.assertIn("missing required key: runtime", out.splitlines())
+            rc, out = ws_run(ws, "env", "resolve", "workspace.toml")
+            self.assertEqual(rc, 1)
+            self.assertIn("missing required key: runtime", out.splitlines())
+
+    def test_env_named_environment_doc_unchanged(self) -> None:
+        """R13-N3 pin: a normally-named environment doc behaves exactly
+        as before under both env commands."""
+        rc, out = ws_run(GOOD, "env", "show", "local")
+        self.assertEqual(rc, 0)
+        self.assertIn("runtime: hermes", out.splitlines())
+        with mock.patch.dict(os.environ, {"CLI_WS_TEST_KEY": "***"},
+                             clear=False):
+            rc, _ = ws_run(GOOD, "env", "resolve", "local")
+        self.assertEqual(rc, 0)
+
 
 class EnvResolveTests(unittest.TestCase):
     def test_resolve_all_present(self) -> None:

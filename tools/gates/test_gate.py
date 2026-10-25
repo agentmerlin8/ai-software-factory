@@ -417,12 +417,207 @@ class BuildLaneUnits(unittest.TestCase):
             self.assertIn(raw, str(cm.exception))
 
     def test_parse_test_command_setup_before_external_accepted(self):
+        # R13-N2 adjusted: `cd nested` → `cd docs` — the cd target must
+        # now EXIST (every cd is validated before advancing); `nested`
+        # never existed in the repo and the old parser accepted it.
         parsed = M.parse_test_command(
-            "cd nested && python3 -m unittest", REPO)
+            "cd docs && python3 -m unittest", REPO)
         assert parsed is not None
         cwd, _env, argv = parsed
-        self.assertEqual(cwd, (REPO / "nested").resolve())
+        self.assertEqual(cwd, (REPO / "docs").resolve())
         self.assertEqual(argv, ["python3", "-m", "unittest"])
+
+    def test_glued_operators_rejected_quoted_stay_legal(self):
+        """R13-N1: shlex keeps `ok&&false` as ONE token — the chain scan
+        runs on the RAW text, quote-aware and whitespace-independent, so
+        a glued operator is a chain (rejected); operators INSIDE quotes
+        stay legal."""
+        for raw in ("python3 -c pass a||b",
+                    "python3 -c pass a;b",
+                    "python3 -c pass a|b"):
+            with self.assertRaises(ValueError) as cm:
+                M.parse_test_command(raw, REPO)
+            self.assertIn("unsafe verify command syntax: ",
+                          str(cm.exception))
+        # a glued `&&` is a CHAIN — separated into segments, it hits the
+        # existing segments-after-external rejection (never executed as
+        # one token that live-runs as a single argv)
+        with self.assertRaises(ValueError) as cm:
+            M.parse_test_command("python3 -c pass ok&&false", REPO)
+        self.assertIn(
+            "verify command has segments after the external command",
+            str(cm.exception))
+        # glued && with TWO external segments → the chain rule still
+        # applies after whitespace separation (segments after external)
+        with self.assertRaises(ValueError) as cm:
+            M.parse_test_command("true&&false", REPO)
+        self.assertIn(
+            "verify command has segments after the external command",
+            str(cm.exception))
+        # a quoted operator is an argument, not a chain
+        parsed = M.parse_test_command(
+            'python3 -c pass "a&&b"', REPO)
+        assert parsed is not None
+        self.assertEqual(parsed[2], ["python3", "-c", "pass", "a&&b"])
+        parsed = M.parse_test_command(
+            "python3 -c pass 'a;b|c&d>out'", REPO)
+        assert parsed is not None
+        self.assertEqual(parsed[2], ["python3", "-c", "pass",
+                                     "a;b|c&d>out"])
+        # spaced-operator behavior unchanged: a legal setup && external
+        parsed = M.parse_test_command(
+            "cd docs && python3 -m unittest", REPO)
+        assert parsed is not None
+        self.assertEqual(parsed[2], ["python3", "-m", "unittest"])
+        with self.assertRaises(ValueError):
+            M.parse_test_command("python3 -m unittest | tee out", REPO)
+
+    def test_glued_operator_chain_rejected_by_verify_check(self):
+        """R13-N1 end-to-end: the glued form reaches the named-failure
+        path of check_verify_commands (never executed, never dropped)."""
+        findings: list[str] = []
+        M.check_verify_commands(
+            {"verify_commands": ["python3 -c pass ok&&false"]}, REPO,
+            findings.append)
+        self.assertTrue(any(
+            "verify command has segments after the external command" in f
+            for f in findings), findings)
+
+    def test_cd_chain_validates_every_target(self):
+        """R13-N2: each cd target must EXIST and stay under the root
+        before the effective dir advances — a non-advancing
+        `cd missing` rejects the whole chain instead of silently
+        passing."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            (root / "tools").mkdir(parents=True)
+            # existing target → accepted, effective dir advanced
+            parsed = M.parse_test_command(
+                "cd tools && cd .. && true", root)
+            assert parsed is not None
+            self.assertEqual(parsed[0], root.resolve())
+            # nonexistent target anywhere in the chain → rejected
+            for raw in ("cd missing && cd .. && true",
+                        "cd tools && cd missing && true"):
+                with self.assertRaises(ValueError) as cm:
+                    M.parse_test_command(raw, root)
+                self.assertIn("cd names nonexistent directory",
+                              str(cm.exception))
+            # escaping cd still rejects (existing rule preserved)
+            with self.assertRaises(ValueError) as cm:
+                M.parse_test_command("cd tools && cd ../..", root)
+            self.assertIn("cd escapes repository", str(cm.exception))
+        # the refusal flows through check_verify_commands as a named
+        # finding (never executed live)
+        findings: list[str] = []
+        M.check_verify_commands(
+            {"verify_commands": ["cd missing && cd .. && true"]}, REPO,
+            findings.append)
+        self.assertTrue(any("cd names nonexistent directory" in f
+                            for f in findings), findings)
+
+    def test_cd_chain_live_mode_rejects_nonexistent_target(self):
+        """R13-N2 pin: the reported repro — live verification from the
+        repository root must REJECT `cd missing && cd .. && true`."""
+        findings: list[str] = []
+        M.check_verify_commands(
+            {"verify_commands": ["cd missing && cd .. && true"]}, REPO,
+            findings.append, None, run_live=True)
+        self.assertTrue(any("cd names nonexistent directory" in f
+                            for f in findings), findings)
+
+    def test_pytest_node_id_target_parsed_by_runner(self):
+        """R13-N4: a declared pytest target may be a NODE ID — the file
+        portion is existence-checked; the original target is preserved
+        for execution. A missing file portion rejects; bare-file targets
+        unchanged."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_example.py").write_text(
+                "def test_ok():\n    pass\n", encoding="utf-8")
+            findings: list[str] = []
+            M.check_bare_runners(
+                {"verify_commands": [
+                    "pytest tests/test_example.py::test_ok"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertEqual(findings, [])
+            # nested node id (class::method) also checks the file only
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": [
+                    "pytest tests/test_example.py::TestX::test_ok"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertEqual(findings, [])
+            # missing file portion → named rejection
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": [
+                    "pytest tests/test_ghost.py::test_ok"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertTrue(
+                any("nonexistent target path "
+                    "'tests/test_ghost.py::test_ok'" in f
+                    for f in findings), findings)
+            # bare-file targets unchanged
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["pytest tests/test_ghost.py"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertTrue(
+                any("nonexistent target path 'tests/test_ghost.py'" in f
+                    for f in findings), findings)
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["pytest tests/test_example.py"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertEqual(findings, [])
+            # non-pytest runners keep verbatim checking: a `::` target
+            # for another runner is a path and does not exist
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": [
+                    "myrunner tests/test_example.py::test_ok"]},
+                root, ["myrunner"], findings.append, findings.append)
+            self.assertTrue(
+                any("nonexistent target path "
+                    "'tests/test_example.py::test_ok'" in f
+                    for f in findings), findings)
+        # live execution preserves the ORIGINAL target (never rewritten)
+        parsed = M.parse_test_command(
+            "pytest tests/test_example.py::test_ok", REPO)
+        assert parsed is not None
+        self.assertEqual(
+            parsed[2], ["pytest", "tests/test_example.py::test_ok"])
+
+    def test_injected_result_rows_require_string_command(self):
+        """R13-N5: each injected result row is validated BEFORE the
+        lookup — a missing or non-string `command` is a named rejection,
+        never silently skipped (one-to-one evidence match)."""
+        cmd = "python3 -m unittest tests.test_widget"
+        contract = {"verify_commands": [cmd]}
+        findings: list[str] = []
+        M.check_verify_commands(contract, REPO, findings.append,
+                                [{"exit_code": 0}])
+        self.assertTrue(any("missing string `command` key" in f
+                            for f in findings), findings)
+        self.assertTrue(any(f"missing command result for {cmd!r}" in f
+                            for f in findings), findings)
+        findings = []
+        M.check_verify_commands(contract, REPO, findings.append,
+                                [{"command": 42, "exit_code": 0}])
+        self.assertTrue(any("command must be a string (got int)" in f
+                            for f in findings), findings)
+        findings = []
+        M.check_verify_commands(contract, REPO, findings.append,
+                                ["not-a-mapping"])
+        self.assertTrue(any("row must be a mapping" in f
+                            for f in findings), findings)
+        # valid rows unchanged
+        findings = []
+        M.check_verify_commands(contract, REPO, findings.append, [{
+            "command": cmd, "exit_code": 0, "stdout": "OK", "stderr": ""}])
+        self.assertEqual(findings, [])
 
     def test_parse_test_command_refuses_variable_expansion_in_argv(self):
         """R5-F2: argv is executed literally — a `$VAR` token in the

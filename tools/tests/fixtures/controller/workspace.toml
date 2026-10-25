@@ -1,0 +1,13 @@
+workspace = "test-control-home"
+control_home = "dedicated"
+
+[factory]
+pin = "<kit-tag>"
+
+[[repos]]
+id = "app"
+role = "primary"
+url = "example.test/org/app"
+
+[identity]
+approvers = ["approver-one", "human-ops"]

@@ -130,30 +130,58 @@ def render(events: list[dict], root: Path, header: str,
     for sid, story in stories.items():
         story["findings"] = L.latest_findings(events, sid)
 
+    def _valid_counter(v) -> bool:
+        """A VALID loop counter value: non-negative int, not a bool
+        (the R8-I5 validity rule)."""
+        return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+    def _valid_total(totals, key: str) -> int:
+        """A supported outcome-total counter when VALID, else 0."""
+        v = totals.get(key)
+        return v if _valid_counter(v) else 0
+
+    def loop_breakdown(s: dict) -> tuple[int, int]:
+        """(plan, code) loop counts by stage. Loop rows win; when NO rows
+        exist, fall back to the valid `plan_loops`/`code_loops` aggregates
+        from the outcome totals (R9-J1 — the same fallback formal_loops
+        applies to the total; the breakdowns must not show 0/0 beside a
+        non-zero aggregate total)."""
+        rows = s.get("loops", [])
+        if rows:
+            return (sum(1 for l in rows if l.get("stage") == "plan_review"),
+                    sum(1 for l in rows if l.get("stage") == "code_review"))
+        totals = s.get("outcome", {}).get("totals")
+        if not isinstance(totals, dict):
+            return (0, 0)
+        return (_valid_total(totals, "plan_loops"),
+                _valid_total(totals, "code_loops"))
+
     def formal_loops(s: dict) -> int:
         """Loop rows win; when a story recorded an outcome `totals`
         aggregate WITHOUT loop rows (R8-I5), the aggregate is the count
         — an outcome with `plan_loops: 2` and no rows is NOT loop-free.
-        Aggregate = sum of non-negative int values under the supported
-        keys `plan_loops`/`code_loops` (bools are not counts)."""
+        Aggregate = sum of the valid supported counters `plan_loops` /
+        `code_loops` (bools/negatives are not counts)."""
         rows = s.get("loops", [])
         if rows:
             return len(rows)
-        totals = s.get("outcome", {}).get("totals")
-        if not isinstance(totals, dict):
-            return 0
-        return sum(v for k, v in totals.items()
-                   if k in ("plan_loops", "code_loops")
-                   and isinstance(v, int) and not isinstance(v, bool)
-                   and v >= 0)
+        return sum(loop_breakdown(s))
 
     def instrumented(s: dict) -> bool:
         """Was loop/finding data actually recorded for this story?
         Unavailable ≠ zero — a story without instrumentation is never
-        counted as correction-free."""
+        counted as correction-free. R9-J3: a `totals` dict counts as
+        instrumentation ONLY when it carries at least one VALID supported
+        counter (`plan_loops`/`code_loops`, non-negative int, not bool) —
+        `totals: {}` or only unrelated counters is a MISSING measurement
+        (excluded), while an explicit recorded zero still counts."""
+        if s.get("findings") or s.get("loops"):
+            return True
         totals = s.get("outcome", {}).get("totals")
-        return bool(isinstance(totals, dict)) or \
-            bool(s.get("findings")) or bool(s.get("loops"))
+        if not isinstance(totals, dict):
+            return False
+        return any(k in ("plan_loops", "code_loops") and _valid_counter(v)
+                   for k, v in totals.items())
 
     def external_rounds(s: dict) -> int:
         rounds = {f.get("evidence_path") for f in s.get("findings", [])
@@ -208,10 +236,11 @@ def render(events: list[dict], root: Path, header: str,
     out.append(f"| Merged stories WITHOUT loop/finding instrumentation "
                f"(excluded from both measures above, never counted as zero) "
                f"| {len(uninstr)} — {', '.join(uninstr) or 'none'} |")
+    plan_sum = sum(loop_breakdown(s)[0] for s in merged.values())
+    code_sum = sum(loop_breakdown(s)[1] for s in merged.values())
     out.append(f"| Formal loops recorded | "
                f"{sum(formal_loops(s) for s in merged.values())} "
-               f"(plan: {sum(1 for s in merged.values() for l in s.get('loops', []) if l['stage'] == 'plan_review')}, "
-               f"code: {sum(1 for s in merged.values() for l in s.get('loops', []) if l['stage'] == 'code_review')}) |")
+               f"(plan: {plan_sum}, code: {code_sum}) |")
     out.append(f"| Observed external correction rounds | "
                f"{sum(external_rounds(s) for s in merged.values())} |")
     out.append(f"| Logic-changing nits (schema-forbidden) | "
@@ -277,8 +306,7 @@ def render(events: list[dict], root: Path, header: str,
     for sid in sorted(stories, key=sort_key):
         s = stories[sid]
         o = s.get("outcome", {})
-        pl = sum(1 for l in s.get("loops", []) if l["stage"] == "plan_review")
-        il = sum(1 for l in s.get("loops", []) if l["stage"] == "code_review")
+        pl, il = loop_breakdown(s)
         state = s.get("state") or ("MERGED*" if o.get("merged_sha")
                                    else "no transitions (events only)")
         out.append(

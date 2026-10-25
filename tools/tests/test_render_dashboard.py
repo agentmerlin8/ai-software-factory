@@ -502,8 +502,12 @@ class AggregateLoopTotalsTests(unittest.TestCase):
 
     def test_totals_only_plan_loops_not_loop_free(self):
         text = self._render([self._outcome_row({"plan_loops": 2})])
-        # aggregate counts as formal loops
-        self.assertIn("| Formal loops recorded | 2 (plan: 0, code: 0) |",
+        # aggregate counts as formal loops AND its stage breakdown (R9-J1:
+        # totals-only stories no longer render `2 (plan: 0, code: 0)`)
+        self.assertIn("| Formal loops recorded | 2 (plan: 2, code: 0) |",
+                      text)
+        # per-story P/I cell uses the same fallback (R9-J1)
+        self.assertIn("| S | — | `MERGED*` | 2/0 | 0 | 2 | deadbeef | — |",
                       text)
         # NOT listed as correction-free or formal-loop-free
         self.assertNotIn("Formal-loop-free deliveries (0 plan/code loops; "
@@ -519,7 +523,9 @@ class AggregateLoopTotalsTests(unittest.TestCase):
     def test_totals_code_loops_sum_too(self):
         text = self._render([self._outcome_row({"plan_loops": 1,
                                                 "code_loops": 3})])
-        self.assertIn("| Formal loops recorded | 4 (plan: 0, code: 0) |",
+        self.assertIn("| Formal loops recorded | 4 (plan: 1, code: 3) |",
+                      text)
+        self.assertIn("| S | — | `MERGED*` | 1/3 | 0 | 4 | deadbeef | — |",
                       text)
 
     def test_bool_and_negative_values_ignored(self):
@@ -527,16 +533,17 @@ class AggregateLoopTotalsTests(unittest.TestCase):
                                                 "code_loops": -3})])
         self.assertIn("| Formal loops recorded | 0 (plan: 0, code: 0) |",
                       text)
-        # still instrumented (totals dict present) → loop-free list is
-        # the honest zero here, not an uninstrumented exclusion
-        self.assertNotIn("1 — S", text.split("WITHOUT loop/finding "
-                                             "instrumentation")[1]
-                         .splitlines()[1])
+        # R9-J3: a totals dict carrying NO valid supported counter is not
+        # instrumentation — the story is excluded and listed, never
+        # presented as a measured zero
+        uninstr_line = next(l for l in text.splitlines()
+                            if l.startswith("| Merged stories WITHOUT"))
+        self.assertIn("1 — S", uninstr_line)
 
     def test_unsupported_total_keys_ignored(self):
         text = self._render([self._outcome_row({"review_loops": 5,
                                                 "plan_loops": 1})])
-        self.assertIn("| Formal loops recorded | 1 (plan: 0, code: 0) |",
+        self.assertIn("| Formal loops recorded | 1 (plan: 1, code: 0) |",
                       text)
 
     def test_loop_rows_win_over_totals(self):
@@ -565,6 +572,85 @@ class AggregateLoopTotalsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             ledger = build_ledger(Path(td))
             return L.load_events(ledger)
+
+
+class InstrumentedTotalsValidityTests(unittest.TestCase):
+    """R9-J3: a `totals` dict counts as instrumentation ONLY when it
+    carries at least one VALID supported counter (`plan_loops`/
+    `code_loops`, non-negative int, not bool). `totals: {}` or only
+    unrelated counters with no loop/finding rows is a MISSING
+    measurement — the story belongs on the 'WITHOUT instrumentation'
+    list, never in the loop-free/correction-free measures as a zero."""
+
+    HEADER = "H"
+
+    def _outcome_row(self, totals):
+        return {"event": "outcome", "event_id": "outcome-S-1",
+                "story_id": "S", "merged_sha": "deadbeef",
+                "merged_at": "2026-09-02T01:00:00Z",
+                "live_proof_status": None, "totals": totals,
+                "recorded_at": "2026-09-02T01:30:00Z", "provenance": "live"}
+
+    def _render(self, events):
+        with tempfile.TemporaryDirectory() as td:
+            return RD.render(events, Path(td), self.HEADER)
+
+    def _lists(self, text):
+        uninstr = next(l for l in text.splitlines()
+                       if l.startswith("| Merged stories WITHOUT"))
+        cf = next(l for l in text.splitlines()
+                  if l.startswith("| Correction-free deliveries"))
+        ff = next(l for l in text.splitlines()
+                  if l.startswith("| Formal-loop-free deliveries"))
+        return uninstr, cf, ff
+
+    def test_empty_totals_not_instrumented(self):
+        text = self._render([self._outcome_row({})])
+        uninstr, cf, ff = self._lists(text)
+        self.assertIn("1 — S", uninstr)
+        self.assertIn("0 — none", cf)
+        self.assertIn("0 — none", ff)
+
+    def test_unrelated_counter_only_not_instrumented(self):
+        text = self._render([self._outcome_row({"review_loops": 5,
+                                                "duration_s": 12})])
+        uninstr, cf, ff = self._lists(text)
+        self.assertIn("1 — S", uninstr)
+        self.assertIn("0 — none", cf)
+        self.assertIn("0 — none", ff)
+
+    def test_bool_and_negative_counters_not_instrumented(self):
+        text = self._render([self._outcome_row({"plan_loops": True,
+                                                "code_loops": -3})])
+        uninstr, cf, ff = self._lists(text)
+        self.assertIn("1 — S", uninstr)
+        self.assertIn("0 — none", cf)
+        self.assertIn("0 — none", ff)
+
+    def test_explicit_recorded_zero_is_instrumented(self):
+        text = self._render([self._outcome_row({"plan_loops": 0})])
+        uninstr, cf, ff = self._lists(text)
+        self.assertIn("0 — none", uninstr)
+        self.assertIn("1 — S", cf)
+        self.assertIn("1 — S", ff)
+
+    def test_explicit_zero_code_loops_is_instrumented(self):
+        text = self._render([self._outcome_row({"code_loops": 0})])
+        uninstr, cf, ff = self._lists(text)
+        self.assertIn("0 — none", uninstr)
+        self.assertIn("1 — S", ff)
+
+    def test_findings_or_loops_still_instrumented_without_valid_totals(self):
+        """Findings/loops behavior is unchanged — a loop row makes the
+        story instrumented even when totals is empty."""
+        loop = {"event": "loop", "event_id": "loop-S-1", "story_id": "S",
+                "stage": "code_review", "loop_n": 1, "class": "reasoning",
+                "root_cause_one_line": "x", "recorded_at": "t",
+                "provenance": "live"}
+        text = self._render([loop, self._outcome_row({})])
+        uninstr, cf, ff = self._lists(text)
+        self.assertIn("0 — none", uninstr)
+        self.assertIn("0 — none", ff)  # 1 loop row → not loop-free
 
 
 if __name__ == "__main__":

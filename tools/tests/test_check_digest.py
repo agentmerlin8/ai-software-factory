@@ -806,5 +806,54 @@ class AnchorKeywordSkipTests(unittest.TestCase):
                           "['class', 'def']", errors)
 
 
+J2_SRC = ("# module\n"
+          "def compute_total(items):\n"
+          "    return sum(items)\n")
+
+
+class AnchorSymbolTokenMatchTests(unittest.TestCase):
+    """R9-J2: the anchor symbol check compares COMPLETE tokens, not
+    substrings — anchor `def total` must NOT pass against
+    `def compute_total(items):` (an incorrect anchor must never
+    authorize planner dispatch); `compute_total` still passes."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=J2_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_substring_anchor_symbol_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-932",
+                              "- `src/app.py:2` — def total\n")
+            errors = CD.run_gate(root, "STORY-932", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['total']", errors)
+
+    def test_complete_token_anchor_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-933",
+                              "- `src/app.py:2` — def compute_total\n")
+            self.assertEqual(CD.run_gate(root, "STORY-933", "HEAD"), [])
+
+    def test_prefix_of_token_anchor_flagged(self):
+        """`compute` is a prefix of the line's `compute_total` token —
+        a prefix substring is not a token match either."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-934",
+                              "- `src/app.py:2` — compute\n")
+            errors = CD.run_gate(root, "STORY-934", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['compute']", errors)
+
+    def test_token_inside_punctuation_passes(self):
+        """Tokenization splits on non-\\w characters — `items` on
+        `def compute_total(items):` is a complete token and passes."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-935",
+                              "- `src/app.py:2` — items\n")
+            self.assertEqual(CD.run_gate(root, "STORY-935", "HEAD"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

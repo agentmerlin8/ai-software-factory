@@ -196,7 +196,12 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                 # check degrades to the old first-two-tokens behavior.
                 symbols = [t for t in tokens if t not in DECL_KEYWORDS]
                 check = symbols[:1] if symbols else tokens[:2]
-                if not all(t in src_lines[lineno - 1] for t in check):
+                # R9-J2: COMPLETE token match, not substring — anchor
+                # `def total` must NOT pass against
+                # `def compute_total(items):` (a substring pass on an
+                # incorrect anchor would authorize planner dispatch).
+                line_tokens = set(re.findall(r"\w+", src_lines[lineno - 1]))
+                if not all(t in line_tokens for t in check):
                     errors.append(f"anchor symbol not on line {lineno} of "
                                   f"{path}: {check}")
 

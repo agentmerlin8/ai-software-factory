@@ -1,0 +1,11 @@
+# fixture workspace: concrete pin, no environments, no ledger
+workspace = "concrete-fixture"
+control_home = "in-repo"
+
+[factory]
+pin = "v0.1.0"
+
+[[repos]]
+id = "app"
+role = "primary"
+url = "github.com/ORG/app"

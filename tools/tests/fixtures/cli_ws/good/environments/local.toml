@@ -1,0 +1,23 @@
+# fixture environment: fully concrete
+runtime = "hermes"
+
+[dispatch]
+mechanism = "delegate_task"
+isolation = "per-invocation"
+
+[state]
+agent_home = "~/.agent"
+usage = "harvest"
+
+[models]
+T1 = "model-a"
+T2 = "model-b"
+T3 = "model-c"
+
+[credentials]
+refs = ["env:CLI_WS_TEST_KEY", "file:secrets/token.txt"]
+
+[limits]
+wall = "2h"
+runs = 10
+budget = "50M"

@@ -563,8 +563,15 @@ def main(argv: list[str] | None = None) -> int:
                       + ", ".join(f"{p}=<cmd>" for p in missing),
                       file=sys.stderr)
                 return 2
-        command_results = [json.loads(Path(p).read_text(encoding="utf-8"))
-                           for p in args.command_result]
+        command_results: list[dict] = []
+        for p in args.command_result:
+            parsed = json.loads(Path(p).read_text(encoding="utf-8"))
+            # both shapes legal: a LIST of results (extend) or a single
+            # result object (append) — never wrap a list as one element.
+            if isinstance(parsed, list):
+                command_results.extend(parsed)
+            else:
+                command_results.append(parsed)
         ui_results = (json.loads(Path(args.ui_results).read_text(
                       encoding="utf-8")) if args.ui_results else None)
         gate.build_mode(dirs[0], args.base,

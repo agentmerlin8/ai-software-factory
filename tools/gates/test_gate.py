@@ -528,6 +528,25 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("exactly one story dir", err)
 
+    def test_build_cli_command_result_list_flattened(self):
+        """The exact CLI repro: a --command-result file holding a LIST of
+        results must be flattened (extend), not wrapped as one element —
+        previously `AttributeError: 'list' object has no attribute 'get'`.
+        Run via subprocess on the frozen fixture; expect rc 0."""
+        d = FIX / "build-valid-manifest"
+        proc = subprocess.run(
+            [sys.executable, str(REPO / "tools" / "gates" /
+                                "pre_review_gate.py"),
+             "build", str(d), "--root", str(REPO),
+             "--diff-file", str(d / "diff-name-status.txt"),
+             "--discovery", f"tests={d / 'discovery.txt'}",
+             "--command-result", str(d / "command-results.json")],
+            capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("PRE-REVIEW GATE (build): PASS", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

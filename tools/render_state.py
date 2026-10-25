@@ -62,13 +62,32 @@ def ledger_display(root: Path, ledger_path: Path) -> str:
         return str(ledger_path)
 
 
+def is_canonical_sid(sid) -> bool:
+    """True only for canonical STORY-NNN ids (fullmatch on ledger_schema's
+    STORY_ID_RE). Story ids become path components under stories/ — a
+    schema-valid but non-canonical string (`../outside`, an absolute path)
+    must never be used to build a path."""
+    return isinstance(sid, str) and L.S.STORY_ID_RE.fullmatch(sid) is not None
+
+
 def stories_in_ledger(events: list[dict]) -> list[str]:
     """Canonical story order for --all: first-appearance order of story_id
-    (usage rows carry no story_id and never introduce one)."""
+    (usage rows carry no story_id and never introduce one). Non-canonical
+    ids are ledger data, never path components — each distinct skipped id
+    is reported once on stderr."""
     seen: list[str] = []
+    skipped: set[str] = set()
     for e in events:
         sid = e.get("story_id")
-        if isinstance(sid, str) and sid not in seen:
+        if not isinstance(sid, str):
+            continue
+        if not is_canonical_sid(sid):
+            if sid not in skipped:
+                skipped.add(sid)
+                print(f"skipping non-canonical story id from ledger: {sid}",
+                      file=sys.stderr)
+            continue
+        if sid not in seen:
             seen.append(sid)
     return seen
 
@@ -130,13 +149,14 @@ def render(events: list[dict], sid: str, header: str,
     trans = [e for e in evs if e["event"] == "transition"]
     if trans:
         out += ["## Transitions (controller-enforced)", "",
-                "| Recorded at (UTC) | From | To | Requested by | Checks | Approved by |",
-                "|---|---|---|---|---|---|"]
+                "| Recorded at (UTC) | From | To | Repo | Requested by | Checks | Approved by |",
+                "|---|---|---|---|---|---|---|"]
         for t in trans:
             checks = ", ".join(t.get("checks_run", []))
             ap = t.get("approved_by") or fmt_null(None, "approved_by_reason", t)
             out.append(f"| {t['recorded_at']} | {t['from_state']} | "
-                       f"**{t['to_state']}** | {t.get('requested_by')} | "
+                       f"**{t['to_state']}** | {t.get('repo') or '—'} | "
+                       f"{t.get('requested_by')} | "
                        f"{checks} | {ap} |")
         out.append("")
 
@@ -307,6 +327,11 @@ def main(argv: list[str] | None = None) -> int:
     if not sids:
         print("usage: render_state.py <story-id>... | --all", file=sys.stderr)
         return 2
+    for sid in sids:  # refuse BEFORE building any path (no read, no write)
+        if not is_canonical_sid(sid):
+            print(f"REFUSED: story id {sid} is not a canonical STORY-NNN",
+                  file=sys.stderr)
+            return 1
     rc = 0
     for sid in sids:
         text = render(events, sid, header, stories_root)

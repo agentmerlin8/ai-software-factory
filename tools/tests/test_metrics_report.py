@@ -173,6 +173,105 @@ class MetricsReportTests(unittest.TestCase):
             rc = MT.main(["--root", str(self.root), "--diff", str(missing)])
             self.assertEqual(rc, 1)
 
+    # ---- null dispatch_id usage rows never collapse (B9)
+    def test_null_dispatch_id_usage_rows_all_counted(self):
+        def usage(eid, did, it, ot):
+            return {"event": "usage", "event_id": eid, "dispatch_id": did,
+                    "input_tokens": it, "output_tokens": ot,
+                    "cached_input_tokens": None,
+                    "cached_input_tokens_reason": "n/a",
+                    "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+                    "token_semantics": "tokens",
+                    "usage_source": "executor-report",
+                    "recorded_at": "2026-09-01T00:00:00Z",
+                    "provenance": "live"}
+        events = [usage("usage-1", None, 100, 10),
+                  usage("usage-2", None, 200, 20)]
+        c = MT.collect(events)
+        self.assertEqual(c["totals"]["usage_rows"], 2)
+        self.assertEqual(c["totals"]["input_tokens"], 300)
+        self.assertEqual(c["totals"]["output_tokens"], 30)
+        # and the by-id join dict stays free of a "None" key
+        snap = MT.to_jsonable(c)
+        self.assertEqual(snap["totals"]["usage_rows"], 2)
+
+    # ---- requested model is not a served model (B10)
+    def test_requested_model_never_counted_as_served(self):
+        dispatch = {
+            "event": "dispatch", "event_id": "STORY-230-coder-1-1789003000",
+            "story_id": "STORY-230", "role": "coder",
+            "requested_model": "model-y", "reported_model": None,
+            "reported_model_reason": "executor report carried no model id",
+            "thinking_setting": None, "thinking_setting_reason": "n/a",
+            "session_id": None, "session_id_reason": "pre-spawn row",
+            "parent_session_id": None, "parent_session_id_reason": "top",
+            "attempt": 1, "started_at": "2026-09-01T01:00:00Z",
+            "ended_at": None, "ended_at_reason": "pre-spawn row",
+            "outcome": None, "outcome_reason": "pre-spawn row",
+            "prompt_version": "coder-v0.1.0", "worktree": "/tmp/wt",
+            "model_unverified": True,
+            "recorded_at": "2026-09-01T01:00:00Z", "provenance": "live"}
+        c = MT.collect([dispatch])
+        self.assertEqual(dict(c["per_role"]["coder"]["models"]),
+                         {"(unreported)": 1})
+        text = MT.render_md(c, "t", self.header, 1)
+        self.assertIn("(unreported)×1", text)
+        self.assertNotIn("model-y×", text)
+
+    # ---- reasoning-loop guard scoping under --story (B11)
+    def test_guard_scopes_per_story_never_all(self):
+        base = {"totals": {}, "per_role": {},
+                "per_story": {"A": {"loops": {"reasoning": 5}},
+                              "B": {"loops": {"reasoning": 1}}}}
+        cur = {"totals": {}, "per_role": {},
+               "per_story": {"A": {"loops": {"reasoning": 5}}}}
+        # B absent from current → B contributes 0, never the all-story 5
+        out = MT.diff(base, cur, "B")
+        self.assertIn("Reasoning-loop guard: baseline 1 → current 0 — OK",
+                      out)
+
+    # ---- malformed baseline = documented exit-1 refusal (B12)
+    def _diff_rc(self, baseline_doc) -> tuple[int, str]:
+        import contextlib, io
+        with tempfile.TemporaryDirectory() as td:
+            bp = Path(td) / "base.json"
+            bp.write_text(json.dumps(baseline_doc), encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = MT.main(["--root", str(self.root),
+                              "--diff", str(bp)])
+        return rc, err.getvalue()
+
+    def test_malformed_baseline_refusals(self):
+        rc, err = self._diff_rc([])
+        self.assertEqual(rc, 1)
+        self.assertIn("error: malformed baseline snapshot: top level must "
+                      "be an object, got list", err)
+        rc, err = self._diff_rc({"totals": {"input_tokens": "invalid"},
+                                 "per_story": {}, "per_role": {}})
+        self.assertEqual(rc, 1)
+        self.assertIn("error: malformed baseline snapshot: "
+                      "`totals.input_tokens` must be numeric, got 'invalid'",
+                      err)
+        rc, err = self._diff_rc({"per_story": {}, "per_role": {}})
+        self.assertEqual(rc, 1)
+        self.assertIn("error: malformed baseline snapshot: missing "
+                      "`totals` section", err)
+
+    def test_valid_baseline_still_renders_delta(self):
+        import contextlib, io
+        with tempfile.TemporaryDirectory() as td:
+            bp = Path(td) / "base.json"
+            bp.write_bytes(MT.snapshot_bytes(MT.to_jsonable(
+                MT.collect(self.events))))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = MT.main(["--root", str(self.root), "--diff", str(bp)])
+        self.assertEqual(rc, 0)
+        self.assertIn("# Delta vs baseline", buf.getvalue())
+        self.assertIn("| TOTAL input_tokens | 1,000 | 1,000 | +0 (+0%) |",
+                      buf.getvalue())
+
     def test_bad_ledger_exits_2(self):
         with tempfile.TemporaryDirectory() as td:
             bad = Path(td) / "bad.jsonl"

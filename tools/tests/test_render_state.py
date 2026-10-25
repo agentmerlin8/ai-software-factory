@@ -12,6 +12,8 @@ outside tempdirs.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -85,8 +87,8 @@ class RenderStateTests(unittest.TestCase):
         self.assertIn("**claim** by agent-a on host-1 (session sess-201)",
                       text)
         self.assertIn("start pin: " + "a" * 40, text)
-        # transition table rows
-        self.assertIn("| BACKLOG | **CODING** | orchestrator |", text)
+        # transition table rows (Repo column: story-level rows render —)
+        self.assertIn("| BACKLOG | **CODING** | — | orchestrator |", text)
         self.assertIn("approver-1", text)
         # stage counts
         self.assertIn("| full_suite | 42 | 0 | 0 | 0 |", text)
@@ -171,25 +173,31 @@ class RenderStateTests(unittest.TestCase):
             RS.main(["STORY-202", "--check", "--root", str(self.root)]), 0)
 
     def test_check_ignores_non_generated_files(self):
-        d = self.stories / "T-A"
+        d = self.stories / "STORY-998"
         d.mkdir(parents=True, exist_ok=True)
         (d / "state.md").write_text("# hand-written, no header\n",
                                     encoding="utf-8")
         self.assertEqual(
-            RS.main(["T-A", "--check", "--root", str(self.root)]), 0)
+            RS.main(["STORY-998", "--check", "--root", str(self.root)]), 0)
 
-    def test_all_discovery_uses_verbatim_story_ids(self):
+    def test_all_discovery_confines_to_canonical_ids(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("factory", "ledger").mkdir(parents=True)
             ledger = root / "factory" / "ledger" / "events.jsonl"
             ledger.write_bytes(self.ledger.read_bytes())
-            rc = RS.main(["--all", "--root", str(root)])
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RS.main(["--all", "--root", str(root)])
             self.assertEqual(rc, 0)
-            for sid in ("STORY-201", "STORY-202", "T-A"):
+            for sid in ("STORY-201", "STORY-202"):
                 self.assertTrue(
                     (root / "stories" / sid / "state.md").exists(),
                     f"missing render for {sid}")
+            # non-canonical ledger ids are data, never path components
+            self.assertFalse((root / "stories" / "T-A").exists())
+            self.assertIn("skipping non-canonical story id from ledger: T-A",
+                          err.getvalue())
 
     def test_alt_ledger_path(self):
         with tempfile.TemporaryDirectory() as td:
@@ -211,6 +219,91 @@ class RenderStateTests(unittest.TestCase):
             bad.write_text("{not json}\n", encoding="utf-8")
             self.assertEqual(RS.main(["STORY-201", "--root", str(self.root),
                                       "--ledger", str(bad)]), 2)
+
+    # ---- story-id path confinement (B1)
+    def _traversal_ledger(self, root: Path) -> Path:
+        """Ledger whose rows carry a schema-valid but non-canonical
+        story_id (`../outside`) — a real path-traversal attempt through
+        the stories/<id>/ join."""
+        ledger = root / "factory" / "ledger" / "events.jsonl"
+        rows = [
+            {"event": "transition",
+             "event_id": "transition-STORY-201-1", "story_id": "STORY-201",
+             "repo": None, "repo_reason": "story-level",
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"},
+            {"event": "transition",
+             "event_id": "transition-outside-1", "story_id": "../outside",
+             "repo": None, "repo_reason": "story-level",
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"},
+        ]
+        for row in rows:
+            L.append_event(ledger, row)
+        return ledger
+
+    def test_traversal_id_from_ledger_never_builds_a_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("factory", "ledger").mkdir(parents=True)
+            self._traversal_ledger(root)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RS.main(["--all", "--root", str(root)])
+            self.assertEqual(rc, 0)
+            # the canonical story rendered; the traversal id did not
+            self.assertTrue((root / "stories" / "STORY-201" /
+                             "state.md").exists())
+            self.assertFalse((root.parent / "outside" / "state.md").exists())
+            self.assertFalse((root / "stories" / "../outside").exists())
+            self.assertEqual(
+                err.getvalue().count(
+                    "skipping non-canonical story id from ledger: ../outside"),
+                1)
+
+    def test_explicit_noncanonical_id_refused(self):
+        for bad in ("../outside", "/tmp/evil", "T-A"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RS.main([bad, "--root", str(self.root)])
+            self.assertEqual(rc, 1, bad)
+            self.assertIn(
+                f"REFUSED: story id {bad} is not a canonical STORY-NNN",
+                err.getvalue())
+        # nothing written anywhere (no path was ever built)
+        self.assertFalse((self.root.parent / "outside" / "state.md").exists())
+        self.assertFalse((self.stories / "T-A" / "state.md").exists())
+        self.assertFalse(Path("/tmp/evil/state.md").exists())
+
+    def test_is_canonical_sid(self):
+        self.assertTrue(RS.is_canonical_sid("STORY-201"))
+        for bad in ("../outside", "/abs", "STORY-21", "story-201",
+                    "STORY-2011", "", None, 7):
+            self.assertFalse(RS.is_canonical_sid(bad), bad)
+
+    # ---- transitions table repo scope (B3)
+    def test_transitions_table_preserves_repo_scope(self):
+        events = self.events + [{
+            "event": "transition", "event_id": "transition-STORY-201-9",
+            "story_id": "STORY-201", "repo": "backend",
+            "from_state": "CODING", "to_state": "BUILD_GREEN",
+            "requested_by": "orchestrator", "checks_run": [],
+            "check_results": {}, "approved_by": None,
+            "approved_by_reason": "no gate required",
+            "recorded_at": "2026-09-01T07:00:00Z", "provenance": "live"}]
+        text = RS.render(events, "STORY-201", self.header, self.stories)
+        self.assertIn("| Recorded at (UTC) | From | To | Repo | Requested "
+                      "by | Checks | Approved by |", text)
+        self.assertIn("|---|---|---|---|---|---|---|", text)
+        self.assertIn("| backend | orchestrator |", text)
+        # story-level rows (repo null) render the em-dash
+        self.assertIn("**CODING** | — | orchestrator", text)
 
 
 if __name__ == "__main__":

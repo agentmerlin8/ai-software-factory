@@ -55,11 +55,21 @@ def fmt_null(v, reason_key: str, evt: dict) -> str:
 def stories_in_ledger(events: list[dict]) -> list[str]:
     """Every story_id with ledger events, in first-appearance order (same
     canonical order as render_state.py; usage rows carry no story_id and
-    never introduce one)."""
+    never introduce one). Non-canonical ids are ledger data, never path
+    components — each distinct skipped id is reported once on stderr."""
     seen: list[str] = []
+    skipped: set[str] = set()
     for e in events:
         sid = e.get("story_id")
-        if isinstance(sid, str) and sid not in seen:
+        if not isinstance(sid, str):
+            continue
+        if not RSt.is_canonical_sid(sid):
+            if sid not in skipped:
+                skipped.add(sid)
+                print(f"skipping non-canonical story id from ledger: {sid}",
+                      file=sys.stderr)
+            continue
+        if sid not in seen:
             seen.append(sid)
     return seen
 
@@ -146,15 +156,17 @@ def render(events: list[dict], sid: str, header: str) -> str:
     out += ["## State timeline", ""]
     trans = [e for e in evs if e["event"] == "transition"]
     if trans:
-        out += ["| Recorded at (UTC) | From → To | Requested by | Approved by "
-                "(human gate) | Checks |", "|---|---|---|---|---|"]
+        out += ["| Recorded at (UTC) | From → To | Repo | Requested by | "
+                "Approved by (human gate) | Checks |",
+                "|---|---|---|---|---|---|"]
         for t in trans:
             ap = t.get("approved_by")
             gate = _cell(ap) if ap else \
                 f"_{fmt_null(None, 'approved_by_reason', t)}_"
             checks = ", ".join(t.get("checks_run", []))
             out.append(f"| {t['recorded_at']} | {t['from_state']} → "
-                       f"**{t['to_state']}** | {_cell(t.get('requested_by'))} "
+                       f"**{t['to_state']}** | {_cell(t.get('repo') or '—')} "
+                       f"| {_cell(t.get('requested_by'))} "
                        f"| {gate} | {_cell(checks)} |")
         gated = [t for t in trans if t.get("approved_by")]
         out += ["", f"_{len(trans)} transition(s); {len(gated)} human-gated "
@@ -195,9 +207,18 @@ def render(events: list[dict], sid: str, header: str) -> str:
     out += [f"### Human gates ({len(gates)})", ""]
     if gates:
         out += ["| Gate | Question | Asked | Answered |", "|---|---|---|---|"]
-        for g in gates:
-            ans = g.get("answered_at") or \
-                f"PENDING — {g.get('answered_at_reason') or 'no reason recorded'}"
+        for i, g in enumerate(gates):
+            if g.get("answered_at"):
+                ans = g["answered_at"]
+            else:
+                # append-only ledger: an ask row stays unanswered forever
+                # once a later answered row for the same (story, gate)
+                # records the reply — mirror render_state.py's supersede
+                supers = [s.get("event_id") for s in gates[i + 1:]
+                          if s.get("gate") == g.get("gate")
+                          and s.get("answered_at")]
+                ans = f"superseded by {supers[0]}" if supers else \
+                    f"PENDING — {g.get('answered_at_reason') or 'no reason recorded'}"
             out.append(f"| {g['gate']} | {_cell(g['question'])} "
                        f"| {g['asked_at']} | {_cell(ans)} |")
         out.append("")
@@ -256,15 +277,20 @@ def render(events: list[dict], sid: str, header: str) -> str:
             vals = [u[key] for u in usage if u.get(key) is not None]
             return sum(vals) if vals else None
 
-        in_tok, out_tok = _sum("input_tokens"), _sum("output_tokens")
-        cached = _sum("cached_input_tokens")
-        cached_s = str(cached) if cached is not None else \
-            f"not recorded: {usage[0].get('cached_input_tokens_reason') or 'no reason recorded'}"
+        def _total_s(key: str) -> str:
+            """Totals can be null (every row's value unrecorded) — render
+            like the cached cell: 'not recorded: <reason>', never a zero."""
+            v = _sum(key)
+            if v is not None:
+                return str(v)
+            return f"not recorded: {usage[0].get(key + '_reason') or 'no reason recorded'}"
+
         out += ["| Measure | Value |", "|---|---|",
                 f"| Dispatches with usage | {len(usage)} |",
-                f"| Input tokens | {in_tok} |",
-                f"| Output tokens | {out_tok} |",
-                f"| Cached input tokens | {cached_s} |", "",
+                f"| Input tokens | {_total_s('input_tokens')} |",
+                f"| Output tokens | {_total_s('output_tokens')} |",
+                f"| Cached input tokens | {_total_s('cached_input_tokens')} |",
+                "",
                 "### Per-dispatch usage", "",
                 "| Dispatch | Role | Model | Input | Output | Cached |",
                 "|---|---|---|---|---|---|"]
@@ -279,7 +305,8 @@ def render(events: list[dict], sid: str, header: str) -> str:
             role = d.get("role") or (did.rsplit("-", 3)[-3]
                                      if did and did.count("-") >= 3 else "—")
             out.append(f"| {_cell(did)} | {_cell(role)} | {_cell(model)} "
-                       f"| {u['input_tokens']} | {u['output_tokens']} "
+                       f"| {fmt_null(u.get('input_tokens'), 'input_tokens_reason', u)} "
+                       f"| {fmt_null(u.get('output_tokens'), 'output_tokens_reason', u)} "
                        f"| {fmt_null(u.get('cached_input_tokens'), 'cached_input_tokens_reason', u)} |")
         out += ["", f"_token_semantics: {usage[0].get('token_semantics')} · "
                 f"usage_source: `{usage[0].get('usage_source')}`_", ""]
@@ -335,6 +362,11 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: render_provenance.py <story-id>... | --all",
               file=sys.stderr)
         return 2
+    for sid in sids:  # refuse BEFORE building any path (no read, no write)
+        if not RSt.is_canonical_sid(sid):
+            print(f"REFUSED: story id {sid} is not a canonical STORY-NNN",
+                  file=sys.stderr)
+            return 1
     rc = 0
     wrote = 0
     for sid in sids:

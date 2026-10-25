@@ -12,7 +12,9 @@ ledger_lib.append_event. No network, no writes outside tempdirs.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -147,24 +149,31 @@ class RenderProvenanceTests(unittest.TestCase):
             RP.main(["STORY-202", "--check", "--root", str(self.root)]), 0)
 
     def test_check_ignores_non_generated_files(self):
-        d = self.stories / "T-A"
+        d = self.stories / "STORY-997"
         d.mkdir(parents=True, exist_ok=True)
         (d / "PROVENANCE.md").write_text("# hand-written, no header\n",
                                          encoding="utf-8")
         self.assertEqual(
-            RP.main(["T-A", "--check", "--root", str(self.root)]), 0)
+            RP.main(["STORY-997", "--check", "--root", str(self.root)]), 0)
 
-    def test_all_discovery_uses_verbatim_story_ids(self):
+    def test_all_discovery_confines_to_canonical_ids(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("factory", "ledger").mkdir(parents=True)
             (root / "factory" / "ledger" / "events.jsonl").write_bytes(
                 self.ledger.read_bytes())
-            self.assertEqual(RP.main(["--all", "--root", str(root)]), 0)
-            for sid in ("STORY-201", "STORY-202", "T-A"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RP.main(["--all", "--root", str(root)])
+            self.assertEqual(rc, 0)
+            for sid in ("STORY-201", "STORY-202"):
                 self.assertTrue(
                     (root / "stories" / sid / "PROVENANCE.md").exists(),
                     f"missing render for {sid}")
+            # non-canonical ledger ids are data, never path components
+            self.assertFalse((root / "stories" / "T-A").exists())
+            self.assertIn("skipping non-canonical story id from ledger: T-A",
+                          err.getvalue())
 
     def test_alt_ledger_and_refusals(self):
         with tempfile.TemporaryDirectory() as td:
@@ -180,6 +189,152 @@ class RenderProvenanceTests(unittest.TestCase):
                          "--ledger", str(bad)]), 2)
         # no story ids and no --all → 2
         self.assertEqual(RP.main(["--root", str(self.root)]), 2)
+
+    # ---- story-id path confinement (B2)
+    def _traversal_ledger(self, root: Path) -> Path:
+        ledger = root / "factory" / "ledger" / "events.jsonl"
+        rows = [
+            {"event": "transition",
+             "event_id": "transition-STORY-201-1", "story_id": "STORY-201",
+             "repo": None, "repo_reason": "story-level",
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"},
+            {"event": "transition",
+             "event_id": "transition-outside-1", "story_id": "../outside",
+             "repo": None, "repo_reason": "story-level",
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"},
+        ]
+        for row in rows:
+            L.append_event(ledger, row)
+        return ledger
+
+    def test_traversal_id_from_ledger_never_builds_a_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("factory", "ledger").mkdir(parents=True)
+            self._traversal_ledger(root)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RP.main(["--all", "--root", str(root)])
+            self.assertEqual(rc, 0)
+            self.assertTrue((root / "stories" / "STORY-201" /
+                             "PROVENANCE.md").exists())
+            self.assertFalse((root.parent / "outside" /
+                              "PROVENANCE.md").exists())
+            self.assertFalse((root / "stories" / "../outside").exists())
+            self.assertEqual(
+                err.getvalue().count(
+                    "skipping non-canonical story id from ledger: ../outside"),
+                1)
+
+    def test_explicit_noncanonical_id_refused(self):
+        for bad in ("../outside", "/tmp/evil", "T-A"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RP.main([bad, "--root", str(self.root)])
+            self.assertEqual(rc, 1, bad)
+            self.assertIn(
+                f"REFUSED: story id {bad} is not a canonical STORY-NNN",
+                err.getvalue())
+        self.assertFalse((self.root.parent / "outside" /
+                          "PROVENANCE.md").exists())
+        self.assertFalse((self.stories / "T-A" / "PROVENANCE.md").exists())
+        self.assertFalse(Path("/tmp/evil/PROVENANCE.md").exists())
+
+    # ---- state timeline repo column (B4)
+    def test_state_timeline_preserves_repo_scope(self):
+        events = self.events + [{
+            "event": "transition", "event_id": "transition-STORY-201-9",
+            "story_id": "STORY-201", "repo": "backend",
+            "from_state": "CODING", "to_state": "BUILD_GREEN",
+            "requested_by": "orchestrator", "checks_run": [],
+            "check_results": {}, "approved_by": None,
+            "approved_by_reason": "no gate required",
+            "recorded_at": "2026-09-01T07:00:00Z", "provenance": "live"}]
+        text = RP.render(events, "STORY-201", self.header)
+        self.assertIn("| Recorded at (UTC) | From → To | Repo | Requested "
+                      "by | Approved by (human gate) | Checks |", text)
+        self.assertIn("| backend | orchestrator |", text)
+        self.assertIn("**CODING** | — | orchestrator", text)
+
+    # ---- gate supersede (B5)
+    def _gate_rows(self):
+        ask = {"event": "human_gate", "event_id": "human_gate-STORY-210-1",
+               "story_id": "STORY-210", "gate": "merge",
+               "question": "Merge approved diff?",
+               "asked_at": "2026-09-02T00:00:00Z", "answered_at": None,
+               "answered_at_reason": "awaiting the allowlisted approver",
+               "decision": None, "decision_reason": "unanswered",
+               "answered_by": None, "answered_by_reason": "unanswered",
+               "recorded_at": "2026-09-02T00:00:00Z", "provenance": "live"}
+        answer = {**ask, "event_id": "human_gate-STORY-210-2",
+                  "answered_at": "2026-09-02T00:30:00Z",
+                  "answered_at_reason": None, "decision": "approved",
+                  "decision_reason": None, "answered_by": "approver-1",
+                  "answered_by_reason": None,
+                  "recorded_at": "2026-09-02T00:30:00Z"}
+        lone = {**ask, "event_id": "human_gate-STORY-210-3", "gate": "ui",
+                "question": "Approve UI change?",
+                "asked_at": "2026-09-03T00:00:00Z",
+                "recorded_at": "2026-09-03T00:00:00Z"}
+        return ask, answer, lone
+
+    def test_gate_answered_by_later_row_is_superseded(self):
+        ask, answer, lone = self._gate_rows()
+        text = RP.render([ask, answer, lone], "STORY-210", self.header)
+        self.assertIn("superseded by human_gate-STORY-210-2", text)
+        self.assertIn("| 2026-09-02T00:30:00Z |", text)  # answer row
+        # the still-unanswered gate keeps PENDING + its reason
+        self.assertIn("PENDING — awaiting the allowlisted approver", text)
+
+    def test_gate_pending_without_reason(self):
+        ask, _answer, _lone = self._gate_rows()
+        ask = {**ask, "answered_at_reason": None}
+        text = RP.render([ask], "STORY-210", self.header)
+        self.assertIn("PENDING — no reason recorded", text)
+
+    # ---- nullable token totals with reasons (B6)
+    def test_null_token_totals_render_reasons(self):
+        dispatch = {
+            "event": "dispatch", "event_id": "STORY-211-coder-1-1789002000",
+            "story_id": "STORY-211", "role": "coder",
+            "requested_model": "model-x", "reported_model": "model-x",
+            "thinking_setting": None, "thinking_setting_reason": "n/a",
+            "session_id": "sess-1", "parent_session_id": None,
+            "parent_session_id_reason": "top-level", "attempt": 1,
+            "started_at": "2026-09-01T01:00:00Z",
+            "ended_at": "2026-09-01T02:00:00Z", "outcome": "success",
+            "prompt_version": "coder-v0.1.0", "worktree": "/tmp/wt",
+            "model_unverified": False,
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        usage = {
+            "event": "usage", "event_id": "usage-STORY-211-coder-1",
+            "dispatch_id": "STORY-211-coder-1-1789002000",
+            "input_tokens": None,
+            "input_tokens_reason": "executor reported no counts",
+            "output_tokens": None,
+            "output_tokens_reason": "executor reported no counts",
+            "cached_input_tokens": None,
+            "cached_input_tokens_reason": "n/a",
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        text = RP.render([dispatch, usage], "STORY-211", self.header)
+        self.assertIn("| Input tokens | not recorded: executor reported "
+                      "no counts |", text)
+        self.assertIn("| Output tokens | not recorded: executor reported "
+                      "no counts |", text)
+        self.assertIn("| Cached input tokens | not recorded: n/a |", text)
+        # per-row cells too — never an invented zero
+        self.assertNotIn("| None |", text)
+        self.assertNotIn(" 0 |", text.split("## Token usage")[1])
 
 
 if __name__ == "__main__":

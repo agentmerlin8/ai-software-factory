@@ -88,10 +88,16 @@ def collect(events: list[dict]) -> dict[str, Any]:
         if e.get("event") == "dispatch":
             dispatches[e["event_id"]] = {**dispatches.get(e["event_id"], {}),
                                          **e}
+    # usage rows: keep ALL of them in ledger order for totals (a null
+    # dispatch_id is still a real usage row — never collapsed away); the
+    # by-id join dict is built ONLY for non-null dispatch_ids.
+    usage_rows: list[dict] = [e for e in events
+                              if e.get("event") == "usage"]
     usage: dict[str, dict] = {}
-    for e in events:
-        if e.get("event") == "usage":
-            usage[str(e.get("dispatch_id"))] = e
+    for e in usage_rows:
+        did = e.get("dispatch_id")
+        if did is not None:
+            usage[str(did)] = e
     loops = [e for e in events if e.get("event") == "loop"]
     findings = L.latest_findings(events)
     outcomes = [e for e in events if e.get("event") == "outcome"]
@@ -140,8 +146,11 @@ def collect(events: list[dict]) -> dict[str, Any]:
         pr["dispatches"] += 1
         pr["input_tokens"] += it
         pr["output_tokens"] += ot
-        pr["models"][str(d.get("reported_model")
-                         or d.get("requested_model") or "?")] += 1
+        # a requested model is not a served model — tally reported_model
+        # only; dispatches without one are `(unreported)`, never guessed
+        pr["models"][str(d.get("reported_model"))
+                     if d.get("reported_model") is not None
+                     else "(unreported)"] += 1
 
     for lp in loops:
         per_story[str(lp.get("story_id"))]["loops"][
@@ -154,14 +163,14 @@ def collect(events: list[dict]) -> dict[str, Any]:
     return {"per_story": per_story, "per_role": per_role,
             "totals": {
                 "dispatches": len(dispatches),
-                "usage_rows": len(usage),
+                "usage_rows": len(usage_rows),
                 "input_tokens": sum(int(u.get("input_tokens") or 0)
-                                    for u in usage.values()),
+                                    for u in usage_rows),
                 "output_tokens": sum(int(u.get("output_tokens") or 0)
-                                     for u in usage.values()),
+                                     for u in usage_rows),
                 "cached_input_tokens": sum(
                     int(u.get("cached_input_tokens") or 0)
-                    for u in usage.values()),
+                    for u in usage_rows),
                 "loops": len(loops),
             }}
 
@@ -240,6 +249,42 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
     return "\n".join(out)
 
 
+def validate_baseline(base: Any) -> str | None:
+    """Baseline shape validation before diffing — returns None when the
+    snapshot has the documented shape, else the detail for the named
+    refusal `error: malformed baseline snapshot: <detail>` (rc 1)."""
+    if not isinstance(base, dict):
+        return f"top level must be an object, got {type(base).__name__}"
+    for key in ("per_story", "per_role", "totals"):
+        if key not in base:
+            return f"missing `{key}` section"
+        if not isinstance(base[key], dict):
+            return (f"`{key}` must be an object, got "
+                    f"{type(base[key]).__name__}")
+    for st, sv in base["per_story"].items():
+        if not isinstance(sv, dict):
+            return (f"`per_story.{st}` must be an object, got "
+                    f"{type(sv).__name__}")
+        loops = sv.get("loops")
+        if loops is not None and not isinstance(loops, dict):
+            return (f"`per_story.{st}.loops` must be an object, got "
+                    f"{type(loops).__name__}")
+        for lk, lv in (loops or {}).items():
+            if not isinstance(lv, (int, float)) or isinstance(lv, bool):
+                return (f"`per_story.{st}.loops.{lk}` must be numeric, got "
+                        f"{lv!r}")
+        for nk in ("input_tokens", "output_tokens", "dispatches"):
+            nv = sv.get(nk)
+            if nv is not None and \
+                    (not isinstance(nv, (int, float)) or isinstance(nv, bool)):
+                return (f"`per_story.{st}.{nk}` must be numeric, got "
+                        f"{nv!r}")
+    for tk, tv in base["totals"].items():
+        if not isinstance(tv, (int, float)) or isinstance(tv, bool):
+            return f"`totals.{tk}` must be numeric, got {tv!r}"
+    return None
+
+
 def diff(base: dict, cur: dict, story: str | None) -> str:
     out = ["# Delta vs baseline", "",
            "| Metric | Baseline | Current | Δ |", "|---|---|---|---|"]
@@ -264,11 +309,14 @@ def diff(base: dict, cur: dict, story: str | None) -> str:
     else:
         rows(base.get("totals", {}), cur.get("totals", {}), "TOTAL")
 
-    # reasoning-loop guard (adoption rule)
+    # reasoning-loop guard (adoption rule) — with an explicit story scope,
+    # ALWAYS scope per story on each side: an absent side contributes 0,
+    # never a fall-back to all stories
     def reasoning(snap, st=None):
         ps = snap.get("per_story", {})
-        items = [ps[st]] if st and st in ps else ps.values()
-        return sum(v.get("loops", {}).get("reasoning", 0) for v in items)
+        items = [ps.get(st, {})] if st else list(ps.values())
+        return sum(int(v.get("loops", {}).get("reasoning", 0) or 0)
+                   for v in items)
     rb, rc = reasoning(base, story), reasoning(cur, story)
     verdict = "OK" if rc <= rb else "REGRESSION — reasoning loops rose"
     out += ["", f"Reasoning-loop guard: baseline {rb} → current {rc} — "
@@ -337,7 +385,19 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, json.JSONDecodeError) as e:
             print(f"error: cannot read baseline {bp}: {e}", file=sys.stderr)
             return 1
-        print(diff(base, snap, args.story))
+        detail = validate_baseline(base)
+        if detail:
+            print(f"error: malformed baseline snapshot: {detail}",
+                  file=sys.stderr)
+            return 1
+        try:
+            print(diff(base, snap, args.story))
+        except (AttributeError, TypeError) as e:
+            # residual shape problems surface here — same named rc-1
+            # refusal, never a traceback
+            print(f"error: malformed baseline snapshot: {e}",
+                  file=sys.stderr)
+            return 1
     return 0
 
 

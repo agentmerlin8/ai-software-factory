@@ -84,8 +84,15 @@ def render(events: list[dict], root: Path, header: str) -> str:
         s = stories[sid]
         et = e["event"]
         if et == "assignment":
-            if e.get("op") == "claim":
+            # claim/handover/release fold into ONE owner cell — latest row
+            # wins: claim sets the owner, handover moves it, release clears
+            op = e.get("op")
+            if op == "claim":
                 s["owner"] = e.get("owner")
+            elif op == "handover":
+                s["owner"] = e.get("to")
+            elif op == "release":
+                s["owner"] = None
         elif et == "transition":
             if not e.get("repo"):  # per-repo sub-events never move state
                 s["state"] = e["to_state"]
@@ -185,13 +192,16 @@ def render(events: list[dict], root: Path, header: str) -> str:
                    for k in sorted(S.REVIEW_ATTRIBUTIONS)}
     context_stories = {e.get("story_id") for e in events
                        if e.get("event") == "review_context"}
-    attributed_ids = {a.get("finding_id") for a in attrs}
-    activated_external = [f for sid, s in stories.items()
+    # finding ids are unique only WITHIN a story — attribution joins are
+    # (story_id, finding_id) tuples, never bare finding_ids
+    attributed_keys = {(a.get("story_id"), a.get("finding_id"))
+                       for a in attrs}
+    activated_external = [(sid, f) for sid, s in stories.items()
                           if sid in context_stories
                           for f in s.get("findings", [])
                           if f.get("source") == "external"]
-    unattributed = sum(1 for f in activated_external
-                       if f.get("finding_id") not in attributed_ids)
+    unattributed = sum(1 for sid, f in activated_external
+                       if (sid, f.get("finding_id")) not in attributed_keys)
     uninstrumented = sum(1 for sid, s in stories.items()
                          if sid not in context_stories
                          for f in s.get("findings", [])

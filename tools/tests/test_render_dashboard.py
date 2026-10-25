@@ -126,6 +126,80 @@ class RenderDashboardTests(unittest.TestCase):
         self.assertIn("| STORY-203 | — | `no transitions (events only)`",
                       text)
 
+    # ---- owner fold (B7): claim → handover → release, latest row wins
+    def _assign(self, eid: str, **kw):
+        row = {"event": "assignment", "event_id": eid,
+               "story_id": "STORY-220", "recorded_at":
+               "2026-09-01T00:00:00Z", "provenance": "live"}
+        row.update(kw)
+        return row
+
+    def test_owner_fold_handover_and_release(self):
+        claim = self._assign("assignment-STORY-220-1", op="claim",
+                             owner="agent-a", host="host-1",
+                             session="sess-1", claimed_at="2026-09-01T00:00:00Z",
+                             start_sha="a" * 40)
+        hand = self._assign("assignment-STORY-220-2", op="handover",
+                            **{"from": "agent-a"}, to="agent-b",
+                            reason="shift change", flagged=False)
+        rel = self._assign("assignment-STORY-220-3", op="release",
+                           owner="agent-b")
+        text = RD.render([claim, hand], self.root, self.header)
+        self.assertIn("| STORY-220 | agent-b |", text)
+        text = RD.render([claim, hand, rel], self.root, self.header)
+        self.assertIn("| STORY-220 | — |", text)
+        # claim alone still shows the claimer
+        text = RD.render([claim], self.root, self.header)
+        self.assertIn("| STORY-220 | agent-a |", text)
+
+    # ---- attribution membership keyed by (story, finding_id) (B8)
+    def test_attribution_keyed_by_story_and_finding_id(self):
+        # two stories share the finding id F-1 (schema-permitted: finding
+        # ids are unique only within a story); only STORY-221's is
+        # attributed → STORY-222's counts UNATTRIBUTED
+        def ext_finding(sid, eid):
+            return {"event": "finding", "event_id": eid, "story_id": sid,
+                    "finding_id": "F-1", "source": "external",
+                    "reviewed_sha": "b" * 40, "introduced_sha": "b" * 40,
+                    "class": "mechanical", "severity": "minor",
+                    "disposition": "fixed", "logic_touched": False,
+                    "overlap_id": None, "overlap_id_reason": "independent",
+                    "fixer": "orchestrator", "fix_sha": "c" * 40,
+                    "validation": None, "validation_reason": "n/a",
+                    "evidence_path": f"stories/{sid}/ext.md",
+                    "recorded_at": "2026-09-01T00:00:00Z",
+                    "provenance": "live"}
+
+        def ctx(sid, eid):
+            return {"event": "review_context", "event_id": eid,
+                    "story_id": sid, "review_role": "external_review",
+                    "reviewed_sha": "b" * 40, "base_sha": "a" * 40,
+                    "context_manifest_path": f"stories/{sid}/manifest.json",
+                    "context_manifest_digest": "f" * 64,
+                    "prompt_version": "external_review-v0.1.0",
+                    "dispatch_id": None,
+                    "dispatch_id_reason": "external surface",
+                    "delivery_surface": "pr-full-diff",
+                    "requested_at": "2026-09-01T00:00:00Z",
+                    "recorded_at": "2026-09-01T00:00:00Z",
+                    "provenance": "live"}
+        attr = {"event": "review_attribution",
+                "event_id": "review_attribution-STORY-221-1",
+                "story_id": "STORY-221", "finding_id": "F-1",
+                "internal_context_event_id": "review_context-STORY-221-1",
+                "external_context_event_id": "review_context-STORY-221-1",
+                "classification": "MISSED_WITH_CONTEXT",
+                "classified_by": "orchestrator",
+                "evidence_path": "stories/STORY-221/attr.md",
+                "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"}
+        events = [ctx("STORY-221", "review_context-STORY-221-1"),
+                  ctx("STORY-222", "review_context-STORY-222-1"),
+                  ext_finding("STORY-221", "finding-STORY-221-1"),
+                  ext_finding("STORY-222", "finding-STORY-222-1"),
+                  attr]
+        text = RD.render(events, self.root, self.header)
+        self.assertIn("UNATTRIBUTED 1", text)
+
     def test_notes_sidecar_inlined(self):
         notes = self.root / "factory" / "dashboard-notes.md"
         notes.parent.mkdir(parents=True, exist_ok=True)

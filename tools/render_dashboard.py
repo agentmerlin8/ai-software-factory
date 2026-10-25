@@ -133,6 +133,11 @@ def render(events: list[dict], root: Path, header: str,
             s["suite"] = e
 
     for sid, story in stories.items():
+        # R23-X1: keep the RAW (unfolded) finding history alongside the
+        # latest-row fold — the external-round counter must see every
+        # lifecycle row (a finding first cited in round 1 and updated in
+        # round 2 spans TWO rounds), while dispositions keep the fold.
+        story["finding_history"] = list(story.get("findings", []))
         story["findings"] = L.latest_findings(events, sid)
 
     def _valid_counter(v) -> bool:
@@ -189,7 +194,13 @@ def render(events: list[dict], root: Path, header: str,
                    for k, v in totals.items())
 
     def external_rounds(s: dict) -> int:
-        rounds = {f.get("evidence_path") for f in s.get("findings", [])
+        # R23-X1: count DISTINCT rounds across ALL lifecycle rows (raw
+        # history), not the latest-row fold — an update that moves a
+        # finding to a later round must not erase the earlier one.
+        rows = s.get("finding_history")
+        if rows is None:  # defensive: fall back to the folded rows
+            rows = s.get("findings", [])
+        rounds = {f.get("evidence_path") for f in rows
                   if f.get("source") == "external"
                   and f.get("evidence_path")}
         return len(rounds)
@@ -252,17 +263,25 @@ def render(events: list[dict], root: Path, header: str,
                f"{sum(1 for s in stories.values() for f in s.get('findings', []) if f.get('class') == 'nit' and f.get('logic_touched'))} |")
     hg = [e for e in events if e["event"] == "human_gate"]
 
-    def truly_pending(g, idx):
+    def superseded(g, idx):
+        """An ask row whose reply was appended later (append-only ledger):
+        unanswered here, but a later answered row for the same
+        (story, gate) records the reply — one human intervention, not
+        two. R23-X2: totals/avoidable must count LIFECYCLES, not rows."""
         if g.get("answered_at"):
             return False
-        # append-only ledger: an unanswered ask row is superseded when a
-        # later answered row for the same (story, gate) records the reply
-        return not any(s.get("answered_at")
-                       and s.get("story_id") == g.get("story_id")
-                       and s.get("gate") == g.get("gate")
-                       for s in hg[idx + 1:])
-    out.append(f"| Human gates (avoidable target 0/story) | total {len(hg)}, "
-               f"avoidable {sum(1 for g in hg if g.get('gate') == 'avoidable')}, "
+        return any(s.get("answered_at")
+                   and s.get("story_id") == g.get("story_id")
+                   and s.get("gate") == g.get("gate")
+                   for s in hg[idx + 1:])
+
+    def truly_pending(g, idx):
+        return not g.get("answered_at") and not superseded(g, idx)
+
+    live_gates = [(i, g) for i, g in enumerate(hg) if not superseded(g, i)]
+    out.append(f"| Human gates (avoidable target 0/story) | "
+               f"total {len(live_gates)}, "
+               f"avoidable {sum(1 for _, g in live_gates if g.get('gate') == 'avoidable')}, "
                f"pending {sum(1 for i, g in enumerate(hg) if truly_pending(g, i))} |")
     corr_events = [e for e in events if e["event"] == "correction"]
     out.append(f"| Reconciliation corrections applied | {len(corr_events)} |")

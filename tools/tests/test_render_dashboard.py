@@ -746,5 +746,147 @@ class InstrumentedTotalsValidityTests(unittest.TestCase):
         self.assertIn("0 — none", ff)  # 1 loop row → not loop-free
 
 
+class ExternalRoundsFullHistoryTests(unittest.TestCase):
+    """R23-X1: the external-round counter reads the RAW (unfolded)
+    finding history — a finding first cited in round 1 and updated in
+    round 2 spans TWO distinct rounds. Dispositions keep latest-row
+    folding; only the round COUNT sees every lifecycle row."""
+
+    HEADER = "H"
+
+    def _finding(self, eid, fid, evidence, disposition, ts):
+        return {"event": "finding", "event_id": eid, "story_id": "S",
+                "finding_id": fid, "source": "external",
+                "reviewed_sha": "b" * 40, "introduced_sha": "b" * 40,
+                "class": "mechanical", "severity": "minor",
+                "disposition": disposition, "logic_touched": False,
+                "overlap_id": None, "overlap_id_reason": "independent",
+                "fixer": "orchestrator", "fix_sha": "c" * 40,
+                "validation": None, "validation_reason": "n/a",
+                "evidence_path": evidence, "recorded_at": ts,
+                "provenance": "live"}
+
+    def _outcome_row(self):
+        return {"event": "outcome", "event_id": "outcome-S-1",
+                "story_id": "S", "merged_sha": "deadbeef",
+                "merged_at": "2026-09-02T01:00:00Z",
+                "live_proof_status": None,
+                "totals": {"plan_loops": 0, "code_loops": 0},
+                "recorded_at": "2026-09-02T01:30:00Z", "provenance": "live"}
+
+    def _render(self, events):
+        with tempfile.TemporaryDirectory() as td:
+            return RD.render(events, Path(td), self.HEADER)
+
+    def test_update_across_two_rounds_counts_both(self):
+        r1 = self._finding("finding-S-1", "F-1",
+                           "stories/S/external-round-1.md", "open",
+                           "2026-09-01T00:00:00Z")
+        r2 = self._finding("finding-S-2", "F-1",
+                           "stories/S/external-round-2.md", "fixed",
+                           "2026-09-01T01:00:00Z")
+        text = self._render([r1, r2, self._outcome_row()])
+        # total (merged rollup) AND the per-story Ext rounds cell = 2
+        self.assertIn("| Observed external correction rounds | 2 |", text)
+        self.assertIn("| S | — | `MERGED*` | 0/0 | 2 |", text)
+
+    def test_single_round_unchanged(self):
+        r1 = self._finding("finding-S-1", "F-1",
+                           "stories/S/external-round-1.md", "fixed",
+                           "2026-09-01T00:00:00Z")
+        text = self._render([r1, self._outcome_row()])
+        self.assertIn("| Observed external correction rounds | 1 |", text)
+        self.assertIn("| S | — | `MERGED*` | 0/0 | 1 |", text)
+
+    def test_same_round_repeated_evidence_counts_once(self):
+        # two distinct findings cited in the SAME round file = one round
+        r1 = self._finding("finding-S-1", "F-1",
+                           "stories/S/external-round-1.md", "fixed",
+                           "2026-09-01T00:00:00Z")
+        r2 = self._finding("finding-S-2", "F-2",
+                           "stories/S/external-round-1.md", "fixed",
+                           "2026-09-01T00:30:00Z")
+        text = self._render([r1, r2, self._outcome_row()])
+        self.assertIn("| Observed external correction rounds | 1 |", text)
+        self.assertIn("| S | — | `MERGED*` | 0/0 | 1 |", text)
+
+    def test_dispositions_still_fold_to_latest_row(self):
+        # the round-2 update flips disposition to `fixed`; the correction
+        # count still sees ONE fixed finding (latest-row fold intact)
+        r1 = self._finding("finding-S-1", "F-1",
+                           "stories/S/external-round-1.md", "open",
+                           "2026-09-01T00:00:00Z")
+        r2 = self._finding("finding-S-2", "F-1",
+                           "stories/S/external-round-2.md", "fixed",
+                           "2026-09-01T01:00:00Z")
+        text = self._render([r1, r2, self._outcome_row()])
+        # Corrections cell = 1 (one fixed finding after the fold, no loops)
+        self.assertIn("| S | — | `MERGED*` | 0/0 | 2 | 1 | deadbeef | — |",
+                      text)
+
+    def test_internal_findings_not_counted_as_external_rounds(self):
+        row = self._finding("finding-S-1", "F-1",
+                            "stories/S/internal-round-1.md", "fixed",
+                            "2026-09-01T00:00:00Z")
+        row["source"] = "internal"
+        text = self._render([row, self._outcome_row()])
+        self.assertIn("| Observed external correction rounds | 0 |", text)
+
+
+class GateLifecycleTotalsTests(unittest.TestCase):
+    """R23-X2: gate totals/avoidable count LIFECYCLES, not rows — an
+    unanswered ask row superseded by its appended answer is the SAME
+    human intervention and must not be counted twice (the treatment the
+    pending calculation already applied)."""
+
+    HEADER = "H"
+
+    def _gate(self, eid, gate, answered, ts):
+        return {"event": "human_gate", "event_id": eid, "story_id": "S",
+                "gate": gate, "question": "q?", "asked_at": ts,
+                "answered_at": ts if answered else None,
+                "decision": "approved" if answered else None,
+                "answered_by": "human-1" if answered else None,
+                "recorded_at": ts, "provenance": "live"}
+
+    def _render(self, events):
+        with tempfile.TemporaryDirectory() as td:
+            return RD.render(events, Path(td), self.HEADER)
+
+    def _gate_line(self, text):
+        return next(l for l in text.splitlines()
+                    if l.startswith("| Human gates"))
+
+    def test_ask_answer_pair_counted_once(self):
+        ask = self._gate("human_gate-S-1", "avoidable", False,
+                         "2026-09-01T00:00:00Z")
+        ans = self._gate("human_gate-S-2", "avoidable", True,
+                         "2026-09-01T00:30:00Z")
+        line = self._gate_line(self._render([ask, ans]))
+        self.assertIn("total 1, avoidable 1, pending 0", line)
+
+    def test_unanswered_ask_counted_once_and_pending(self):
+        ask = self._gate("human_gate-S-1", "avoidable", False,
+                         "2026-09-01T00:00:00Z")
+        line = self._gate_line(self._render([ask]))
+        self.assertIn("total 1, avoidable 1, pending 1", line)
+
+    def test_answered_gate_alone_counted(self):
+        ans = self._gate("human_gate-S-1", "merge", True,
+                         "2026-09-01T00:00:00Z")
+        line = self._gate_line(self._render([ans]))
+        self.assertIn("total 1, avoidable 0, pending 0", line)
+
+    def test_distinct_gates_both_counted(self):
+        # supersession matches on (story, gate) — a different gate is a
+        # distinct lifecycle and is NOT folded away
+        ask = self._gate("human_gate-S-1", "avoidable", False,
+                         "2026-09-01T00:00:00Z")
+        other = self._gate("human_gate-S-2", "merge", True,
+                           "2026-09-01T00:30:00Z")
+        line = self._gate_line(self._render([ask, other]))
+        self.assertIn("total 2, avoidable 1, pending 1", line)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

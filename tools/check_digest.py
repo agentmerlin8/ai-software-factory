@@ -92,11 +92,21 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             except RuntimeError:
                 errors.append(f"manifest path missing at {sha}: {p}")
 
-    # 3. AC count matches story file
+    # 3. AC count matches story file — BOTH inputs are REQUIRED (fail
+    # closed): without the declaration or without the ground-truth story
+    # file the honesty check cannot run, and "cannot check" is a refusal.
     ac_match = re.search(r"Acceptance criteria: exactly (\d+)", text)
     story_file = next((f for f in story_file_candidates(root, story)
                        if f.exists()), None)
-    if ac_match and story_file is not None:
+    if ac_match is None:
+        errors.append('missing AC-count declaration '
+                      '("Acceptance criteria: exactly N")')
+    elif story_file is None:
+        cands = ", ".join(f.relative_to(root).as_posix()
+                          for f in story_file_candidates(root, story))
+        errors.append("story file not found for AC-count ground truth "
+                      f"(looked at {cands})")
+    else:
         rel = story_file.relative_to(root).as_posix()
         try:
             story_text = git(root, "show", f"{sha}:{rel}")
@@ -117,6 +127,9 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             if not mm:
                 continue
             path, lineno, desc = mm.group(1), int(mm.group(2)), mm.group(3)
+            if lineno < 1:
+                errors.append(f"anchor line must be >= 1: {path}:{lineno}")
+                continue
             try:
                 src = git(root, "show", f"{sha}:{path}")
             except RuntimeError:

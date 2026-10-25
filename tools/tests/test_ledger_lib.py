@@ -267,6 +267,103 @@ class TestAppend(unittest.TestCase):
         self.assertEqual(L.seen_ended([ended], transition("t", "PLANNED")), "")
 
 
+class TestAppendCandidateLedger(unittest.TestCase):
+    """F1: append_event validates the CANDIDATE ledger (existing rows +
+    the new row) with the same machinery load uses — cross-row laws are
+    enforced at append time, and a refusal never touches the file."""
+
+    def test_duplicate_non_dispatch_id_refused_at_append(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, transition("t-1", "PLANNED"))
+            before = p.read_bytes()
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, transition("t-1", "PLANNED"))
+            self.assertIn("candidate ledger rejected:", str(cm.exception))
+            self.assertIn("duplicate event_id 't-1'", str(cm.exception))
+            self.assertEqual(p.read_bytes(), before)  # nothing written
+
+    def test_second_dispatch_completion_refused_at_append(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, dispatch_pre())
+            L.append_event(p, dispatch_done())
+            before = p.read_bytes()
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, dispatch_done())
+            self.assertIn("candidate ledger rejected:", str(cm.exception))
+            self.assertIn("has 3 rows", str(cm.exception))
+            self.assertEqual(p.read_bytes(), before)
+
+    def test_orphan_live_completion_refused_at_append(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, dispatch_done())  # live, no pre-spawn row
+            self.assertIn("candidate ledger rejected:", str(cm.exception))
+            self.assertIn("single completed row must be provenance=backfilled",
+                          str(cm.exception))
+            self.assertFalse(p.exists())
+
+    def test_backfilled_single_completion_still_appends(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, dispatch_done(provenance="backfilled"))
+            self.assertEqual(len(L.load_events(p)), 1)
+
+    def test_happy_path_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, transition("t-1", "PLANNED"))
+            L.append_event(p, transition("t-2", "CODING", "PLANNED"))
+            L.append_event(p, dispatch_pre())
+            L.append_event(p, dispatch_done())
+            self.assertEqual(len(L.load_events(p)), 4)
+
+    def test_stale_restart_keeps_specialized_message(self):
+        """The pre-existing dispatch guard fires BEFORE the candidate
+        check, so its specialized message is preserved."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, dispatch_pre())
+            L.append_event(p, dispatch_done())
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, dispatch_pre())
+            self.assertIn("stale notifications cannot re-start it",
+                          str(cm.exception))
+
+
+class TestAppendTrailingNewline(unittest.TestCase):
+    """F2: a ledger file missing its trailing newline refuses appends
+    (fail closed) — the next object would land on the same line."""
+
+    def test_missing_terminator_refused_then_repaired(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            p.write_text(json.dumps(transition("t-1", "PLANNED")),
+                         encoding="utf-8", newline="\n")  # no trailing \n
+            before = p.read_bytes()
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, transition("t-2", "CODING", "PLANNED"))
+            self.assertIn("missing its trailing newline", str(cm.exception))
+            self.assertIn("repair the file before appending",
+                          str(cm.exception))
+            self.assertEqual(p.read_bytes(), before)  # file untouched
+            # repair the terminator, then the append succeeds
+            p.write_bytes(before + b"\n")
+            L.append_event(p, transition("t-2", "CODING", "PLANNED"))
+            events = L.load_events(p)
+            self.assertEqual(len(events), 2)
+            self.assertEqual(len(p.read_bytes().splitlines()), 2)
+
+    def test_empty_file_not_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            p.write_bytes(b"")  # empty, no terminator — legal
+            L.append_event(p, transition("t-1", "PLANNED"))
+            self.assertEqual(len(L.load_events(p)), 1)
+
+
 class TestUnknownFieldRejection(unittest.TestCase):
     """S2 field-set strictness (architecture.md §Ledger event schemas —
     extra-key rejection is controller-side): only allowed TOP-LEVEL keys

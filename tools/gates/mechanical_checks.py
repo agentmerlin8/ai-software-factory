@@ -141,6 +141,13 @@ def parse_test_command(raw: str, root: Path,
     for segment in segments:
         if not segment:
             raise ValueError(f"empty verify command segment: {raw!r}")
+        if external is not None:
+            # Setup (cd/export/env-prefix) is only legal BEFORE the external
+            # command — applying it afterwards would retroactively change
+            # the cwd/env of an already-chosen command.
+            raise ValueError(
+                f"verify command has segments after the external command: "
+                f"{raw!r}")
         if segment[0] == "export":
             assignments = segment[1:]
             if not assignments:

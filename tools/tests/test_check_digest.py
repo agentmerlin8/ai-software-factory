@@ -11,12 +11,40 @@ Stdlib unittest.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_digest as CD  # noqa: E402
+
+FXROOT = Path(__file__).resolve().parent / "fixtures" / "check_digest"
+
+
+def build_repo(td: str, fixture: str, sid: str) -> Path:
+    """Throwaway git repo from a check_digest fixture (same shape as the
+    gate harness's DigestGateFixtures._build_repo). A fixture without a
+    story.md builds a repo without one (the no-ground-truth case)."""
+    root = Path(td)
+    fx = FXROOT / fixture
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "app.py").write_text(
+        (fx / "tree" / "src" / "app.py").read_text(encoding="utf-8"))
+    sdir = root / "stories" / sid
+    sdir.mkdir(parents=True)
+    if (fx / "story.md").exists():
+        (sdir / "story.md").write_text(
+            (fx / "story.md").read_text(encoding="utf-8"))
+    (sdir / "context-digest.md").write_text(
+        (fx / "context-digest.md").read_text(encoding="utf-8"))
+    for args in (["init", "-q"], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "fixture"]):
+        subprocess.run(["git", "-C", str(root), *args], check=True,
+                       capture_output=True)
+    return root
 
 
 class SectionPresenceTests(unittest.TestCase):
@@ -99,6 +127,49 @@ class AnchorParseTests(unittest.TestCase):
         mm = re.match(r"^\s*-?\s*`?([^`:\s]+\.\w+):(\d+)`?\s*—?\s*([^—]*)",
                       "a prose sentence without anchors")
         self.assertIsNone(mm)
+
+
+class FailClosedACInputsTests(unittest.TestCase):
+    """F3: the AC-count honesty check fails closed when either input is
+    missing — the declaration phrase is REQUIRED, and without a story file
+    there is no ground truth."""
+
+    def test_missing_ac_count_declaration_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = build_repo(td, "no-ac-count", "STORY-903")
+            errors = CD.run_gate(root, "STORY-903", "HEAD")
+            self.assertIn('missing AC-count declaration '
+                          '("Acceptance criteria: exactly N")', errors)
+
+    def test_missing_story_file_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = build_repo(td, "no-story-file", "STORY-904")
+            errors = CD.run_gate(root, "STORY-904", "HEAD")
+            self.assertIn("story file not found for AC-count ground truth "
+                          "(looked at stories/STORY-904/story.md, "
+                          "stories/STORY-904.md)", errors)
+
+    def test_both_inputs_present_no_ac_errors(self):
+        """The zero-anchor fixture has BOTH AC inputs — only the anchor
+        error must appear (no fail-closed false positives)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = build_repo(td, "zero-anchor", "STORY-905")
+            errors = CD.run_gate(root, "STORY-905", "HEAD")
+            self.assertNotIn('missing AC-count declaration '
+                             '("Acceptance criteria: exactly N")', errors)
+            self.assertFalse(any("story file not found" in e
+                                 for e in errors), errors)
+
+
+class ZeroAnchorTests(unittest.TestCase):
+    """F4: a `:0` anchor must refuse — the old code indexed src_lines[-1]
+    and could false-pass a symbol on the last line."""
+
+    def test_zero_anchor_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = build_repo(td, "zero-anchor", "STORY-905")
+            errors = CD.run_gate(root, "STORY-905", "HEAD")
+            self.assertIn("anchor line must be >= 1: src/app.py:0", errors)
 
 
 class StoryFileCandidatesTests(unittest.TestCase):

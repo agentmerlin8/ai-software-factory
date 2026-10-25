@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError:
             missing.append(src)
             continue
-        lines = content.count("\n") + 1
+        lines = len(content.splitlines())
         manifest.append((src, len(content.encode()), lines))
         parts += [f"\n\n<!-- ===== SOURCE {src} ({lines} lines, pinned at "
                   f"{full_sha[:12]}) ===== -->\n",
@@ -122,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
     dest.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {dest}")
     print(f"bundle sha256: {digest}")
-    print(f"sources: {len(manifest)} · total lines: {text.count(chr(10))}")
+    print(f"sources: {len(manifest)} · total lines: "
+          f"{len(text.splitlines())}")
     return 0
 
 

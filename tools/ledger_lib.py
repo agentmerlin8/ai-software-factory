@@ -11,9 +11,11 @@ Laws enforced at the I/O boundary:
   * The ledger is append-only JSON Lines: one JSON object per line, UTC
     timestamps (`YYYY-MM-DDTHH:MM:SSZ`), stable event ids, LF endings,
     trailing newline. Corrections are events, never edits.
-  * `append_event` validates BEFORE writing (single-event schema via
-    ledger_schema + the stale-restart check): a refused event never
-    touches the file.
+  * `append_event` validates BEFORE writing: the single-event schema via
+    ledger_schema, the stale-restart check, the CANDIDATE ledger (existing
+    rows + the new row must pass the same cross-row laws `_all_errors`
+    enforces at load), and the file's trailing newline — a refused event
+    never touches the file.
   * `load_events` parses and then validates the whole ledger — schema plus
     the cross-row laws ledger_schema enforces on a snapshot: the dispatch
     two-row lifecycle (pre-spawn then completion; reversed order, stale
@@ -217,8 +219,13 @@ def seen_ended(events: list[dict], evt: dict) -> str:
 def append_event(ledger_path: Path | str, event: dict[str, Any]) -> None:
     """Validate + append exactly one JSON line to the ledger.
 
-    Validation is ledger_schema.validate_event plus the stale-restart check
-    (`seen_ended`); on refusal nothing is written and LedgerError lists
+    Validation is ledger_schema.validate_event, the stale-restart check
+    (`seen_ended`), the CANDIDATE ledger (existing rows + this event must
+    satisfy the same cross-row laws load enforces — duplicate
+    non-dispatch ids, a second dispatch completion, and orphan live
+    completions refuse here, at append time), and the file's trailing
+    newline (a terminator-less ledger refuses — repair before appending);
+    on refusal nothing is written and LedgerError lists
     every violation. Convenience defaults applied before validation:
     a null-valued nullable field's missing `<field>_reason` sibling is NOT
     invented (the null+reason law stays the caller's job), but a
@@ -260,6 +267,19 @@ def append_event(ledger_path: Path | str, event: dict[str, Any]) -> None:
     errs = S.validate_event(evt)
     if errs:
         raise LedgerError("event rejected:\n  " + "\n  ".join(errs))
+    # Candidate-ledger check (fail closed): the ledger PLUS the new row must
+    # satisfy the same cross-row laws load enforces — a duplicate
+    # non-dispatch id, a second dispatch completion, or an orphan live
+    # completion is refused HERE, at append time, never written.
+    cand_errs = _all_errors(events + [evt])
+    if cand_errs:
+        raise LedgerError("candidate ledger rejected:\n  "
+                          + "\n  ".join(cand_errs))
+    if p.exists():
+        raw = p.read_bytes()
+        if raw and not raw.endswith(b"\n"):
+            raise LedgerError(f"ledger {p} is missing its trailing newline "
+                              "— repair the file before appending")
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(evt, sort_keys=False, ensure_ascii=False) + "\n")

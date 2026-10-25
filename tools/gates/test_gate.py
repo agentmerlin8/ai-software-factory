@@ -358,6 +358,26 @@ class BuildLaneUnits(unittest.TestCase):
         with self.assertRaises(ValueError):
             M.parse_test_command("cd /etc && cat passwd", REPO)
 
+    def test_parse_test_command_refuses_segments_after_external(self):
+        """F5: setup AFTER the external command would be applied
+        retroactively (wrong cwd/env for the already-chosen command)."""
+        for raw in ("python3 -m unittest && cd nested",
+                    "python3 -m unittest && export X=1"):
+            with self.assertRaises(ValueError) as cm:
+                M.parse_test_command(raw, REPO)
+            self.assertIn(
+                "verify command has segments after the external command: ",
+                str(cm.exception))
+            self.assertIn(raw, str(cm.exception))
+
+    def test_parse_test_command_setup_before_external_accepted(self):
+        parsed = M.parse_test_command(
+            "cd nested && python3 -m unittest", REPO)
+        assert parsed is not None
+        cwd, _env, argv = parsed
+        self.assertEqual(cwd, (REPO / "nested").resolve())
+        self.assertEqual(argv, ["python3", "-m", "unittest"])
+
     def test_pinned_commands_injected_results(self):
         cmd = "python3 -m unittest tests.test_widget"
         contract = {"verify_commands": [cmd]}

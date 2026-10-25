@@ -156,6 +156,23 @@ class RenderProvenanceTests(unittest.TestCase):
         self.assertEqual(
             RP.main(["STORY-997", "--check", "--root", str(self.root)]), 0)
 
+    def test_check_compares_bytes_crlf_fails(self):
+        """R14-O4: a CRLF-converted generated file violates the required
+        LF format and MUST fail --check — read_text() normalization used
+        to hide the difference."""
+        self.assertEqual(RP.main(["STORY-203", "--root", str(self.root)]), 0)
+        p = self.stories / "STORY-203" / "PROVENANCE.md"
+        raw = p.read_bytes()
+        self.assertNotIn(b"\r\n", raw)  # renderer output is LF
+        p.write_bytes(raw.replace(b"\n", b"\r\n"))
+        self.assertEqual(
+            RP.main(["STORY-203", "--check", "--root", str(self.root)]), 1)
+        # re-render restores the LF bytes and --check passes again
+        self.assertEqual(RP.main(["STORY-203", "--root", str(self.root)]), 0)
+        self.assertEqual(p.read_bytes(), raw)
+        self.assertEqual(
+            RP.main(["STORY-203", "--check", "--root", str(self.root)]), 0)
+
     def test_all_discovery_confines_to_canonical_ids(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -1011,7 +1011,7 @@ class AnchorBulletFormsTests(unittest.TestCase):
             self.assertEqual(CD.run_gate(root, "STORY-942", "HEAD"), [])
 
     def test_grammar_accepts_all_bullet_markers(self):
-        pat = r"^\s*[-*+]?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)"
+        pat = r"^\s*(?:[-*+]|\d+\.)?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)"
         for line in ("- `src/app.py:12` — def f",
                      "* `src/app.py:12` — def f",
                      "+ `src/app.py:12` — def f",
@@ -1020,6 +1020,137 @@ class AnchorBulletFormsTests(unittest.TestCase):
             self.assertIsNotNone(mm, line)
             self.assertEqual(mm.group(1), "src/app.py")
             self.assertEqual(int(mm.group(2)), 12)
+
+
+def _r14_repo(root: Path, sid: str, *, src_lines: str, story_text: str,
+              manifest_rows: str, anchors: str) -> Path:
+    """R14 inline fixture: like _r8_repo but with a caller-supplied
+    manifest-rows block (leading pipes optional per row)."""
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "app.py").write_text(src_lines, encoding="utf-8")
+    sdir = root / "stories" / sid
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "story.md").write_text(story_text, encoding="utf-8")
+    (sdir / "context-digest.md").write_text(
+        f"# digest — {sid}\n\n"
+        "## 1. File manifest\n\n"
+        "| path | role |\n|---|---|\n"
+        f"{manifest_rows}\n"
+        "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+        "## 3. Frozen decisions\n\n- none.\n\n"
+        f"## 4. Code anchors\n\n{anchors}\n\n"
+        "## 5. Conventions\n\n- stdlib only.\n\n"
+        "## 6. Open questions\n\n- none.\n\n"
+        "## 7. Risk list\n\n- none — L\n\n"
+        "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+        encoding="utf-8")
+    _commit(root)
+    return root
+
+
+class ManifestPipelessRowTests(unittest.TestCase):
+    """R14-O1: manifest table rows may omit the leading pipe — a
+    pipe-less ghost row must still hit the existence check, and the
+    leading-pipe form is unchanged."""
+
+    def test_pipeless_ghost_row_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _r14_repo(
+                Path(td), "STORY-950", src_lines=J2_SRC,
+                story_text="# s\n\n- AC-1: one.\n",
+                manifest_rows="| `src/app.py` | subject |\n"
+                              "`src/ghost.py` | subject\n",
+                anchors="- `src/app.py:2` — def compute_total\n")
+            errors = CD.run_gate(root, "STORY-950", "HEAD")
+            self.assertIn("manifest path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_pipeless_bare_ghost_row_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _r14_repo(
+                Path(td), "STORY-951", src_lines=J2_SRC,
+                story_text="# s\n\n- AC-1: one.\n",
+                manifest_rows="src/ghost.py | subject\n",
+                anchors="- `src/app.py:2` — def compute_total\n")
+            errors = CD.run_gate(root, "STORY-951", "HEAD")
+            self.assertIn("manifest path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_leading_pipe_form_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _r14_repo(
+                Path(td), "STORY-952", src_lines=J2_SRC,
+                story_text="# s\n\n- AC-1: one.\n",
+                manifest_rows="| `src/app.py` | subject |\n",
+                anchors="- `src/app.py:2` — def compute_total\n")
+            self.assertEqual(CD.run_gate(root, "STORY-952", "HEAD"), [])
+
+    def test_pipeless_valid_row_resolves(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _r14_repo(
+                Path(td), "STORY-953", src_lines=J2_SRC,
+                story_text="# s\n\n- AC-1: one.\n",
+                manifest_rows="`src/app.py` | subject\n",
+                anchors="- `src/app.py:2` — def compute_total\n")
+            self.assertEqual(CD.run_gate(root, "STORY-953", "HEAD"), [])
+
+
+class NumberedAnchorTests(unittest.TestCase):
+    """R14-O2: the §4 anchor grammar accepts ORDERED-list markers
+    (`1.`) — a numbered ghost anchor is flagged instead of silently
+    skipped, numbered valid anchors resolve, and `-`/`*`/`+`/bare forms
+    are unchanged."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=J2_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_numbered_ghost_anchor_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(
+                td, "STORY-954",
+                "1. src/ghost.py:99 — def missing_symbol\n")
+            errors = CD.run_gate(root, "STORY-954", "HEAD")
+            self.assertIn("anchor path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_numbered_backtick_ghost_anchor_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(
+                td, "STORY-955",
+                "12. `src/ghost.py:999` — def nonexistent\n")
+            errors = CD.run_gate(root, "STORY-955", "HEAD")
+            self.assertIn("anchor path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_numbered_valid_anchor_resolves(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(
+                td, "STORY-956",
+                "1. `src/app.py:2` — def compute_total\n"
+                "2. `src/app.py:3` — return\n")
+            self.assertEqual(CD.run_gate(root, "STORY-956", "HEAD"), [])
+
+    def test_previous_forms_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(
+                td, "STORY-957",
+                "- `src/app.py:2` — def compute_total\n"
+                "* `src/app.py:3` — return\n")
+            self.assertEqual(CD.run_gate(root, "STORY-957", "HEAD"), [])
+
+    def test_grammar_accepts_ordered_markers(self):
+        pat = r"^\s*(?:[-*+]|\d+\.)?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)"
+        for line in ("1. src/ghost.py:99 — def missing_symbol",
+                     "12. `src/app.py:12` — def f",
+                     "  3. src/app.py:12 — def f",
+                     "- `src/app.py:12` — def f",
+                     "src/app.py:12 — def f"):
+            mm = re.match(pat, line)
+            self.assertIsNotNone(mm, line)
+            self.assertEqual(mm.group(1).strip("`"), "src/ghost.py"
+                             if "ghost" in line else "src/app.py")
 
 
 if __name__ == "__main__":

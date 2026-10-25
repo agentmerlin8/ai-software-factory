@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
@@ -348,6 +350,43 @@ class UpsertSeamTests(unittest.TestCase):
                             for a in self.calls[1][0]))
         self.assertTrue(json.loads(self.calls[1][1])["body"]
                         .startswith(R.PIN_MARKER))
+
+    def test_selector_anchored_to_body_start(self):
+        """R14-O3: the listing selector must use startswith, NOT
+        contains — a contains selector also matches a reply QUOTING the
+        card and would PATCH that reply."""
+        R.upsert_comment("o/r", 7, "BODY", gh_fn=self.fake_gh)
+        jq = self.calls[0][0][-1]
+        self.assertIn(f'startswith("{R.PIN_MARKER}")', jq)
+        self.assertNotIn("contains(", jq)
+
+    def test_quoted_reply_not_selected_by_jq(self):
+        """R14-O3 grounded check: run the ACTUAL jq selector emitted by
+        upsert_comment over a comment list where a later reply quotes the
+        card mid-body (blockquote + code fence). Only the genuine card
+        comment (marker at start) is selected."""
+        captured: dict = {}
+
+        def gh(*args, stdin=None):
+            if len(captured) == 0 and "--jq" in args:
+                captured["jq"] = args[args.index("--jq") + 1]
+                return "101\n"
+            return "ok"
+
+        R.upsert_comment("o/r", 7, "BODY", gh_fn=gh)
+        if not shutil.which("jq"):
+            self.skipTest("jq not installed — selector string verified by "
+                          "test_selector_anchored_to_body_start")
+        comments = [
+            {"id": 55, "body": f"As seen in:\n> {R.PIN_MARKER}\n"},
+            {"id": 77, "body": f"```\n{R.PIN_MARKER}\nCARD\n```\n"},
+            {"id": 101, "body": f"{R.PIN_MARKER}\nCARD BODY\n"},
+        ]
+        out = subprocess.run(
+            ["jq", "-r", captured["jq"]],
+            input=json.dumps(comments), capture_output=True,
+            text=True, check=True)
+        self.assertEqual(out.stdout.split(), ["101"])
 
     def test_post_when_no_pin(self):
         R.upsert_comment("o/r", 7, "BODY", gh_fn=self.fake_gh_empty)

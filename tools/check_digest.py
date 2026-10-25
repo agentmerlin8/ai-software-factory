@@ -153,7 +153,13 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
         errors.append("unparseable section: ## 1. File manifest")
     if m:
         for line in m.group(1).splitlines():
-            mm = re.match(r"^\s*\|\s*`?([^`|\n]+?)`?\s*\|", line)
+            # R14-O1: the leading pipe is OPTIONAL — Markdown allows
+            # table rows without it (`src/x.py | subject`), and a
+            # pipe-less ghost row must not slip past the existence
+            # check. Header (`path | role`) and separator (`---|---`)
+            # skips below already key off the CELL text, so they keep
+            # working with or without the leading pipe.
+            mm = re.match(r"^\s*\|?\s*`?([^`|\n]+?)`?\s*\|", line)
             if not mm:
                 continue
             p = mm.group(1).strip()
@@ -207,13 +213,16 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
     # bin/build:3) get the same existence/line-bound checks. R11-L3: the
     # bullet marker accepts all Markdown unordered-list forms (`-`, `*`,
     # `+`) — a `*`-bulleted ghost anchor must not be silently skipped.
+    # R14-O2: ORDERED-list markers (`1.`) are accepted too — a numbered
+    # ghost anchor must not fall through to `continue` unchecked.
     am = re.search(r"## 4\. Code anchors[ \t]*\n(.*?)(?=\n## 5\.)",
                    text, re.S)
     if am is None and "## 4. Code anchors" in text:
         errors.append("unparseable section: ## 4. Code anchors")
     if am:
         for line in am.group(1).splitlines():
-            mm = re.match(r"^\s*[-*+]?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
+            mm = re.match(r"^\s*(?:[-*+]|\d+\.)?\s*"
+                          r"`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
                           line)
             if not mm:
                 continue

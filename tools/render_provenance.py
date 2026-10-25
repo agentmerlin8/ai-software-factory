@@ -373,9 +373,13 @@ def main(argv: list[str] | None = None) -> int:
         text = render(events, sid, header)
         p = stories_root / sid / "PROVENANCE.md"
         if args.check:
-            cur = p.read_text(encoding="utf-8") if p.exists() else None
-            if cur is not None and cur.startswith(HEADER_START) \
-                    and cur != text:
+            # R14-O4: compare raw BYTES — read_text() would normalize a
+            # CRLF-mangled file back to LF and let it pass --check
+            # despite violating the required LF format.
+            cur = p.read_bytes() if p.exists() else None
+            if cur is not None \
+                    and cur.startswith(HEADER_START.encode("utf-8")) \
+                    and cur != text.encode("utf-8"):
                 print(f"OUT OF DATE: {p}")
                 rc = 1
             continue

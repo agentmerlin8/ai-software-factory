@@ -336,7 +336,11 @@ def upsert_comment(repo: str, issue: int, body: str,
         return "dry-run"
     listing = gh_fn("api", f"repos/{repo}/issues/{issue}/comments",
                     "--paginate", "--jq",
-                    f'.[] | select(.body | contains("{PIN_MARKER}")) | .id')
+                    # R14-O3: anchor to the START of the body — this path
+                    # always stores the marker as the first line, and a
+                    # `contains` selector would also match a later reply
+                    # QUOTING the card (blockquote/code fence) and PATCH it.
+                    f'.[] | select(.body | startswith("{PIN_MARKER}")) | .id')
     ids = [ln for ln in listing.splitlines() if ln.strip()]
     target = pick_target(ids)
     if target:

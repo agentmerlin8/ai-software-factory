@@ -126,6 +126,7 @@ limits = { wall = "…", runs = "…", budget = "…" }
 ### CLI surface (candidate additions)
 
 Shipped in the reference and ported genericized: `status` · `doctor` · `prepare` (sealed, non-launching) · `validate`, plus the run-phase record path, surfaced in the kit as `run-stage`. Workspace layer (candidates): `factory workspace init|add-repo|show` · `factory env show|resolve` · `render` · `claim` / `transition` (wraps the existing controller — no second state machine; read path first).
+Read path SHIPPED (S2-T7): `python3 factory/tools/factory.py workspace show [--repo <path>] [--json]` · `env show|resolve <name|path> [--strict] [--json]`, global `--workspace <dir>` — stable text/JSON (same data, sorted keys), validation delegated verbatim to `config_validator`/`ledger_lib`, nonzero refusals (0 ok · 1 findings · 2 usage), strictly read-only.
 
 ## Ledger durability and the single writer
 

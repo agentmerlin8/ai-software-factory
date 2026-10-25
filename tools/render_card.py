@@ -100,8 +100,10 @@ def known_story_ids(events: list[dict], root: Path) -> set[str]:
     for rel in KNOWN_SCAN_FILES:
         f = root / rel
         if f.exists():
-            ids.update(m for m in f.read_text(encoding="utf-8").split()
-                       if L.S.STORY_ID_RE.fullmatch(m.strip("`,.:;()")))
+            for m in f.read_text(encoding="utf-8").split():
+                bare = m.strip().strip("`,.:;()").strip().rstrip(":")
+                if L.S.STORY_ID_RE.fullmatch(bare):
+                    ids.add(bare)  # store the NORMALIZED id, not the token
     return ids
 
 
@@ -140,12 +142,14 @@ def next_moves(sid: str, state: str, blocked_from: str | None,
     nxt = SM.next_state(state)
     if nxt is None:
         return ["— none —"]
-    moves = [f"advance to **{nxt}**",
-             f"CLI: `python3 factory/tools/controller.py request {sid} "
-             f"{nxt}`"]
+    cmd = f"python3 factory/tools/controller.py request {sid} {nxt}"
     keys = SM.EVIDENCE_KEYS.get(nxt, ())
     if keys:
-        moves[-1] += " --evidence " + " ".join(f"{k}=…" for k in keys)
+        # The controller declares --evidence action="append" (one value
+        # per occurrence): repeat the flag per key, whole command in the
+        # inline-code span so it copies as one parseable command.
+        cmd += "".join(f" --evidence {k}=…" for k in keys)
+    moves = [f"advance to **{nxt}**", f"CLI: `{cmd}`"]
     # FIXING reentry: post-review states may legally route back to FIXING.
     if state in SM.FIXING_REENTRY_FROM:
         moves.append(f"or route back to **FIXING** (reentry legal from "
@@ -227,8 +231,12 @@ def render_card_text(sid: str, events: list[dict], state: str,
     """Pure renderer: card markdown from ledger events + computed state.
     Deterministic — no wall-clock content."""
     story_events = [e for e in events if e.get("story_id") == sid]
+    # Last-transition line is STORY scope: repo-tagged sub-events (which
+    # can legitimately differ from the story state, e.g. one repo MERGED
+    # while the story is still CODING) never display as the story's last
+    # transition — fall through to the latest story-scope transition.
     transitions = [e for e in story_events
-                   if e.get("event") == "transition"]
+                   if e.get("event") == "transition" and not e.get("repo")]
     gates = [e for e in story_events if e.get("event") == "human_gate"]
     assignments = [e for e in story_events
                    if e.get("event") == "assignment"]

@@ -80,8 +80,17 @@ class CardFixtureTests(unittest.TestCase):
         self.assertIn("advance to **BUILD_GREEN**", card)
         self.assertIn(
             "CLI: `python3 factory/tools/controller.py request "
-            f"{STORY} BUILD_GREEN` --evidence commit_sha=… "
-            "build_result=… named_tests_result=…", card)
+            f"{STORY} BUILD_GREEN --evidence commit_sha=… "
+            "--evidence build_result=… --evidence named_tests_result=…`",
+            card)
+        # one --evidence flag per required key (controller append form)
+        line = next(x for x in card.splitlines()
+                    if "--evidence commit_sha" in x)
+        self.assertEqual(
+            line.count("--evidence"),
+            len(SM.EVIDENCE_KEYS["BUILD_GREEN"]))
+        # no stray multi-value form (single flag followed by 2+ values)
+        self.assertNotIn("--evidence commit_sha=… build_result=…", card)
 
     def test_open_findings_summary(self):
         card = self.card()
@@ -163,6 +172,99 @@ class NextMoveTests(unittest.TestCase):
         for s in SM.LINEAR[:-1]:
             m = self.moves(s)
             self.assertIn(f"advance to **{SM.next_state(s)}**", m[0], s)
+
+    def test_evidence_command_parses_under_controller_parser(self):
+        """M2 parity: the documented command (flags inside the code span,
+        --evidence repeated per key) parses under the controller's REAL
+        argparse parser — argparse failure raises SystemExit, so reaching
+        any integer return proves parseability."""
+        import shlex
+        from contextlib import redirect_stdout, redirect_stderr
+        from tools import controller as Ctl
+        m = self.moves("CODING")
+        cli = next(x for x in m if x.startswith("CLI:"))
+        span = cli.split("`", 1)[1].rsplit("`", 1)[0]
+        argv = shlex.split(span)
+        self.assertEqual(argv[:5], [
+            "python3", "factory/tools/controller.py", "request",
+            "STORY-902", "BUILD_GREEN"])
+        tail = argv[5:]
+        self.assertEqual(tail.count("--evidence"),
+                         len(SM.EVIDENCE_KEYS["BUILD_GREEN"]))
+        with tempfile.TemporaryDirectory() as td:
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = Ctl.main(["--root", td, "request", *argv[3:]])
+        self.assertIsInstance(rc, int)  # parsed; refused later, not usage-exit
+        self.assertNotIn("usage:", err.getvalue())
+
+
+class FormattedMentionTests(unittest.TestCase):
+    """M1: intake mentions normalize on insertion — backtick-wrapped or
+    colon-suffixed ids yield a bare STORY-NNN in the known set."""
+
+    def test_formatted_intake_ids_are_normalized(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "stories").mkdir()
+            (root / "stories" / "BACKLOG.md").write_text(
+                "- `STORY-951`: candidate (backticked, colon-suffixed)\n"
+                "- STORY-952 — bare mention\n", encoding="utf-8")
+            ids = R.known_story_ids([], root)
+            self.assertIn("STORY-951", ids)
+            self.assertIn("STORY-952", ids)
+            self.assertNotIn("`STORY-951`:", ids)
+            self.assertTrue(R.story_known("STORY-951", [], root))
+            # a pre-ledger formatted mention still receives a pinned card
+            card, known = R.build_card("STORY-951", [], root, "digest123456")
+            self.assertTrue(known)
+            self.assertIn("## Factory Card — STORY-951", card)
+            self.assertNotIn("appears nowhere", card)
+
+
+class StoryScopeTransitionTests(unittest.TestCase):
+    """M3: the last-transition line is story scope — repo-tagged
+    sub-events never display as the story's last transition."""
+
+    def test_repo_sub_event_not_shown_as_last_transition(self):
+        events = [
+            {"event": "transition", "story_id": "STORY-961", "repo": None,
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator"},
+            {"event": "transition", "story_id": "STORY-961", "repo": "app",
+             "from_state": "CODING", "to_state": "MERGED",
+             "requested_by": "orchestrator"},
+        ]
+        card = R.render_card_text("STORY-961", events, "CODING", None,
+                                  Path("/nonexistent"), "digest123456")
+        self.assertIn("**Last transition:** BACKLOG → CODING (by "
+                      "orchestrator)", card)
+        self.assertNotIn("MERGED", card.split("###")[0])
+
+    def test_only_repo_events_falls_back_to_none_line(self):
+        events = [
+            {"event": "transition", "story_id": "STORY-962", "repo": "app",
+             "from_state": "CODING", "to_state": "MERGED",
+             "requested_by": "orchestrator"},
+        ]
+        card = R.render_card_text("STORY-962", events, "CODING", None,
+                                  Path("/nonexistent"), "digest123456")
+        self.assertIn("**Last transition:** none — no recorded transitions "
+                      "yet", card)
+
+    def test_story_scope_picks_unchanged(self):
+        events = [
+            {"event": "transition", "story_id": "STORY-963", "repo": None,
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator"},
+            {"event": "transition", "story_id": "STORY-963", "repo": None,
+             "from_state": "CODING", "to_state": "BUILD_GREEN",
+             "requested_by": "agent-a"},
+        ]
+        card = R.render_card_text("STORY-963", events, "BUILD_GREEN", None,
+                                  Path("/nonexistent"), "digest123456")
+        self.assertIn("**Last transition:** CODING → BUILD_GREEN (by "
+                      "agent-a)", card)
 
 
 class GateSupersessionTests(unittest.TestCase):

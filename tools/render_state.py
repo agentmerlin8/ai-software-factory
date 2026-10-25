@@ -36,6 +36,13 @@ except ImportError:  # direct-run layout: load the tools package itself
     from tools import ledger_lib as L
 
 
+def _cell(s) -> str:
+    """Escape a value for a markdown table cell (mirrors
+    render_provenance._cell exactly) — an unescaped `|` adds a column and
+    shifts every following field; an embedded newline breaks the row."""
+    return str(s).replace("|", "\\|").replace("\n", " ")
+
+
 def workspace_name(root: Path) -> str:
     """Workspace display name from <root>/workspace.toml (`workspace` key),
     else the generic default `factory` — renders are never project-named."""
@@ -188,7 +195,8 @@ def render(events: list[dict], sid: str, header: str,
             co = f" (+{','.join(lp['co_classes'])})" if lp.get("co_classes") else ""
             out.append(f"| {lp.get('occurred_on', lp['recorded_at'][:10])} "
                        f"| {lp['stage']} | {lp['loop_n']} "
-                       f"| {lp['class']}{co} | {lp['root_cause_one_line']} |")
+                       f"| {lp['class']}{co} "
+                       f"| {_cell(lp['root_cause_one_line'])} |")
     else:
         out.append("(none)")
     out.append("")
@@ -264,7 +272,8 @@ def render(events: list[dict], sid: str, header: str,
             else:
                 dec = fmt_null(g.get("decision"), "decision_reason", g)
                 aby = fmt_null(g.get("answered_by"), "answered_by_reason", g)
-            out.append(f"| {g['gate']} | {g['question']} | {g['asked_at']} "
+            out.append(f"| {g['gate']} | {_cell(g['question'])} "
+                       f"| {g['asked_at']} "
                        f"| {answered} | {dec} | {aby} |")
         out.append("")
 

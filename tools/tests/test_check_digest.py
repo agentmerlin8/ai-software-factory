@@ -1340,5 +1340,71 @@ class PinnedTreeGroundTruthTests(unittest.TestCase):
                           "story file has ~2", errors)
 
 
+class AnchorSignatureMemberTests(unittest.TestCase):
+    """R24-Y1: a call-signature anchor description checks the MEMBER
+    IDENTIFIER immediately before the `(` — `public static Foo Missing()`
+    must NOT pass against `public static Foo Bar()` on the shared return
+    type alone."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=R8_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_signature_wrong_member_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-970",
+                              "- `src/app.py:6` — public static Foo "
+                              "Missing()\n")
+            errors = CD.run_gate(root, "STORY-970", "HEAD")
+            self.assertIn("anchor symbol not on line 6 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_signature_correct_member_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-971",
+                              "- `src/app.py:6` — public static Foo Bar()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-971", "HEAD"), [])
+
+    def test_signature_with_args_wrong_member_flagged(self):
+        """Parenthesized arguments do not change the checked symbol —
+        the identifier before `(` is the member."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-972",
+                              "- `src/app.py:6` — public static Foo "
+                              "Missing(int x)\n")
+            errors = CD.run_gate(root, "STORY-972", "HEAD")
+            self.assertIn("anchor symbol not on line 6 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_python_signature_with_colon(self):
+        """A `name(...):` form (Python def anchored with the trailing
+        colon) checks the member identifier too."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-973",
+                              "- `src/app.py:3` — async def missing():\n")
+            errors = CD.run_gate(root, "STORY-973", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['missing']", errors)
+            root2 = self._repo(td + "b", "STORY-974",
+                               "- `src/app.py:3` — async def "
+                               "existing(self):\n")
+            self.assertEqual(CD.run_gate(root2, "STORY-974", "HEAD"), [])
+
+    def test_non_signature_description_keeps_keyword_skip(self):
+        """No call signature in the description → unchanged R8-I4
+        behavior: keyword-skip, first symbol token checked."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-975",
+                              "- `src/app.py:3` — async def existing\n")
+            self.assertEqual(CD.run_gate(root, "STORY-975", "HEAD"), [])
+            root2 = self._repo(td + "b", "STORY-976",
+                               "- `src/app.py:3` — async def "
+                               "not_present_anywhere\n")
+            errors = CD.run_gate(root2, "STORY-976", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['not_present_anywhere']", errors)
+
+
 if __name__ == "__main__":
     unittest.main()

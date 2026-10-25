@@ -405,6 +405,49 @@ class RenderStateTests(unittest.TestCase):
         self.assertIn("PENDING", row)
         self.assertIn("— (unanswered) | — (unanswered) |", row)
 
+    # ---- R24-Y2: table-cell escaping (mirrors render_provenance._cell)
+    def test_gate_question_pipe_is_escaped_and_columns_hold(self):
+        """A question containing `|` must not add a Markdown column —
+        the approval fields keep their intended positions."""
+        g = self._gate(event_id="human_gate-STORY-201-9",
+                       question="Approve `producer | consumer`?")
+        text = RS.render([g], "STORY-201", self.header, self.stories)
+        row = next(l for l in text.splitlines() if l.startswith("| merge |"))
+        self.assertIn("Approve `producer \\| consumer`?", row)
+        # exactly the 6 declared columns: 7 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+        self.assertTrue(row.endswith("| approved | approver-1 |"))
+
+    def test_gate_question_newline_stays_in_cell(self):
+        g = self._gate(event_id="human_gate-STORY-201-10",
+                       question="Merge now\nor later?")
+        text = RS.render([g], "STORY-201", self.header, self.stories)
+        row = next(l for l in text.splitlines() if l.startswith("| merge |"))
+        self.assertIn("Merge now or later?", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+
+    def test_root_cause_pipe_and_newline_stay_in_column(self):
+        """A root-cause explanation with pipes/newlines must stay in its
+        own column — the loop row keeps 5 columns."""
+        lp = {"event": "loop", "event_id": "loop-STORY-201-9",
+              "story_id": "STORY-201", "stage": "plan_review", "loop_n": 1,
+              "class": "reasoning",
+              "root_cause_one_line": "plan split a|b across\nservices",
+              "recorded_at": "2026-09-01T02:10:00Z", "provenance": "live"}
+        text = RS.render([lp], "STORY-201", self.header, self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| 2026-09-01 | plan_review |"))
+        self.assertIn("plan split a\\|b across services", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 6)
+        self.assertTrue(row.endswith("across services |"))
+
+    def test_unaffected_fixture_cells_render_unchanged(self):
+        """Cell text without pipes/newlines renders byte-identically —
+        the fixture question and root cause keep their plain form."""
+        text = self.render("STORY-201")
+        self.assertIn("| merge | Merge approved diff? |", text)
+        self.assertIn("| reasoning | plan omitted a migration step |", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

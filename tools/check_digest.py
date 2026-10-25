@@ -267,14 +267,25 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                 continue
             tokens = re.findall(r"\w+", desc)
             if tokens:
-                # R8-I4: skip leading declaration keywords/modifiers —
-                # `async def missing_symbol` must NOT pass against
-                # `async def existing():` because only the keyword tokens
-                # were checked. The first remaining SYMBOL token must
-                # appear on the line; when every token is a keyword the
-                # check degrades to the old first-two-tokens behavior.
-                symbols = [t for t in tokens if t not in DECL_KEYWORDS]
-                check = symbols[:1] if symbols else tokens[:2]
+                # R24-Y1: a CALL-SIGNATURE description (`name(...)`,
+                # optionally with a trailing `:`) checks the MEMBER
+                # IDENTIFIER immediately before the `(` — an anchor
+                # `public static Widget MissingMethod()` must NOT pass
+                # against `public static Widget ExistingMethod()` on the
+                # strength of the shared return type alone.
+                sig = re.search(r"(\w+)\s*\([^()]*\):?\s*$", desc)
+                if sig:
+                    check = [sig.group(1)]
+                else:
+                    # R8-I4: skip leading declaration keywords/modifiers —
+                    # `async def missing_symbol` must NOT pass against
+                    # `async def existing():` because only the keyword
+                    # tokens were checked. The first remaining SYMBOL
+                    # token must appear on the line; when every token is
+                    # a keyword the check degrades to the old
+                    # first-two-tokens behavior.
+                    symbols = [t for t in tokens if t not in DECL_KEYWORDS]
+                    check = symbols[:1] if symbols else tokens[:2]
                 # R9-J2: COMPLETE token match, not substring — anchor
                 # `def total` must NOT pass against
                 # `def compute_total(items):` (a substring pass on an

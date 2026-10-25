@@ -75,6 +75,51 @@ class RiskMarkerTests(unittest.TestCase):
         self.assertNotIn("X", "LMH")
 
 
+class RiskMarkerBoundaryTests(unittest.TestCase):
+    """R4-E1: the marker regex requires a LEFT token boundary (not
+    preceded by a letter) AND a marker-ish right context (end of line or
+    a dash) — the last letter of an uppercase word ("…API") is not a
+    risk marker, while a genuinely bad standalone marker still flags."""
+
+    def _repo(self, td: str, risk_lines: str) -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        sdir = root / "stories" / "STORY-908"
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            "# digest — STORY-908\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            "## 4. Code anchors\n\n- `src/app.py:2` — def f\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            f"## 7. Risk list\n\n{risk_lines}\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_uppercase_word_tail_and_valid_marker_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "- stale API response — M\n"
+                                  "- API drift\n")
+            errors = CD.run_gate(root, "STORY-908", "HEAD")
+            self.assertEqual(errors, [])
+
+    def test_bad_standalone_marker_still_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "- drift — X\n")
+            errors = CD.run_gate(root, "STORY-908", "HEAD")
+            self.assertIn("bad risk marker: X", errors)
+
+
 class ACGrepTests(unittest.TestCase):
     def test_ac_pattern_matches_typical(self):
         sample = (

@@ -13,7 +13,7 @@ Usage:
     python3 tools/gates/pre_review_gate.py plan <story-dir> [more-dirs...]
         [--spec <path>] [--inflight auto|none]
         [--base-sha <sha>] [--base-ref main] [--runner <name>]...
-        [--root <repo>]
+        [--runner-opt <name>=<flag>]... [--root <repo>]
     # installed control-home form:
     python3 factory/gates/pre_review_gate.py plan <story-dir> ...
 
@@ -23,7 +23,7 @@ Usage:
         [--discovery <project>=<list-tests file>]...
         [--discovery-command <project>=<cmd>]... [--run-discovery]
         [--run-verify] [--command-result <json>]... [--ui-results <json>]
-        [--runner <name>]... [--root <repo>]
+        [--runner <name>]... [--runner-opt <name>=<flag>]... [--root <repo>]
 
     Bare story dirs (no mode word) = plan mode.
 
@@ -129,9 +129,12 @@ class Gate:
 
     def __init__(self, root: Path | None = None,
                  runners: list[str] | None = None,
-                 base_ref: str = "main") -> None:
+                 base_ref: str = "main",
+                 runner_value_flags: dict[str, set[str]] | None = None
+                 ) -> None:
         self.root = Path(root) if root else Path.cwd()
         self.runners = list(runners or [])
+        self.runner_value_flags = runner_value_flags or {}
         self.base_ref = base_ref
         self.findings: list[str] = []
         self.notes: list[str] = []
@@ -198,7 +201,8 @@ class Gate:
         M.check_bare_runners(
             contract, self.root, self.runners,
             lambda msg: self.fail("commands", sid, msg),
-            lambda msg: self.notes.append(f"{sid}: {msg}"))
+            lambda msg: self.notes.append(f"{sid}: {msg}"),
+            value_flags=self.runner_value_flags)
 
     def check_snippets(self, story_dir: Path, sid: str) -> None:
         """snippets (plan): code fences need compiled/quoted_from
@@ -515,6 +519,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runner", action="append", default=[], metavar="NAME",
                     help="declare a test-runner name for the "
                          "bare-invocation ban (plan/build)")
+    ap.add_argument("--runner-opt", action="append", default=[],
+                    metavar="NAME=FLAG",
+                    help="declare a VALUE-TAKING option flag for a runner "
+                         "(repeatable, e.g. --runner-opt pytest=-k): the "
+                         "flag's next token is its value, never a "
+                         "positional target (plan/build commands check)")
     ap.add_argument("--root", default=".",
                     help="project repo root (default: cwd)")
     args = ap.parse_args(argv)
@@ -526,7 +536,17 @@ def main(argv: list[str] | None = None) -> int:
         mode, dirs = "plan", [Path(p) for p in args.mode_or_dirs]
     root = Path(args.root).resolve()
 
-    gate = Gate(root=root, runners=args.runner, base_ref=args.base_ref)
+    runner_value_flags: dict[str, set[str]] = {}
+    for item in args.runner_opt:
+        name, sep, flag = item.partition("=")
+        if not sep or not name or not flag:
+            print(f"usage: --runner-opt takes NAME=FLAG (got {item!r})",
+                  file=sys.stderr)
+            return 2
+        runner_value_flags.setdefault(name, set()).add(flag)
+
+    gate = Gate(root=root, runners=args.runner, base_ref=args.base_ref,
+                runner_value_flags=runner_value_flags)
     if mode == "plan":
         gate.plan_mode(dirs, args.inflight,
                        Path(args.spec) if args.spec else None,

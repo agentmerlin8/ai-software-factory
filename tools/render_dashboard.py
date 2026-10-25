@@ -140,16 +140,22 @@ def render(events: list[dict], root: Path, header: str) -> str:
     def correction_rounds(s: dict) -> int:
         """ALL correction rounds incl. external + nit-labeled (two distinct
         measures: formal loops vs every correction). Plan-review findings
-        fold into their plan loop (one round, not N); post-planning fixes
-        count individually."""
+        fold into their plan loop (one round, not N) — but only up to as
+        many folds as there are plan loops; a plan-review-evidenced fixed
+        finding WITHOUT a plan loop row counts individually (an unmatched
+        fix never folds away to zero). Post-planning fixes count
+        individually."""
         # v0.1 association convention (SUPPORTED schema fields only): a
         # fixed finding folds into its plan loop when its evidence_path
         # names the plan review; a future ledger link may replace this.
-        fixed_post_plan = [
-            f for f in s.get("findings", [])
-            if f.get("disposition") in ("fixed",)
-            and not _names_plan_review(f.get("evidence_path"))]
-        return formal_loops(s) + len(fixed_post_plan)
+        fixed = [f for f in s.get("findings", [])
+                 if f.get("disposition") in ("fixed",)]
+        plan_fixed = [f for f in fixed
+                      if _names_plan_review(f.get("evidence_path"))]
+        other = [f for f in fixed
+                 if not _names_plan_review(f.get("evidence_path"))]
+        folded = min(len(plan_fixed), formal_loops(s))
+        return formal_loops(s) + len(other) + (len(plan_fixed) - folded)
 
     merged = {sid: s for sid, s in stories.items()
               if s.get("outcome", {}).get("merged_sha")
@@ -263,8 +269,10 @@ def render(events: list[dict], root: Path, header: str) -> str:
     # ---------- current run notes sidecar
     side = root / "factory" / "dashboard-notes.md"
     if side.exists():
+        # embedded VERBATIM (no strip): hand-written notes may start with
+        # an indented code block; the list-join supplies separators
         out += ["## Run notes (from factory/dashboard-notes.md sidecar)", "",
-                side.read_text(encoding="utf-8").strip(), ""]
+                side.read_text(encoding="utf-8"), ""]
 
     out += ["---", "_Regenerate: `python3 factory/tools/render_dashboard.py`_"]
     return "\n".join(out) + "\n"

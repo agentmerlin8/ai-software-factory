@@ -496,6 +496,92 @@ class BuildLaneUnits(unittest.TestCase):
         self.assertTrue(any("bare-invocation check inactive" in n
                             for n in notes), notes)
 
+    def test_runner_value_flag_option_value_is_not_a_target(self):
+        """R4-E2: with `-k` declared as a value-taking flag
+        (--runner-opt pytest=-k), `pytest -k widget` has NO positional
+        target → bare refusal; an option value is never treated as an
+        exact target."""
+        findings = []
+        M.check_bare_runners(
+            {"verify_commands": ["pytest -k widget"]}, REPO, ["pytest"],
+            findings.append, findings.append,
+            value_flags={"pytest": {"-k"}})
+        self.assertTrue(any("bare `pytest` invocation (no exact target): "
+                            "'pytest -k widget'" in f for f in findings),
+                        findings)
+
+    def test_runner_value_flag_target_existence_checked(self):
+        """R4-E2: with the value flag declared, the positional target
+        AFTER the option value is existence-checked under the effective
+        cwd — the old walk never reached `tests/missing.py`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_x.py").write_text("# t\n",
+                                                      encoding="utf-8")
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["pytest -k widget tests/missing.py"]},
+                root, ["pytest"], findings.append, findings.append,
+                value_flags={"pytest": {"-k"}})
+            self.assertTrue(any("nonexistent target path "
+                                "'tests/missing.py'" in f
+                                for f in findings), findings)
+            # a present target after the option value is accepted
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["pytest -k widget tests/test_x.py"]},
+                root, ["pytest"], findings.append, findings.append,
+                value_flags={"pytest": {"-k"}})
+            self.assertEqual(findings, [])
+
+    def test_undeclared_option_value_still_counts_as_target(self):
+        """R4-E2 pin: with NO --runner-opt declaration, behavior is
+        exactly the old one — `widget` after `-k` counts as a target,
+        so `pytest -k widget` passes and `pytest -v tests/` stays
+        valid."""
+        findings = []
+        M.check_bare_runners(
+            {"verify_commands": ["pytest -k widget"]}, REPO, ["pytest"],
+            findings.append, findings.append)
+        self.assertEqual(findings, [])
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tests").mkdir()
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["pytest -v tests/"]}, root, ["pytest"],
+                findings.append, findings.append)
+            self.assertEqual(findings, [])
+
+    def test_runner_opt_cli_plumbing(self):
+        """R4-E2 CLI: `--runner-opt pytest=-k` parses into Gate and
+        changes the commands verdict end-to-end; a malformed value is a
+        usage refusal (rc 2)."""
+        gate = G.Gate(root=REPO, runners=["pytest"],
+                      runner_value_flags={"pytest": {"-k"}})
+        gate.check_commands("STORY-951",
+                            {"verify_commands": ["pytest -k widget"]})
+        self.assertTrue(any("bare `pytest`" in f for f in gate.findings),
+                        gate.findings)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = G.main(["plan", str(FIX / "valid-plan-complete"),
+                         "--root", str(REPO), "--base-sha", "HEAD",
+                         "--inflight", "none", "--runner", "pytest",
+                         "--runner-opt", "pytest"])
+        self.assertEqual(rc, 2)
+        self.assertIn("--runner-opt takes NAME=FLAG", err.getvalue())
+        # the well-formed sample parses and passes (fixture has no -k use)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = G.main(["plan", str(FIX / "valid-plan-complete"),
+                         "--root", str(REPO), "--base-sha", "HEAD",
+                         "--inflight", "none", "--runner", "pytest",
+                         "--runner-opt", "pytest=-k"])
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertIn("PRE-REVIEW GATE (plan): PASS", out.getvalue())
+
     def test_api_shape_activation(self):
         findings = []
         status = M.check_api_operations({}, {"src/a.py": "M"},

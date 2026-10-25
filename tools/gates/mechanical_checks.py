@@ -91,13 +91,20 @@ def _cd_under_root(cwd: Path, arg: str, root: Path) -> Path | None:
 
 def check_bare_runners(contract: dict, root: Path, runners: list[str],
                        fail: Callable[[str], None],
-                       info: Callable[[str], None]) -> None:
+                       info: Callable[[str], None],
+                       value_flags: dict[str, set[str]] | None = None
+                       ) -> None:
     """command-validity: a DECLARED runner must never appear as a bare
     invocation (no exact target), and a declared target path must exist
     under the EFFECTIVE cwd (repo root adjusted by preceding `cd` setup
     segments, same rules as parse_test_command). Activation-gated on
     `runners` being declared — the reference's runner/flag grammar was
-    project vocabulary."""
+    project vocabulary. `value_flags` optionally declares, per runner
+    name, the option flags that TAKE A VALUE (e.g. {"pytest": {"-k"}}):
+    a declared value flag consumes the next token as its value so an
+    option value is never mistaken for a positional target. No
+    declaration → every non-dash token counts as a target (the original
+    behavior, unchanged)."""
     if not runners:
         info("command-validity: no runner names declared (--runner) — "
              "bare-invocation check inactive")
@@ -126,16 +133,23 @@ def check_bare_runners(contract: dict, root: Path, runners: list[str],
                 continue
             if not seg or seg[0] not in runners:
                 continue
-            rest = [t for t in seg[1:] if not t.startswith("-")]
-            if not rest:
+            declared_values = (value_flags or {}).get(seg[0]) or set()
+            positional: list[str] = []
+            it = iter(seg[1:])
+            for tok in it:
+                if tok in declared_values:
+                    next(it, None)  # the flag's value is not a target
+                elif not tok.startswith("-"):
+                    positional.append(tok)
+            if not positional:
                 fail(f"bare `{seg[0]}` invocation (no exact target): "
                      f"{cmd!r}")
                 continue
-            target = rest[0]
-            if ("/" in target or "." in target) and \
-                    not (cwd / target).exists():
-                fail(f"verify command names nonexistent target path "
-                     f"{target!r}: {cmd!r}")
+            for target in positional:
+                if ("/" in target or "." in target) and \
+                        not (cwd / target).exists():
+                    fail(f"verify command names nonexistent target path "
+                         f"{target!r}: {cmd!r}")
 
 
 # ----------------------------------------------------- pinned commands ----

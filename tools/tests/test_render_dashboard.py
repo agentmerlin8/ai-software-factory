@@ -215,6 +215,26 @@ class RenderDashboardTests(unittest.TestCase):
         finally:
             notes.unlink()
 
+    def test_notes_sidecar_embedded_verbatim(self):
+        """R4-E4: the sidecar is embedded byte-for-byte — leading
+        indentation (an indented code block) and trailing whitespace are
+        never stripped."""
+        notes = self.root / "factory" / "dashboard-notes.md"
+        notes.parent.mkdir(parents=True, exist_ok=True)
+        raw = "    indented first line\nplain\ntrailing   \n"
+        notes.write_text(raw, encoding="utf-8")
+        try:
+            text = self.render()
+            section = text.split(
+                "## Run notes (from factory/dashboard-notes.md sidecar)\n\n",
+                1)[1]
+            self.assertTrue(section.startswith(raw),
+                            f"sidecar not verbatim: {section[:80]!r}")
+            # determinism unchanged
+            self.assertEqual(text, self.render())
+        finally:
+            notes.unlink()
+
     def test_determinism_no_wall_clock(self):
         a, b = self.render(), self.render()
         self.assertEqual(a, b)
@@ -297,7 +317,9 @@ class PlanReviewAssociationTests(unittest.TestCase):
 
     def test_out_of_schema_field_never_read(self):
         """A row carrying an out-of-schema `source_detail` cannot change
-        the association — only the supported evidence_path matters."""
+        the association — only the supported evidence_path matters.
+        R4-E3: with NO plan loop row, the plan-review-evidenced fix can
+        never fold into anything — it counts as 1 correction."""
         finding = {"event": "finding", "event_id": "f-1", "story_id": "S",
                    "finding_id": "F-1", "source": "internal",
                    "class": "reasoning", "severity": "major",
@@ -308,7 +330,42 @@ class PlanReviewAssociationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             text = RD.render(events, Path(td), "H")
         self.assertIn("| S | — | `no transitions (events only)` | 0/0 | 0 "
-                      "| 0 | — | — |", text)
+                      "| 1 | — | — |", text)
+
+    def test_unmatched_plan_fix_counts_individually(self):
+        """R4-E3: 0 plan loops + 1 plan-review-evidenced fixed finding →
+        1 correction (never folded away to a correction-free story)."""
+        plan_fix = {"event": "finding", "event_id": "f-1", "story_id": "S",
+                    "finding_id": "F-1", "source": "internal",
+                    "class": "reasoning", "severity": "major",
+                    "disposition": "fixed",
+                    "evidence_path": "stories/S/plan-review.md"}
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render([plan_fix], Path(td), "H")
+        self.assertIn("| S | — | `no transitions (events only)` | 0/0 | 0 "
+                      "| 1 | — | — |", text)
+
+    def test_matched_fold_still_caps_at_loop_count(self):
+        """R4-E3 regression pin: 1 plan loop + 1 plan-evidenced fix +
+        1 other fix → 2 corrections (fold unchanged when a loop exists)."""
+        loop = {"event": "loop", "event_id": "loop-S-1", "story_id": "S",
+                "stage": "plan_review", "loop_n": 1, "class": "reasoning",
+                "root_cause_one_line": "x", "recorded_at": "t",
+                "provenance": "live"}
+        plan_fix = {"event": "finding", "event_id": "f-1", "story_id": "S",
+                    "finding_id": "F-1", "source": "internal",
+                    "class": "reasoning", "severity": "major",
+                    "disposition": "fixed",
+                    "evidence_path": "stories/S/plan-review.md"}
+        other_fix = {"event": "finding", "event_id": "f-2", "story_id": "S",
+                     "finding_id": "F-2", "source": "external",
+                     "class": "mechanical", "severity": "minor",
+                     "disposition": "fixed",
+                     "evidence_path": "stories/S/external-round-1.md"}
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render([loop, plan_fix, other_fix], Path(td), "H")
+        self.assertIn("| S | — | `no transitions (events only)` | 1/0 | 1 "
+                      "| 2 | — | — |", text)
 
 
 if __name__ == "__main__":

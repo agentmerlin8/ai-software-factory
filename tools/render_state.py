@@ -281,11 +281,12 @@ def render(events: list[dict], sid: str, header: str,
                        f"{c['corrected_artifact']}")
         out.append("")
 
-    # ---- narrative sidecar (inlined verbatim)
+    # ---- narrative sidecar (inlined verbatim — no strip: hand-written
+    # prose may open with an indented block or carry trailing whitespace)
     narr = stories_root / sid / "narrative.md"
     if narr.exists():
         out += ["## History (from narrative.md sidecar)", "",
-                narr.read_text(encoding="utf-8").strip(), ""]
+                narr.read_text(encoding="utf-8"), ""]
     else:
         out += ["## History", "",
                 "_No narrative.md sidecar yet. Hand-written history belongs "

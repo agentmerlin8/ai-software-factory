@@ -158,7 +158,8 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
     rk = re.search(r"## 7\. Risk list\n(.*?)(?=\n## 8\.)", text, re.S)
     if rk:
         for line in rk.group(1).splitlines():
-            for m2 in re.findall(r"`?([A-Z])`?(?=\s|$)", line):
+            for m2 in re.findall(
+                    r"(?<![A-Za-z])`?([A-Z])`?(?=\s*(?:$|—|–|-))", line):
                 if m2 not in ("L", "M", "H"):
                     errors.append(f"bad risk marker: {m2}")
     return errors

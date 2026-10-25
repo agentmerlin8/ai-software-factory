@@ -143,6 +143,22 @@ class RenderStateTests(unittest.TestCase):
         finally:
             (d / "narrative.md").unlink()
 
+    def test_narrative_sidecar_not_trimmed(self):
+        """R4-E5: a narrative opening with an indented command block is
+        preserved byte-for-byte — no .strip() on the hand-written text."""
+        d = self.stories / "STORY-201"
+        d.mkdir(parents=True, exist_ok=True)
+        raw = "    make deploy   # indented first line\nplain prose\n"
+        (d / "narrative.md").write_text(raw, encoding="utf-8")
+        try:
+            text = self.render("STORY-201")
+            section = text.split(
+                "## History (from narrative.md sidecar)\n\n", 1)[1]
+            self.assertTrue(section.startswith(raw),
+                            f"narrative not verbatim: {section[:80]!r}")
+        finally:
+            (d / "narrative.md").unlink()
+
     def test_workspace_name_resolution(self):
         self.assertEqual(RS.workspace_name(self.root), "fixture-ws")
         with tempfile.TemporaryDirectory() as td:

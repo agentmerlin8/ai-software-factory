@@ -389,6 +389,52 @@ class CliTests(TempStoryMixin):
                           "--repo", str(self.repo), "--record-context"])
         self.assertEqual(rc, 2)
 
+    def test_cli_record_context_without_base_sha_exits_two(self):
+        """No BUILD_GREEN recorded → the manifest has no exact base/diff
+        SHA → graceful `error:` refusal, rc 2, no traceback; the package
+        and manifest files (written before the record step) remain."""
+        self.write_plan(GOOD_CONTRACT)
+        did = f"{self.sid}-behavior_reviewer-1-1758800000"
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            rc = BH.main([self.sid, "behavior_reviewer", "--root",
+                          str(self.root), "--repo", str(self.repo),
+                          "--record-context", "--dispatch-id", did])
+        self.assertEqual(rc, 2)
+        printed = err.getvalue()
+        self.assertIn("error: cannot record review context without an "
+                      "exact base/diff SHA", printed)
+        self.assertNotIn("Traceback", printed)
+        self.assertTrue((self.root / "stories" / self.sid /
+                         "handoff-behavior_reviewer.md").exists())
+        self.assertTrue((self.root / "stories" / self.sid /
+                         "context-manifest-behavior_reviewer.json").exists())
+
+    def test_cli_record_context_without_dispatch_id_exits_two(self):
+        """Valid BUILD_GREEN SHA but missing --dispatch-id → graceful
+        refusal, rc 2, no traceback, no ledger event written."""
+        self.write_plan(GOOD_CONTRACT)
+        (self.repo / "src.py").write_text("x = 1\n", encoding="utf-8")
+        target = self.commit_all("work")
+        self.seed_claim(target)
+        self.seed_build_green(target)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            rc = BH.main([self.sid, "behavior_reviewer", "--root",
+                          str(self.root), "--repo", str(self.repo),
+                          "--record-context"])
+        self.assertEqual(rc, 2)
+        printed = err.getvalue()
+        self.assertIn("error: internal review_context requires its "
+                      "pre-spawn dispatch_id", printed)
+        self.assertNotIn("Traceback", printed)
+        ledger = self.root / "factory" / "ledger" / "events.jsonl"
+        events = L.load_ledger(ledger)
+        self.assertFalse(any(e.get("event") == "review_context"
+                             for e in events))
+
 
 class DeterminismTests(TempStoryMixin):
     def test_same_inputs_same_bytes(self):

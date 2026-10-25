@@ -676,9 +676,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"context_manifest_sha256: {manifest_digest(manifest)}")
         print("record a review_context ledger event BEFORE dispatch")
         if args.record_context:
-            event = review_context_event(root, args.story_id, role, manifest,
-                                         manifest_path, args.dispatch_id)
-            L.append_event(ledger_path(root), event)
+            # graceful refusal (config_validator convention): a
+            # review_context_event precondition failure (missing exact
+            # base/diff SHA, missing --dispatch-id) prints `error: <msg>`
+            # and exits 2 — never an uncaught traceback. The package and
+            # manifest files are already written and stay as-is.
+            try:
+                event = review_context_event(root, args.story_id, role,
+                                             manifest, manifest_path,
+                                             args.dispatch_id)
+                L.append_event(ledger_path(root), event)
+            except ValueError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
             print(f"review_context_event: {event.get('event_id') or '(id assigned on write)'}")
     elif args.record_context:
         print("error: --record-context applies only to reviewer roles",

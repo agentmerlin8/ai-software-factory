@@ -395,14 +395,74 @@ class RenderProvenanceTests(unittest.TestCase):
             "token_semantics": "tokens", "usage_source": "executor-report",
             "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
         text = RP.render([dispatch, usage], "STORY-211", self.header)
-        self.assertIn("| Input tokens | not recorded: executor reported "
-                      "no counts |", text)
-        self.assertIn("| Output tokens | not recorded: executor reported "
-                      "no counts |", text)
-        self.assertIn("| Cached input tokens | not recorded: n/a |", text)
+        # all rows unknown → 'unknown (<reasons>)', mirroring tok_cell —
+        # never an unqualified number, never a zero
+        self.assertIn("| Input tokens | unknown (executor reported "
+                      "no counts) |", text)
+        self.assertIn("| Output tokens | unknown (executor reported "
+                      "no counts) |", text)
+        self.assertIn("| Cached input tokens | unknown (n/a) |", text)
         # per-row cells too — never an invented zero
         self.assertNotIn("| None |", text)
         self.assertNotIn(" 0 |", text.split("## Token usage")[1])
+
+    # ---- round 21 V3: mixed known/unknown rows render a PARTIAL total
+    def test_partial_token_totals_mark_unknown_rows(self):
+        known = {
+            "event": "usage", "event_id": "usage-STORY-212-coder-1",
+            "dispatch_id": "STORY-212-coder-1-1789003000",
+            "input_tokens": 1000, "output_tokens": 200,
+            "cached_input_tokens": 50,
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        unknown = {
+            "event": "usage", "event_id": "usage-STORY-212-reviewer-1",
+            "dispatch_id": "STORY-212-reviewer-1-1789004000",
+            "input_tokens": None,
+            "input_tokens_reason": "executor reported no counts",
+            "output_tokens": None,
+            "output_tokens_reason": "executor reported no counts",
+            "cached_input_tokens": None,
+            "cached_input_tokens_reason": "n/a",
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T03:00:00Z", "provenance": "live"}
+        text = RP.render([known, unknown], "STORY-212", self.header)
+        self.assertIn("| Input tokens | 1,000 partial (1 unknown rows) |",
+                      text)
+        self.assertIn("| Output tokens | 200 partial (1 unknown rows) |",
+                      text)
+        self.assertIn("| Cached input tokens | 50 partial "
+                      "(1 unknown rows) |", text)
+        # all-known rows are unqualified (unchanged behavior)
+        solo = RP.render([known], "STORY-212", self.header)
+        self.assertIn("| Input tokens | 1000 |", solo)
+        self.assertNotIn("partial", solo.split("## Token usage")[1])
+
+    # ---- round 21 V4: two usage rows for ONE dispatch count once
+    def test_dispatches_with_usage_counts_distinct_ids(self):
+        usage_a = {
+            "event": "usage", "event_id": "usage-STORY-213-coder-1-a",
+            "dispatch_id": "STORY-213-coder-1-1789005000",
+            "input_tokens": 10, "output_tokens": 2,
+            "cached_input_tokens": None,
+            "cached_input_tokens_reason": "n/a",
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        usage_b = {**usage_a, "event_id": "usage-STORY-213-coder-1-b",
+                   "input_tokens": 5, "output_tokens": 1}
+        text = RP.render([usage_a, usage_b], "STORY-213", self.header)
+        self.assertIn("| Dispatches with usage | 1 |", text)
+        self.assertIn("usage events: 2.", text)
+        # totals still sum BOTH rows
+        self.assertIn("| Input tokens | 15 |", text)
+        # two distinct dispatches stay 2
+        usage_c = {**usage_a, "event_id": "usage-STORY-213-reviewer-1",
+                   "dispatch_id": "STORY-213-reviewer-1-1789006000"}
+        text2 = RP.render([usage_a, usage_c], "STORY-213", self.header)
+        self.assertIn("| Dispatches with usage | 2 |", text2)
 
 
 if __name__ == "__main__":

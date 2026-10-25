@@ -396,7 +396,9 @@ def main(argv: list[str] | None = None) -> int:
                              ledger_digest(ledger))
     if args.issue is None:
         print(card)
-        return 0
+        # unknown story: the refusal card is printed, but rc must be
+        # nonzero so automation cannot read success from an unknown id
+        return 0 if known else 1
     try:
         owner, name = SB.load_repo(root, args.repo)
         repo = f"{owner}/{name}"
@@ -419,7 +421,9 @@ def main(argv: list[str] | None = None) -> int:
     except SB.BoardError as exc:
         print(str(exc))
         return exc.rc
-    return 0
+    # same refusal semantics on the --issue path: an unknown story posts
+    # an explanation (no pin) but must not exit 0
+    return 0 if known else 1
 
 
 if __name__ == "__main__":

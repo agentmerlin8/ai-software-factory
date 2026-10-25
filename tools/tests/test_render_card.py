@@ -533,6 +533,43 @@ class MainCliTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("REFUSED: repo not configured", out)
 
+    # ---- round 21 V2: unknown story exits nonzero on BOTH CLI paths
+    def test_unknown_story_render_only_rc1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)  # no stories, empty ledger → STORY-999 unknown
+            rc, out, _ = self.run_main(["STORY-999", "--root", str(root)])
+            self.assertEqual(rc, 1)
+            # refusal output intact — explanatory card, never pinned
+            self.assertIn(R.CARD_MARKER, out)
+            self.assertIn("**Nothing was pinned.**", out)
+            self.assertIn("unknown", out)
+            self.assertNotIn(R.PIN_MARKER, out)
+
+    def test_unknown_story_issue_dry_run_rc1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "workspace.toml").write_text(
+                '[[repos]]\nid = "app"\nrole = "primary"\n'
+                'url = "github.test/fixture-org/app"\n', encoding="utf-8")
+            rc, out, _ = self.run_main(
+                ["STORY-999", "--root", str(root), "--issue", "42",
+                 "--dry-run"])
+            self.assertEqual(rc, 1)
+            # explanation payload still shown (no pin marker)
+            self.assertIn("POST repos/fixture-org/app/issues/42/comments",
+                          out)
+            payload = json.loads(
+                out.split("POST repos/", 1)[1].splitlines()[1])
+            self.assertIn("**Nothing was pinned.**", payload["body"])
+            self.assertNotIn(R.PIN_MARKER, payload["body"])
+
+    def test_known_story_rc0_both_paths(self):
+        rc, out, _ = self.run_main(self.base())
+        self.assertEqual(rc, 0)
+        rc, out, _ = self.run_main(self.base("--issue", "42", "--dry-run"))
+        self.assertEqual(rc, 0)
+        self.assertIn("dry-run: no write performed", out)
+
 
 if __name__ == "__main__":
     unittest.main()

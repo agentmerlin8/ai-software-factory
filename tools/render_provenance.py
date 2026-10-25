@@ -285,20 +285,29 @@ def render(events: list[dict], sid: str, header: str) -> str:
                f"{len(usage)}.")
     out.append("")
     if usage:
-        def _sum(key: str) -> int | None:
-            vals = [u[key] for u in usage if u.get(key) is not None]
-            return sum(vals) if vals else None
-
         def _total_s(key: str) -> str:
-            """Totals can be null (every row's value unrecorded) — render
-            like the cached cell: 'not recorded: <reason>', never a zero."""
-            v = _sum(key)
-            if v is not None:
-                return str(v)
-            return f"not recorded: {usage[0].get(key + '_reason') or 'no reason recorded'}"
+            """Totals preserve unknown/partial status (mirrors
+            metrics_report.tok_cell): every row measurable → plain total;
+            mixed → '<sum> partial (N unknown rows)'; all unknown →
+            'unknown (<reason>)' — never an unqualified number, never a
+            zero."""
+            vals = [u.get(key) for u in usage]
+            known = [v for v in vals if v is not None]
+            n_unknown = len(vals) - len(known)
+            if known:
+                total = sum(known)
+                if n_unknown:
+                    return f"{total:,} partial ({n_unknown} unknown rows)"
+                return str(total)
+            reasons = Counter(u.get(key + "_reason") or "no reason recorded"
+                              for u in usage)
+            why = "; ".join(r if n == 1 else f"{r} ×{n}"
+                            for r, n in sorted(reasons.items()))
+            return f"unknown ({why})" if why else "unknown"
 
+        distinct_usage = len({u.get("dispatch_id") for u in usage})
         out += ["| Measure | Value |", "|---|---|",
-                f"| Dispatches with usage | {len(usage)} |",
+                f"| Dispatches with usage | {distinct_usage} |",
                 f"| Input tokens | {_total_s('input_tokens')} |",
                 f"| Output tokens | {_total_s('output_tokens')} |",
                 f"| Cached input tokens | {_total_s('cached_input_tokens')} |",

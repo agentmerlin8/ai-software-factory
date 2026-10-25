@@ -253,7 +253,10 @@ def cmd_workspace_show(args: argparse.Namespace) -> int:
     for item in doc.get("repos") or []:
         if not isinstance(item, dict):
             continue
-        rel = item.get("path") or f"repos/{item.get('id')}"
+        # Default layout (architecture.md §Configuration): workspace-relative
+        # sibling directories named after each binding id; repos[].path is
+        # the optional per-repo override.
+        rel = item.get("path") or item.get("id")
         entry = {"id": item.get("id"), "role": item.get("role"),
                  "url": item.get("url"),
                  "local": _repo_local_status(ws, str(rel)),

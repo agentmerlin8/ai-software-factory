@@ -130,8 +130,10 @@ class WorkspaceShowTests(unittest.TestCase):
         self.assertEqual(out, json.dumps(data, sort_keys=True, indent=2) + "\n")
 
     def test_repo_local_status_present_missing_not_git(self) -> None:
-        # app: a REAL git checkout; web: absent; tools: plain dir override
-        git("init", "-q", cwd=self.ws / "repos" / "app")
+        # app: a REAL git checkout at the DEFAULT binding-id path
+        # (<ws>/app — architecture.md §Configuration layout, NOT a
+        # repos/ prefix); web: absent; tools: plain dir override
+        git("init", "-q", cwd=self.ws / "app")
         rc, out = ws_run(self.ws, "workspace", "show")
         self.assertEqual(rc, 0)
         self.assertIn("  - id=app role=primary url=github.com/ORG/app "
@@ -141,8 +143,26 @@ class WorkspaceShowTests(unittest.TestCase):
         self.assertIn("  - id=tools role=member url=github.com/ORG/tools "
                       "local=not-git path=checkout/tools", out.splitlines())
 
+    def test_default_path_is_binding_id_not_repos_prefix(self) -> None:
+        # round 21 V1: a checkout at the LEGACY <ws>/repos/<id> path must
+        # NOT be picked up — the default is <ws>/<binding-id> only
+        legacy = self.ws / "repos" / "web"
+        legacy.mkdir(parents=True)
+        git("init", "-q", cwd=legacy)
+        rc, out = ws_run(self.ws, "workspace", "show")
+        self.assertEqual(rc, 0)
+        self.assertIn("  - id=web role=member url=github.com/ORG/web "
+                      "local=missing", out.splitlines())
+        # and a checkout at <ws>/web IS present
+        (self.ws / "web").mkdir()
+        git("init", "-q", cwd=self.ws / "web")
+        rc, out = ws_run(self.ws, "workspace", "show")
+        self.assertEqual(rc, 0)
+        self.assertIn("  - id=web role=member url=github.com/ORG/web "
+                      "local=present", out.splitlines())
+
     def test_repo_local_status_json(self) -> None:
-        git("init", "-q", cwd=self.ws / "repos" / "app")
+        git("init", "-q", cwd=self.ws / "app")
         rc, out = ws_run(self.ws, "workspace", "show", "--json")
         data = json.loads(out)
         by_id = {r["id"]: r for r in data["repos"]}
@@ -171,7 +191,7 @@ class WorkspaceShowTests(unittest.TestCase):
             shutil.rmtree(parent, ignore_errors=True)
 
     def test_missing_git_binary_means_not_git(self) -> None:
-        git("init", "-q", cwd=self.ws / "repos" / "app")
+        git("init", "-q", cwd=self.ws / "app")
         with mock.patch.object(factory, "_git", return_value=None):
             rc, out = ws_run(self.ws, "workspace", "show")
         self.assertEqual(rc, 0)

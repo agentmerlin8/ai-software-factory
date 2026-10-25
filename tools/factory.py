@@ -122,11 +122,21 @@ def _pin_status(pin: Any, repo: str | None) -> dict:
         return status
     err = CV.check_pin(str(pin), repo)
     if err is None:
-        status["status"] = "resolved"
-        result = _git(["-C", repo, "rev-parse", f"{pin}^{{commit}}"])
-        status["resolved"] = (result.stdout.strip()
-                              if result is not None
-                              and result.returncode == 0 else pin)
+        # R22-W1: `resolved` REQUIRES a successful commit resolution —
+        # check_pin only proves the ref exists, so a tag pointing at a
+        # blob/tree passed it and the old fallback still reported
+        # `resolved` (rc 0) for an unusable pin. Tag pins resolve through
+        # refs/tags/<pin> (never a same-named branch or other ref).
+        target = (f"refs/tags/{pin}^{{commit}}" if kind == "tag"
+                  else f"{pin}^{{commit}}")
+        result = _git(["-C", repo, "rev-parse", "--verify", target])
+        if result is not None and result.returncode == 0:
+            status["status"] = "resolved"
+            status["resolved"] = result.stdout.strip()
+        else:
+            status["status"] = "unresolvable"
+            status["detail"] = (f"unresolvable pin: {pin} "
+                                f"(does not resolve to a commit in {repo})")
     else:
         status["status"] = "unresolvable"
         status["detail"] = err

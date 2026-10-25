@@ -249,6 +249,64 @@ class WorkspaceShowTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["factory_pin"]["status"], "deferred")
 
+    def test_tag_pointing_at_blob_is_unresolvable_rc1(self) -> None:
+        # R22-W1: a tag pin must resolve to a COMMIT — check_pin only
+        # proves refs/tags/<pin> exists, so a tag on a blob/tree used to
+        # pass while the `^{commit}` fallback still reported `resolved`
+        # (rc 0) for an unusable factory pin.
+        repo = make_factory_repo(self.tmp)
+        git("tag", "-d", "v0.1.0", cwd=repo)
+        blob = subprocess.run(
+            ["git", "-C", str(repo), "hash-object", "-w",
+             "--stdin"], input="blob not commit\n",
+            capture_output=True, text=True, check=True).stdout.strip()
+        git("tag", "v0.1.0", blob, cwd=repo)  # tag -> blob
+        rc, out = ws_run(CONCRETE, "workspace", "show", "--repo", str(repo))
+        self.assertEqual(rc, 1)
+        self.assertIn("factory_pin: v0.1.0 unresolvable — does not resolve "
+                      f"to a commit in {repo}", out.splitlines())
+        rc, out, err = sub_run(["--workspace", str(CONCRETE),
+                                "workspace", "show", "--repo", str(repo),
+                                "--json"])
+        self.assertEqual(rc, 1)
+        data = json.loads(out)
+        self.assertEqual(data["factory_pin"]["status"], "unresolvable")
+        self.assertIsNone(data["factory_pin"]["resolved"])
+        self.assertEqual(err, "")
+
+    def test_tag_pin_resolves_via_refs_tags_not_same_named_branch(self
+    ) -> None:
+        # R22-W1: tag pins resolve through refs/tags/<pin> — a same-named
+        # branch pointing elsewhere must not hijack the resolution.
+        repo = make_factory_repo(self.tmp)
+        tag_sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "refs/tags/v0.1.0^{commit}"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        (repo / "extra.txt").write_text("branch work\n", encoding="utf-8")
+        git("add", ".", cwd=repo)
+        git("commit", "-q", "-m", "branch head", cwd=repo)
+        git("branch", "v0.1.0", cwd=repo)  # same-named branch, other commit
+        rc, out = ws_run(CONCRETE, "workspace", "show", "--repo", str(repo))
+        self.assertEqual(rc, 0)
+        self.assertIn(f"factory_pin: v0.1.0 resolved {tag_sha}",
+                      out.splitlines())
+
+    def test_hex_commit_pin_status_unchanged(self) -> None:
+        # R22-W1: hex (sha) pins keep their existing resolved path.
+        repo = make_factory_repo(self.tmp)
+        head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        st = factory._pin_status(head, str(repo))
+        self.assertEqual(st["status"], "resolved")
+        self.assertEqual(st["resolved"], head)
+        blob = subprocess.run(
+            ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+            input="blob\n", capture_output=True, text=True,
+            check=True).stdout.strip()
+        st = factory._pin_status(blob, str(repo))
+        self.assertEqual(st["status"], "unresolvable")  # check_pin refuses
+
     def test_ledger_none_when_absent(self) -> None:
         rc, out = ws_run(CONCRETE, "workspace", "show")
         self.assertIn("ledger: none", out.splitlines())

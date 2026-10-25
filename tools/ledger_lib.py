@@ -273,7 +273,15 @@ def append_event(ledger_path: Path | str, event: dict[str, Any]) -> None:
         raise LedgerError(f"event must be an object, got "
                           f"{type(event).__name__}")
     p = Path(ledger_path)
-    events = load_ledger(p)
+    # R22-W2: an existing ledger with invalid UTF-8 (or any read failure)
+    # must refuse with the SAME named `LedgerError("ledger unreadable: …")`
+    # load_events uses — a raw UnicodeDecodeError here bypasses every
+    # caller's LedgerError handler (including Controller._append). Nothing
+    # is written; the file's bytes are untouched.
+    try:
+        events = load_ledger(p)
+    except (UnicodeDecodeError, OSError) as e:
+        raise LedgerError(f"ledger unreadable: {e}") from e
     etype = event.get("event")
     if etype not in S.EVENT_TYPES:
         raise LedgerError(f"unknown event type {etype!r}")

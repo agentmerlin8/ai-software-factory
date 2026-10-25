@@ -149,6 +149,40 @@ class TestUnreadableLedgerWrapping(unittest.TestCase):
         self.assertIn("invalid JSON", str(cm.exception))
 
 
+class TestAppendUnreadableLedgerWrapping(unittest.TestCase):
+    """R22-W2: append_event must translate decoding/read failures on an
+    EXISTING ledger into the same named `LedgerError("ledger unreadable:
+    …")` load_events uses — a raw UnicodeDecodeError bypassed every
+    caller's LedgerError handler (including Controller._append). Nothing
+    is written on refusal; the file's bytes are untouched."""
+
+    def test_append_invalid_utf8_raises_ledger_error_bytes_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            raw = b'{"event": "loop", "x": "\xff\xfe\x80"}\n'
+            p.write_bytes(raw)
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, transition("t-1", "PLANNED"))
+            self.assertIn("ledger unreadable:", str(cm.exception))
+            self.assertEqual(p.read_bytes(), raw)  # untouched
+
+    def test_append_directory_path_raises_ledger_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(Path(td), transition("t-1", "PLANNED"))
+            self.assertIn("ledger unreadable:", str(cm.exception))
+
+    def test_append_missing_and_valid_cases_unchanged(self):
+        # missing file: append still creates the ledger (empty read is not
+        # a failure); a valid existing ledger still appends normally.
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, transition("t-1", "PLANNED"))
+            L.append_event(p, transition("t-2", "CODING"))
+            self.assertEqual(len(L.load_events(p)), 2)
+
+
+
 class TestValidateLedgerParseFailures(unittest.TestCase):
     """R7-H3: validate_ledger promises a non-raising list — parse
     failures (invalid JSON, invalid UTF-8) come back as findings; only

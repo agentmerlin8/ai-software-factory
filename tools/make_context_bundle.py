@@ -13,6 +13,9 @@ orchestrator pinned, with their SHA-verified content (git plumbing — the
 same object DB view the child will get). The output header carries the
 story id, base SHA, per-source byte/line counts, and a sha256 of the
 bundle body — pin that digest in the context-acquisition dispatch event.
+Source content is inserted VERBATIM (no trimming): trailing whitespace
+and blank lines survive into the bundle, matching the manifest's
+untrimmed byte/line counts.
 
 Genericization notes:
   * No repo/layout constants: the git repo is `--root`, the output path is
@@ -97,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest.append((src, len(content.encode()), lines))
         parts += [f"\n\n<!-- ===== SOURCE {src} ({lines} lines, pinned at "
                   f"{full_sha[:12]}) ===== -->\n",
-                  f"## Source: `{src}`", "", content.rstrip(), ""]
+                  f"## Source: `{src}`", "", content, ""]
     if missing:
         print("error: sources not present at the pinned SHA: "
               + ", ".join(missing), file=sys.stderr)

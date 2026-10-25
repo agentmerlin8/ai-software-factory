@@ -74,13 +74,30 @@ def _segments(tokens: list[str]) -> list[list[str]]:
     return segs
 
 
+def _cd_under_root(cwd: Path, arg: str, root: Path) -> Path | None:
+    """Resolve one `cd` argument against cwd, mirroring
+    parse_test_command's cd rules EXACTLY (relative-only, must stay under
+    root). Returns None when the argument violates those rules — the
+    pinned-commands parser owns that refusal; callers here just leave the
+    cwd unchanged."""
+    if Path(arg).is_absolute():
+        return None
+    candidate = (cwd / arg).resolve()
+    base = root.resolve()
+    if base not in (candidate, *candidate.parents):
+        return None
+    return candidate
+
+
 def check_bare_runners(contract: dict, root: Path, runners: list[str],
                        fail: Callable[[str], None],
                        info: Callable[[str], None]) -> None:
     """command-validity: a DECLARED runner must never appear as a bare
     invocation (no exact target), and a declared target path must exist
-    under the repo root. Activation-gated on `runners` being declared —
-    the reference's runner/flag grammar was project vocabulary."""
+    under the EFFECTIVE cwd (repo root adjusted by preceding `cd` setup
+    segments, same rules as parse_test_command). Activation-gated on
+    `runners` being declared — the reference's runner/flag grammar was
+    project vocabulary."""
     if not runners:
         info("command-validity: no runner names declared (--runner) — "
              "bare-invocation check inactive")
@@ -94,9 +111,19 @@ def check_bare_runners(contract: dict, root: Path, runners: list[str],
         except ValueError as e:
             fail(f"unparsable verify command {cmd!r}: {e}")
             continue
+        cwd = root.resolve()
         for seg in _segments(tokens):
             while seg and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", seg[0]):
                 seg = seg[1:]
+            if seg and seg[0] == "cd":
+                # track the effective working directory through preceding
+                # setup segments; an unsafe/escaping cd leaves cwd as-is
+                # (parse_test_command refuses it under pinned-commands)
+                if len(seg) == 2:
+                    moved = _cd_under_root(cwd, seg[1], root)
+                    if moved is not None:
+                        cwd = moved
+                continue
             if not seg or seg[0] not in runners:
                 continue
             rest = [t for t in seg[1:] if not t.startswith("-")]
@@ -106,7 +133,7 @@ def check_bare_runners(contract: dict, root: Path, runners: list[str],
                 continue
             target = rest[0]
             if ("/" in target or "." in target) and \
-                    not (root / target).exists():
+                    not (cwd / target).exists():
                 fail(f"verify command names nonexistent target path "
                      f"{target!r}: {cmd!r}")
 

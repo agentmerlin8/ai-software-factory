@@ -107,10 +107,71 @@ class ManifestParseTests(unittest.TestCase):
         for line in m.group(1).splitlines():
             mm = re.match(r"^\s*\|\s*`?([^`|\n]+?)`?\s*\|", line)
             if mm:
-                p = mm.group(1).strip().lstrip("./")
+                p = mm.group(1).strip()
+                p = p[2:] if p.startswith("./") else p
                 if p and not p.startswith(("path", "---")):
                     paths.append(p)
         self.assertEqual(paths, ["stories/T-A.md", "docs/architecture.md"])
+
+    def test_leading_dot_prefix_only_and_hidden_paths_survive(self):
+        """The manifest strip must remove a LITERAL `./` prefix, not the
+        character set {.,/} — hidden paths like `.github/workflows/ci.yml`
+        keep their leading dot."""
+        for raw, want in (("./src/app.py", "src/app.py"),
+                          ("src/app.py", "src/app.py"),
+                          (".github/workflows/ci.yml",
+                           ".github/workflows/ci.yml"),
+                          ("./.hidden/x.md", ".hidden/x.md")):
+            p = raw.strip()
+            p = p[2:] if p.startswith("./") else p
+            self.assertEqual(p, want)
+
+
+class HiddenPathGateTests(unittest.TestCase):
+    """End-to-end: a manifest path with a leading dot (.github/…) that
+    EXISTS at the sha must pass the existence check — the old
+    lstrip("./") mangled it to `github/…` and failed valid digests."""
+
+    def _hidden_repo(self, td: str, sid: str) -> Path:
+        root = Path(td)
+        wf = root / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "ci.yml").write_text("name: ci\non: push\n", encoding="utf-8")
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# line1\n# line2\n# line3\ndef compute_total(items):\n"
+            "    return sum(items)\n", encoding="utf-8")
+        sdir = root / "stories" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text(
+            "# story\n\n- AC-1: hidden paths resolve.\n", encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            f"# digest — {sid}\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            "| `.github/workflows/ci.yml` | workflow |\n"
+            "| `./src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            "## 4. Code anchors\n\n"
+            "- `.github/workflows/ci.yml:1` — name ci\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", "fixture"]):
+            subprocess.run(["git", "-C", str(root), *args], check=True,
+                           capture_output=True)
+        return root
+
+    def test_hidden_manifest_path_and_anchor_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._hidden_repo(td, "STORY-NNN")
+            errors = CD.run_gate(root, "STORY-NNN", "HEAD")
+            self.assertEqual(errors, [])
 
 
 class AnchorParseTests(unittest.TestCase):

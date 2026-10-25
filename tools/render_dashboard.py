@@ -67,6 +67,14 @@ def git_head(root: Path) -> str:
         return "?"
 
 
+def _names_plan_review(evidence_path) -> bool:
+    """v0.1 plan-review association: True when a finding's evidence_path
+    names the plan review (case-insensitive `plan-review` / `plan review`).
+    Uses only the supported finding schema — no out-of-schema fields."""
+    ev = str(evidence_path or "").lower()
+    return "plan-review" in ev or "plan review" in ev
+
+
 def render(events: list[dict], root: Path, header: str) -> str:
     name = RSt.workspace_name(root)
     out: list[str] = [header, "", f"# {name} — Factory Dashboard", ""]
@@ -134,10 +142,13 @@ def render(events: list[dict], root: Path, header: str) -> str:
         measures: formal loops vs every correction). Plan-review findings
         fold into their plan loop (one round, not N); post-planning fixes
         count individually."""
+        # v0.1 association convention (SUPPORTED schema fields only): a
+        # fixed finding folds into its plan loop when its evidence_path
+        # names the plan review; a future ledger link may replace this.
         fixed_post_plan = [
             f for f in s.get("findings", [])
             if f.get("disposition") in ("fixed",)
-            and "plan review" not in str(f.get("source_detail", "")).lower()]
+            and not _names_plan_review(f.get("evidence_path"))]
         return formal_loops(s) + len(fixed_post_plan)
 
     merged = {sid: s for sid, s in stories.items()

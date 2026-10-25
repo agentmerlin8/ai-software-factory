@@ -10,6 +10,7 @@ bundle-assembles smoke check (rc 0, manifest + sha256 present).
 """
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -113,6 +114,64 @@ class BundleAssemblyTests(unittest.TestCase):
             rc, _stdout, stderr = run_bundle(root, out, ["src/ghost.py"])
             self.assertEqual(rc, 2)
             self.assertIn("not present at the pinned SHA", stderr)
+
+
+class VerbatimSourceTests(unittest.TestCase):
+    """Sources are inserted VERBATIM — no rstrip: trailing whitespace and
+    blank lines survive, a whitespace-only source stays visible, and the
+    bundle bytes stay deterministic."""
+
+    def test_trailing_whitespace_preserved(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(td, {"src/a.py": "x = 1   \n\nkeep me   \n"})
+            out = Path(td) / "bundle.md"
+            rc, _stdout, stderr = run_bundle(root, out, ["src/a.py"])
+            self.assertEqual(rc, 0, stderr)
+            text = out.read_text(encoding="utf-8")
+            # the exact source bytes appear untouched in the bundle
+            self.assertIn("x = 1   \n\nkeep me   \n", text)
+
+    def test_whitespace_only_source_visible(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(td, {"src/ws.txt": "   \n\n  \t\n"})
+            out = Path(td) / "bundle.md"
+            rc, _stdout, stderr = run_bundle(root, out, ["src/ws.txt"])
+            self.assertEqual(rc, 0, stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("## Source: `src/ws.txt`", text)
+            # the whitespace-only bytes survive between header and next part
+            self.assertIn("## Source: `src/ws.txt`\n\n   \n\n  \t\n", text)
+
+    def test_counts_match_untrimmed_bytes(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = "one   \ntwo\n\n"
+            root = make_repo(td, {"src/a.py": src})
+            out = Path(td) / "bundle.md"
+            rc, _stdout, stderr = run_bundle(root, out, ["src/a.py"])
+            self.assertEqual(rc, 0, stderr)
+            text = out.read_text(encoding="utf-8")
+            # manifest counts the UNTRIMMED content (3 lines, all bytes)
+            self.assertIn(f"| `src/a.py` | {len(src.encode()):,} | 3 |", text)
+
+    def test_bundle_sha_deterministic_across_runs(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(td, {"src/a.py": "x = 1   \n",
+                                  "src/ws.txt": "  \n"})
+            out1 = Path(td) / "b1.md"
+            out2 = Path(td) / "b2.md"
+            rc1, _o1, e1 = run_bundle(root, out1, ["src/a.py", "src/ws.txt"])
+            rc2, _o2, e2 = run_bundle(root, out2, ["src/a.py", "src/ws.txt"])
+            self.assertEqual((rc1, rc2), (0, 0), (e1, e2))
+            h1 = hashlib.sha256(out1.read_bytes()).hexdigest()
+            h2 = hashlib.sha256(out2.read_bytes()).hexdigest()
+            self.assertEqual(h1, h2)
+            # source without trailing newline still renders cleanly
+            root2 = make_repo(str(Path(td) / "r2"), {"src/b.py": "y = 2"})
+            out3 = Path(td) / "b3.md"
+            rc3, _o3, e3 = run_bundle(root2, out3, ["src/b.py"])
+            self.assertEqual(rc3, 0, e3)
+            text3 = out3.read_text(encoding="utf-8")
+            self.assertIn("## Source: `src/b.py`\n\ny = 2\n", text3)
 
 
 if __name__ == "__main__":

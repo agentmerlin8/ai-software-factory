@@ -101,7 +101,10 @@ class RenderDashboardTests(unittest.TestCase):
     def test_per_story_rows_and_corrections_register(self):
         text = self.render()
         self.assertIn("## Per-story state", text)
-        self.assertIn("| STORY-201 | agent-a | `MERGED` | 1/0 | 1 | 3 | "
+        # corrections = 2: 1 formal plan loop (the plan-review-evidenced
+        # fixed finding folds into it — v0.1 evidence_path association) +
+        # 1 external fixed finding counted once
+        self.assertIn("| STORY-201 | agent-a | `MERGED` | 1/0 | 1 | 2 | "
                       "deadbeef1234 | proven |", text)
         # T-A: MERGED by transition without an outcome row
         self.assertIn("| T-A | — | `MERGED` | 0/0 | 0 | 0 | — | — |", text)
@@ -252,6 +255,60 @@ class RenderDashboardTests(unittest.TestCase):
             bad.write_text("{not json}\n", encoding="utf-8")
             self.assertEqual(
                 RD.main(["--root", str(self.root), "--ledger", str(bad)]), 2)
+
+
+class PlanReviewAssociationTests(unittest.TestCase):
+    """v0.1 association: a fixed finding folds into its plan loop when
+    its SUPPORTED-schema `evidence_path` names the plan review
+    (case-insensitive `plan-review` / `plan review`); a non-plan fixed
+    finding counts individually. No out-of-schema fields are read."""
+
+    def test_names_plan_review_helper(self):
+        self.assertTrue(RD._names_plan_review("stories/S/plan-review.md"))
+        self.assertTrue(RD._names_plan_review("evidence/Plan Review 1.md"))
+        self.assertTrue(RD._names_plan_review("PLAN-REVIEW.md"))
+        self.assertFalse(RD._names_plan_review("stories/S/code-review.md"))
+        self.assertFalse(RD._names_plan_review(None))
+        self.assertFalse(RD._names_plan_review(""))
+
+    def test_plan_review_evidence_folds_into_loop(self):
+        loop = {"event": "loop", "event_id": "loop-S-1", "story_id": "S",
+                "stage": "plan_review", "loop_n": 1, "class": "reasoning",
+                "root_cause_one_line": "x", "recorded_at": "t",
+                "provenance": "live"}
+        plan_fix = {"event": "finding", "event_id": "f-1", "story_id": "S",
+                    "finding_id": "F-1", "source": "internal",
+                    "class": "reasoning", "severity": "major",
+                    "disposition": "fixed",
+                    "evidence_path": "stories/S/plan-review.md"}
+        code_fix = {"event": "finding", "event_id": "f-2", "story_id": "S",
+                    "finding_id": "F-2", "source": "external",
+                    "class": "mechanical", "severity": "minor",
+                    "disposition": "fixed",
+                    "evidence_path": "stories/S/external-round-1.md"}
+        events = [loop, plan_fix, code_fix]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            text = RD.render(events, root, "H")
+        # 1 formal loop + 1 non-plan fixed finding = 2 corrections; the
+        # plan-review-evidenced fix is NOT double-counted on top
+        self.assertIn("| S | — | `no transitions (events only)` | 1/0 | 1 "
+                      "| 2 | — | — |", text)
+
+    def test_out_of_schema_field_never_read(self):
+        """A row carrying an out-of-schema `source_detail` cannot change
+        the association — only the supported evidence_path matters."""
+        finding = {"event": "finding", "event_id": "f-1", "story_id": "S",
+                   "finding_id": "F-1", "source": "internal",
+                   "class": "reasoning", "severity": "major",
+                   "disposition": "fixed",
+                   "evidence_path": "stories/S/plan-review.md",
+                   "source_detail": "code review follow-up"}
+        events = [finding]
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render(events, Path(td), "H")
+        self.assertIn("| S | — | `no transitions (events only)` | 0/0 | 0 "
+                      "| 0 | — | — |", text)
 
 
 if __name__ == "__main__":

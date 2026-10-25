@@ -84,7 +84,11 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             mm = re.match(r"^\s*\|\s*`?([^`|\n]+?)`?\s*\|", line)
             if not mm:
                 continue
-            p = mm.group(1).strip().lstrip("./")
+            p = mm.group(1).strip()
+            # strip a literal "./" prefix only — a character-set strip
+            # would eat the leading dot of hidden paths (.github/…) and
+            # fail valid digests
+            p = p[2:] if p.startswith("./") else p
             if not p or p.startswith(("path", "---")):
                 continue
             try:

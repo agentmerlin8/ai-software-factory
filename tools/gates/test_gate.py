@@ -378,6 +378,54 @@ class BuildLaneUnits(unittest.TestCase):
         self.assertEqual(cwd, (REPO / "nested").resolve())
         self.assertEqual(argv, ["python3", "-m", "unittest"])
 
+    def test_bare_runner_target_resolves_against_preceding_cd(self):
+        """command-validity: a declared runner target is resolved against
+        the EFFECTIVE cwd tracked through preceding `cd` setup segments —
+        `cd tests && pytest test_parser.py` is valid when
+        tests/test_parser.py exists, and rejects when it does not."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_parser.py").write_text("# t\n",
+                                                           encoding="utf-8")
+            findings: list[str] = []
+            M.check_bare_runners(
+                {"verify_commands": ["cd tests && pytest test_parser.py"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertEqual(findings, [])
+            # without the file under the effective cwd → named reject
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["cd tests && pytest test_ghost.py"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertTrue(any("nonexistent target path 'test_ghost.py'"
+                                in f for f in findings), findings)
+            # bare invocation still rejects (target tracking doesn't
+            # weaken the no-target rule)
+            findings = []
+            M.check_bare_runners(
+                {"verify_commands": ["cd tests && pytest"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertTrue(any("bare `pytest`" in f for f in findings),
+                            findings)
+
+    def test_escaping_cd_refused_by_parser_and_ignored_for_target(self):
+        """A `cd ..` that leaves the root violates parse_test_command's
+        cd rules (ValueError); check_bare_runners leaves the cwd at root
+        for such a segment, so a root-relative target must exist there."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            with self.assertRaises(ValueError) as cm:
+                M.parse_test_command("cd .. && pytest test_x.py", root)
+            self.assertIn("cd escapes repository", str(cm.exception))
+            findings: list[str] = []
+            M.check_bare_runners(
+                {"verify_commands": ["cd .. && pytest test_x.py"]},
+                root, ["pytest"], findings.append, findings.append)
+            self.assertTrue(any("nonexistent target path 'test_x.py'" in f
+                                for f in findings), findings)
+
     def test_pinned_commands_injected_results(self):
         cmd = "python3 -m unittest tests.test_widget"
         contract = {"verify_commands": [cmd]}

@@ -151,7 +151,9 @@ def load_ledger(ledger_path: Path | str) -> list[dict[str, Any]]:
     """Parse the JSONL ledger WITHOUT validation (raw row access).
 
     A missing file is an empty ledger. Blank lines are skipped. Invalid
-    JSON refuses with `<path>:<line>: invalid JSON: <detail>`.
+    JSON refuses with `<path>:<line>: invalid JSON: <detail>`. Read
+    failures (invalid UTF-8, a directory path) propagate raw here —
+    `load_events`/`validate_ledger` wrap or fold them.
     """
     p = Path(ledger_path)
     if not p.exists():
@@ -182,8 +184,17 @@ def load_events(ledger_path: Path | str) -> list[dict[str, Any]]:
     (`unknown_field_errors`) joins the same error list. Refuses with
     LedgerError listing every violation; use `validate_ledger` for a
     non-raising error list.
+
+    R7-H2: unreadable ledgers (invalid UTF-8, a directory passed as the
+    path, other read failures) refuse with a named
+    `LedgerError("ledger unreadable: …")` so the controller/render/CLI
+    LedgerError handlers see them — raw decoding/filesystem exceptions
+    never escape this boundary.
     """
-    events = load_ledger(ledger_path)
+    try:
+        events = load_ledger(ledger_path)
+    except (UnicodeDecodeError, OSError) as e:
+        raise LedgerError(f"ledger unreadable: {e}") from e
     errs = _all_errors(events)
     if errs:
         raise LedgerError("ledger rejected:\n  " + "\n  ".join(errs))
@@ -192,8 +203,16 @@ def load_events(ledger_path: Path | str) -> list[dict[str, Any]]:
 
 def validate_ledger(ledger_path: Path | str) -> list[str]:
     """Validate every row + the ledger-wide laws; [] = valid. Never raises
-    on content (only on unreadable files)."""
-    return _all_errors(load_ledger(ledger_path))
+    on content: parse failures (invalid JSON, invalid UTF-8) come back as
+    the diagnostic list (R7-H3). Only filesystem errors (OSError, e.g. a
+    directory passed as the path) propagate."""
+    try:
+        events = load_ledger(ledger_path)
+    except LedgerError as e:
+        return [str(e)]
+    except UnicodeDecodeError as e:
+        return [f"ledger unreadable: {e}"]
+    return _all_errors(events)
 
 
 # ---------------------------------------------------------------- append ----

@@ -96,9 +96,12 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             # would eat the leading dot of hidden paths (.github/…) and
             # fail valid digests
             p = p[2:] if p.startswith("./") else p
-            if not p or p.lower() == "path" or set(p) == {"-"}:
+            if not p or p.lower() == "path" or (
+                    set(p) <= {"-", ":"} and "-" in p):
                 # skip ONLY the literal path-table header cell and
-                # separator rows — real paths like `paths/config.json`
+                # separator rows whose cell contains only `-`/`:`
+                # characters (incl. aligned forms `:---` / `---:` /
+                # `:---:` — R7-H1) — real paths like `paths/config.json`
                 # or `pathlib.py` must still hit the existence check
                 continue
             try:

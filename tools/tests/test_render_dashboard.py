@@ -39,7 +39,8 @@ class RenderDashboardTests(unittest.TestCase):
         cls._td.cleanup()
 
     def render(self, root: Path | None = None) -> str:
-        return RD.render(self.events, root or self.root, self.header)
+        return RD.render(self.events, root or self.root, self.header,
+                         ledger_path=self.ledger)
 
     # ---- title + header genericization
     def test_title_defaults_to_factory_without_workspace_toml(self):
@@ -203,6 +204,53 @@ class RenderDashboardTests(unittest.TestCase):
         text = RD.render(events, self.root, self.header)
         self.assertIn("UNATTRIBUTED 1", text)
 
+    # ---- R7-H5: overlap findings excluded from the external census
+    def test_overlap_findings_excluded_from_census(self):
+        """An external finding carrying an `overlap_id` is excluded from
+        BOTH census populations (UNATTRIBUTED and without-instrumentation)
+        — matching the controller's attribution requirement; one without
+        it is still counted."""
+        def ext_finding(sid, eid, fid, overlap):
+            row = {"event": "finding", "event_id": eid, "story_id": sid,
+                   "finding_id": fid, "source": "external",
+                   "reviewed_sha": "b" * 40, "introduced_sha": "b" * 40,
+                   "class": "mechanical", "severity": "minor",
+                   "disposition": "fixed", "logic_touched": False,
+                   "overlap_id": overlap,
+                   "overlap_id_reason": ("duplicate of F-0" if overlap
+                                         else "independent"),
+                   "fixer": "orchestrator", "fix_sha": "c" * 40,
+                   "validation": None, "validation_reason": "n/a",
+                   "evidence_path": f"stories/{sid}/ext.md",
+                   "recorded_at": "2026-09-01T00:00:00Z",
+                   "provenance": "live"}
+            return row
+
+        def ctx(sid, eid):
+            return {"event": "review_context", "event_id": eid,
+                    "story_id": sid, "review_role": "external_review",
+                    "reviewed_sha": "b" * 40, "base_sha": "a" * 40,
+                    "context_manifest_path": f"stories/{sid}/manifest.json",
+                    "context_manifest_digest": "f" * 64,
+                    "prompt_version": "external_review-v0.1.0",
+                    "dispatch_id": None,
+                    "dispatch_id_reason": "external surface",
+                    "delivery_surface": "pr-full-diff",
+                    "requested_at": "2026-09-01T00:00:00Z",
+                    "recorded_at": "2026-09-01T00:00:00Z",
+                    "provenance": "live"}
+        # S1 has context (activated); S2 does not (without-instrumentation)
+        events = [ctx("S1", "review_context-S1-1"),
+                  ext_finding("S1", "finding-S1-1", "F-1", None),
+                  ext_finding("S1", "finding-S1-2", "F-2", "F-1"),
+                  ext_finding("S2", "finding-S2-1", "F-3", "F-9"),
+                  ext_finding("S2", "finding-S2-2", "F-4", None)]
+        text = RD.render(events, self.root, self.header)
+        # F-2 (overlap, activated) excluded → UNATTRIBUTED 1 (only F-1);
+        # F-3 (overlap, uninstrumented) excluded → without-instrumentation 1
+        self.assertIn("UNATTRIBUTED 1", text)
+        self.assertIn("without-instrumentation 1", text)
+
     def test_notes_sidecar_inlined(self):
         notes = self.root / "factory" / "dashboard-notes.md"
         notes.parent.mkdir(parents=True, exist_ok=True)
@@ -242,6 +290,53 @@ class RenderDashboardTests(unittest.TestCase):
                          hashlib.sha256(b.encode()).hexdigest())
         self.assertTrue(a.endswith("\n"))
         self.assertNotIn("\r", a)
+
+    # ---- R7-H4: ledger-derived freshness stamp (never repo HEAD)
+    def test_stamp_is_ledger_digest_not_head(self):
+        text = self.render()
+        self.assertNotIn("repo HEAD", text)
+        digest = hashlib.sha256(self.ledger.read_bytes()).hexdigest()[:12]
+        self.assertIn(f"_{len(self.events)} ledger events · ledger digest "
+                      f"{digest}_", text)
+
+    def test_render_stable_across_commit_boundary(self):
+        """Render at commit A, commit the dashboard (HEAD → B): the
+        second render must be byte-identical (ledger unchanged) and
+        --check rc 0 — the old HEAD stamp looped forever."""
+        import subprocess
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("factory", "ledger").mkdir(parents=True)
+            ledger = root / "factory" / "ledger" / "events.jsonl"
+            ledger.write_bytes(self.ledger.read_bytes())
+            subprocess.run(["git", "-C", str(root), "init", "-q"],
+                           check=True, capture_output=True)
+            self.assertEqual(RD.main(["--root", str(root)]), 0)
+            first = (root / "factory" / "DASHBOARD.md").read_bytes()
+            for args in (["add", "-A"],
+                         ["-c", "user.email=t@t", "-c", "user.name=t",
+                          "commit", "-qm", "dashboard"]):
+                subprocess.run(["git", "-C", str(root), *args], check=True,
+                               capture_output=True)
+            # HEAD moved; the render is unchanged
+            self.assertEqual(RD.main(["--check", "--root", str(root)]), 0)
+            self.assertEqual(RD.main(["--root", str(root)]), 0)
+            self.assertEqual(
+                (root / "factory" / "DASHBOARD.md").read_bytes(), first)
+
+    def test_stamp_changes_when_ledger_changes(self):
+        before = RD.ledger_digest(self.events, self.ledger)
+        alt = self.root / "factory" / "ledger" / "alt.jsonl"
+        alt.write_bytes(self.ledger.read_bytes()
+                        + b'{"event": "noop-changes-bytes"}\n')
+        after = RD.ledger_digest(self.events, alt)
+        self.assertNotEqual(before, after)
+        alt.unlink()
+
+    def test_ledger_digest_helper_matches_render_card_convention(self):
+        from tools import render_card as RC
+        self.assertEqual(RC.ledger_digest(self.ledger),
+                         RD.ledger_digest(self.events, self.ledger))
 
     # ---- CLI
     def test_cli_writes_check_stale_and_fresh(self):

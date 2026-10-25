@@ -565,5 +565,76 @@ class ExtensionlessAnchorGateTests(unittest.TestCase):
                           "['set', 'e']", errors)
 
 
+class AlignedSeparatorSkipTests(unittest.TestCase):
+    """R7-H1: aligned Markdown table separators (`|:---|---|`,
+    `|---:|---|`, `|:---:|---|`) yield first cells like `:---` /
+    `---:` — the old `set(p) == {"-"}` skip missed them, so the gate
+    looked for the separator as a Git path and rejected a valid digest.
+    Separator cells containing only `-`/`:` characters are skipped;
+    ghost entries and real paths are unaffected."""
+
+    def _repo(self, td: str, sid: str, separator: str,
+              extra_rows: str = "") -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        sdir = root / "stories" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            f"# digest — {sid}\n\n"
+            "## 1. File manifest\n\n"
+            f"| path | role |\n{separator}\n"
+            f"{extra_rows}"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            "## 4. Code anchors\n\n- `src/app.py:2` — def f\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_left_aligned_separator_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-915", "|:---|---|")
+            self.assertEqual(CD.run_gate(root, "STORY-915", "HEAD"), [])
+
+    def test_right_aligned_separator_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-916", "|---:|---|")
+            self.assertEqual(CD.run_gate(root, "STORY-916", "HEAD"), [])
+
+    def test_center_and_plain_separators_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-917", "|:---:|---|")
+            self.assertEqual(CD.run_gate(root, "STORY-917", "HEAD"), [])
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-918", "|---|---|")
+            self.assertEqual(CD.run_gate(root, "STORY-918", "HEAD"), [])
+
+    def test_ghost_entries_still_flagged_with_aligned_separator(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-919", "|:---|---|",
+                              extra_rows="| `src/ghost.py` | ghost |\n")
+            errors = CD.run_gate(root, "STORY-919", "HEAD")
+            self.assertIn("manifest path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_colon_path_cells_are_not_separator_exemptions(self):
+        """A cell that is not purely `-`/`:` characters still hits the
+        existence check — `:` alone or path-like tokens are not exempt."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-920", "|:---|---|",
+                              extra_rows="| `x:y` | odd |\n")
+            errors = CD.run_gate(root, "STORY-920", "HEAD")
+            self.assertIn("manifest path missing at HEAD: x:y", errors)
+
+
 if __name__ == "__main__":
     unittest.main()

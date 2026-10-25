@@ -11,10 +11,12 @@ The dashboard reports RAW COUNTS + breakdowns — never a single pooled
 percentage. Stories without loop/finding instrumentation are excluded from
 the correction-free measures and listed separately (unavailable ≠ zero).
 
-Render byte contract (architecture.md §Data model): ledger + git only;
-LF endings; trailing newline; NO wall-clock content — same ledger + same
-tree renders byte-identical output. The repo HEAD short SHA is git-derived
-and part of the deterministic body.
+Render byte contract (architecture.md §Data model): ledger only; LF
+endings; trailing newline; NO wall-clock content — same ledger renders
+byte-identical output across commit boundaries (R7-H4: the freshness
+stamp is the LEDGER-derived digest `ledger events · ledger digest
+<sha256[:12]>`, the same convention as render_card's footer — the old
+repo-HEAD stamp made a committed dashboard perpetually stale).
 
 Title genericization: the workspace display name comes from
 <root>/workspace.toml (`workspace` key) when present, else `factory` —
@@ -28,8 +30,9 @@ Exit codes (config_validator convention): 0 ok (incl. --check fresh) ·
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -57,14 +60,19 @@ def process_version(root: Path) -> str | None:
     return m.group(1).strip() if m else None
 
 
-def git_head(root: Path) -> str:
-    """Short HEAD SHA (git-derived; deterministic for a fixed tree)."""
-    try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                              cwd=root, capture_output=True, text=True,
-                              check=True).stdout.strip()
-    except (subprocess.CalledProcessError, OSError):
-        return "?"
+def ledger_digest(events: list[dict], ledger_path: Path | None = None) -> str:
+    """Stable LEDGER-derived freshness stamp (R7-H4; same convention as
+    render_card's footer: sha256[:12] of the ledger content). With a
+    ledger path the file bytes are hashed exactly like render_card does;
+    without one (in-process event lists) the canonical JSON of the events
+    is hashed. Never git/wall-clock derived — a committed dashboard stays
+    fresh across commit boundaries while its ledger is unchanged."""
+    if ledger_path is not None and ledger_path.exists():
+        data = ledger_path.read_bytes()
+    else:
+        data = json.dumps(events, sort_keys=True,
+                          ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()[:12]
 
 
 def _names_plan_review(evidence_path) -> bool:
@@ -75,13 +83,15 @@ def _names_plan_review(evidence_path) -> bool:
     return "plan-review" in ev or "plan review" in ev
 
 
-def render(events: list[dict], root: Path, header: str) -> str:
+def render(events: list[dict], root: Path, header: str,
+           ledger_path: Path | None = None) -> str:
     name = RSt.workspace_name(root)
     out: list[str] = [header, "", f"# {name} — Factory Dashboard", ""]
     pv = process_version(root)
     if pv:
         out += [f"**process-version: {pv}**"]
-    out += [f"_{len(events)} ledger events · repo HEAD {git_head(root)}_", ""]
+    out += [f"_{len(events)} ledger events · ledger digest "
+            f"{ledger_digest(events, ledger_path)}_", ""]
 
     # ---------- per-story rollup
     stories: dict[str, dict] = defaultdict(dict)
@@ -217,16 +227,21 @@ def render(events: list[dict], root: Path, header: str) -> str:
     # (story_id, finding_id) tuples, never bare finding_ids
     attributed_keys = {(a.get("story_id"), a.get("finding_id"))
                        for a in attrs}
+    # R7-H5: external findings carrying an `overlap_id` are excluded
+    # from the attribution requirement by the controller — the census
+    # must not count them as UNATTRIBUTED / without-instrumentation.
     activated_external = [(sid, f) for sid, s in stories.items()
                           if sid in context_stories
                           for f in s.get("findings", [])
-                          if f.get("source") == "external"]
+                          if f.get("source") == "external"
+                          and not f.get("overlap_id")]
     unattributed = sum(1 for sid, f in activated_external
                        if (sid, f.get("finding_id")) not in attributed_keys)
     uninstrumented = sum(1 for sid, s in stories.items()
                          if sid not in context_stories
                          for f in s.get("findings", [])
-                         if f.get("source") == "external")
+                         if f.get("source") == "external"
+                         and not f.get("overlap_id"))
     out.append("| External-unique finding attribution | "
                f"MISSED_WITH_CONTEXT {attr_counts['MISSED_WITH_CONTEXT']}; "
                f"CONTEXT_ABSENT {attr_counts['CONTEXT_ABSENT']}; "
@@ -302,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     header = RSt.generated_header(RSt.ledger_display(root, ledger))
-    text = render(events, root, header)
+    text = render(events, root, header, ledger_path=ledger)
     dash = root / "factory" / "DASHBOARD.md"
     if args.check:
         cur = dash.read_text(encoding="utf-8") if dash.exists() else ""

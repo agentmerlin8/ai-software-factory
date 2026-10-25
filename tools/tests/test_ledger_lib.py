@@ -110,6 +110,74 @@ class TestLoad(unittest.TestCase):
             self.assertEqual(len(L.load_events(p)), 2)
 
 
+class TestUnreadableLedgerWrapping(unittest.TestCase):
+    """R7-H2: load_events must wrap read failures (invalid UTF-8, a
+    directory passed as the ledger path) as named LedgerErrors so the
+    controller/render/CLI refusal handlers see them — raw decoding or
+    filesystem exceptions never bypass the boundary."""
+
+    def test_directory_path_raises_ledger_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(L.LedgerError) as cm:
+                L.load_events(Path(td))
+            self.assertIn("ledger unreadable:", str(cm.exception))
+
+    def test_invalid_utf8_raises_ledger_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            p.write_bytes(b'{"event": "loop", "x": "\xff\xfe\x80"}\n')
+            with self.assertRaises(L.LedgerError) as cm:
+                L.load_events(p)
+            self.assertIn("ledger unreadable:", str(cm.exception))
+
+    def test_load_ledger_raw_behavior_unchanged(self):
+        """load_ledger keeps its documented raw behavior: a directory
+        path propagates the OSError, invalid UTF-8 the decode error."""
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(OSError):
+                L.load_ledger(Path(td))
+            p = Path(td) / "events.jsonl"
+            p.write_bytes(b"\xff\xfe\x80\n")
+            with self.assertRaises(UnicodeDecodeError):
+                L.load_ledger(p)
+
+    def test_normal_ledgers_unaffected(self):
+        events = L.load_events(os.path.join(FIXTURES, "good_ledger.jsonl"))
+        self.assertEqual(len(events), 4)
+        with self.assertRaises(L.LedgerError) as cm:
+            L.load_events(os.path.join(FIXTURES, "bad_json.jsonl"))
+        self.assertIn("invalid JSON", str(cm.exception))
+
+
+class TestValidateLedgerParseFailures(unittest.TestCase):
+    """R7-H3: validate_ledger promises a non-raising list — parse
+    failures (invalid JSON, invalid UTF-8) come back as findings; only
+    filesystem errors (OSError) propagate."""
+
+    def test_bad_json_returns_finding_list(self):
+        errs = L.validate_ledger(os.path.join(FIXTURES, "bad_json.jsonl"))
+        self.assertIsInstance(errs, list)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("bad_json.jsonl:1: invalid JSON:", errs[0])
+
+    def test_invalid_utf8_returns_finding_list(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            p.write_bytes(b"\xff\xfe\x80\n")
+            errs = L.validate_ledger(p)
+            self.assertEqual(len(errs), 1)
+            self.assertIn("ledger unreadable:", errs[0])
+
+    def test_directory_path_still_propagates_oserror(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(OSError):
+                L.validate_ledger(Path(td))
+
+    def test_good_ledger_still_valid(self):
+        self.assertEqual(L.validate_ledger(
+            os.path.join(FIXTURES, "good_ledger.jsonl")), [])
+
+
 class TestLoadLifecycleLaws(unittest.TestCase):
     """Cross-row dispatch laws enforced at load (schema authority:
     ledger_schema.validate_events — I/O must surface them)."""

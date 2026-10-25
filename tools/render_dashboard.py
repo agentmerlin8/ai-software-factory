@@ -321,7 +321,9 @@ def render(events: list[dict], root: Path, header: str,
     out += ["## Corrections register (correct forward, never rewrite "
             "history)", ""]
     for c in corr_events:
-        cv = str(c.get("corrected_value") or "")
+        raw_cv = c.get("corrected_value")
+        # falsy-but-recorded values (0, False) must render, not collapse
+        cv = "" if raw_cv is None else str(raw_cv)
         out.append(f"- `{c['event_id']}` **{c.get('story_id') or 'run-level'}**: "
                    f"{cv[:220]}{'…' if len(cv) > 220 else ''} "
                    f"(_{c['source_citation']}_)")

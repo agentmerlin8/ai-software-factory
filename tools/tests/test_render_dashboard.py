@@ -115,6 +115,29 @@ class RenderDashboardTests(unittest.TestCase):
         self.assertIn("correction-STORY-201-1", text)
         self.assertIn("_loop-STORY-201-1_", text)
 
+    def test_falsy_corrected_values_render(self):
+        # round-17 R5: `or ""` collapsed a recorded 0/False to empty
+        def corr(eid, value):
+            return {"event": "correction", "event_id": eid,
+                    "story_id": None, "repo": None,
+                    "repo_reason": "run-level",
+                    "contradicted_claim": "c", "corrected_value": value,
+                    "source_citation": "src-1", "corrected_artifact": None,
+                    "recorded_at": "2026-09-01T00:00:00Z",
+                    "provenance": "live"}
+        text = RD.render([corr("correction-falsy-1", 0),
+                          corr("correction-falsy-2", False),
+                          corr("correction-falsy-3", "text value"),
+                          corr("correction-falsy-4", None)],
+                         self.root, self.header)
+        self.assertIn("`correction-falsy-1` **run-level**: 0 (_src-1_)", text)
+        self.assertIn("`correction-falsy-2` **run-level**: False "
+                      "(_src-1_)", text)
+        self.assertIn("`correction-falsy-3` **run-level**: text value "
+                      "(_src-1_)", text)
+        # None keeps the existing empty form
+        self.assertIn("`correction-falsy-4` **run-level**:  (_src-1_)", text)
+
     def test_repo_tagged_transitions_never_move_state(self):
         # per-repo sub-events must not appear as the story state
         repo_evt = {

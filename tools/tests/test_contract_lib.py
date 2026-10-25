@@ -104,6 +104,68 @@ class TestYamlSubset(unittest.TestCase):
         self.assertEqual(val["items"],
                          [{"id": "A", "text": "x"}, {"id": "B"}])
 
+    # ---- round-17 R1: escapes in quoted scalars
+    def test_double_quoted_escapes_decoded(self):
+        val = C.parse_yaml_subset(
+            'cmd: "python3 -c \\"raise(SystemExit(7))\\""\n'
+            'esc: "a\\nb\\tc\\\\d\\"\\""\n')
+        self.assertEqual(val["cmd"], 'python3 -c "raise(SystemExit(7))"')
+        self.assertEqual(val["esc"], 'a\nb\tc\\d""')
+
+    def test_unknown_escape_is_named_refusal(self):
+        with self.assertRaises(C.ContractParseError) as cm:
+            C.parse_yaml_subset('a: "x\\qy"\n')
+        self.assertIn("unsupported escape sequence", str(cm.exception))
+        # via extract_contract the refusal carries the standard prefix
+        with self.assertRaises(C.ContractParseError) as cm:
+            C.extract_contract('```contract.yaml\na: "x\\qy"\n```')
+        self.assertTrue(str(cm.exception).startswith(
+            "malformed contract block: unsupported escape sequence"),
+            str(cm.exception))
+
+    def test_single_quoted_only_doubling_escapes(self):
+        val = C.parse_yaml_subset("a: 'it''s \\n literal'\n")
+        self.assertEqual(val["a"], "it's \\n literal")
+
+    def test_plain_scalars_unchanged_by_escapes(self):
+        val = C.parse_yaml_subset("a: back\\slash keep\n")
+        self.assertEqual(val["a"], "back\\slash keep")
+
+    # ---- round-17 R2: mapping colon only before whitespace/end
+    def test_colon_in_scalar_not_a_mapping(self):
+        val = C.parse_yaml_subset(
+            "verify_commands:\n"
+            "  - python3 -m pytest tests/test_widget.py::test_refusal\n")
+        self.assertEqual(val["verify_commands"],
+                         ["python3 -m pytest "
+                          "tests/test_widget.py::test_refusal"])
+
+    def test_real_mapping_unchanged(self):
+        self.assertEqual(C.parse_yaml_subset("key: value\nb:\n"),
+                         {"key": "value", "b": None})
+
+    def test_key_value_without_space_not_a_mapping(self):
+        with self.assertRaises(C.ContractParseError):
+            C.parse_yaml_subset("key:value\n")
+
+    # ---- round-17 R3: duplicate keys refused at every depth
+    def test_duplicate_top_level_key_refused(self):
+        with self.assertRaises(C.ContractParseError) as cm:
+            C.parse_yaml_subset("verify_commands: [a]\nverify_commands: [b]\n")
+        self.assertEqual(str(cm.exception),
+                         "duplicate mapping key: 'verify_commands'")
+
+    def test_duplicate_nested_key_refused(self):
+        with self.assertRaises(C.ContractParseError) as cm:
+            C.parse_yaml_subset("files:\n  - path: a.py\n    path: b.py\n")
+        self.assertEqual(str(cm.exception), "duplicate mapping key: 'path'")
+        with self.assertRaises(C.ContractParseError):
+            C.parse_yaml_subset("a:\n  b: 1\n  b: 2\n")
+
+    def test_normal_docs_parse_after_duplicate_guard(self):
+        c = extract()
+        self.assertEqual(C.validate_contract(c), [])
+
 
 class TestValidate(unittest.TestCase):
     def test_valid_minimal(self):
@@ -202,6 +264,21 @@ class TestValidate(unittest.TestCase):
         self.assertTrue(any("api_operations source —" in e for e in errs),
                         errs)
         self.assertTrue(any("duplicate" in e for e in errs), errs)
+
+    def test_api_method_non_string_is_named_finding(self):
+        # round-17 R4: an unhashable method must not raise TypeError
+        c = extract()
+        c["api_operations"] = [
+            {"method": ["GET"], "route": "/x", "source": "src/a.py",
+             "action": "f", "responses": [{"status": 200, "type": "T"}]},
+        ]
+        errs = C.validate_contract(c)
+        self.assertIn("contract block: api_operations method — ['GET'] "
+                      "not in ['DELETE', 'GET', 'PATCH', 'POST', 'PUT']",
+                      errs)
+        # valid method unchanged
+        c["api_operations"][0]["method"] = "GET"
+        self.assertEqual(C.validate_contract(c), [])
 
     def test_api_duplicate_status(self):
         c = extract()

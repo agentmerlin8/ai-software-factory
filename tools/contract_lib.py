@@ -101,6 +101,36 @@ def _strip_comment(line: str) -> str:
     return "".join(out).rstrip()
 
 
+_DOUBLE_ESCAPES = {"\\": "\\", '"': '"', "n": "\n", "t": "\t",
+                   "r": "\r", "b": "\b", "f": "\f"}
+
+
+def _decode_double_quoted(body: str) -> str:
+    """Decode escapes inside a double-quoted YAML scalar. The standard set
+    (\\\\, \\", \\n, \\t, \\r, \\b, \\f) decodes; any other backslash
+    sequence is a named parse refusal — never silently kept, so the runner
+    cannot execute a different program than the author intended."""
+    out: list[str] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 >= len(body):
+            raise ContractParseError(
+                f"unsupported escape sequence: {ch!r} "
+                "(trailing backslash in double-quoted scalar)")
+        nxt = body[i + 1]
+        if nxt not in _DOUBLE_ESCAPES:
+            raise ContractParseError(
+                f"unsupported escape sequence: {(ch + nxt)!r}")
+        out.append(_DOUBLE_ESCAPES[nxt])
+        i += 2
+    return "".join(out)
+
+
 def _scalar(tok: str) -> Any:
     tok = tok.strip()
     if tok == "" or tok in ("null", "~"):
@@ -110,7 +140,12 @@ def _scalar(tok: str) -> Any:
     if tok in ("false", "False"):
         return False
     if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "\"'":
-        return tok[1:-1]
+        body = tok[1:-1]
+        if tok[0] == "'":
+            # YAML single-quote rule: only '' escapes (to '); backslashes
+            # stay literal.
+            return body.replace("''", "'")
+        return _decode_double_quoted(body)
     if re.fullmatch(r"-?\d+", tok):
         return int(tok)
     if re.fullmatch(r"-?\d+\.\d+", tok):
@@ -150,6 +185,20 @@ def _split_flow(s: str) -> list[str]:
     return [p.strip() for p in parts]
 
 
+_MAP_KV_RE = re.compile(r"([^:]+):(?:\s+(.*))?$")
+
+
+def _mapping_split(content: str) -> tuple[str, str] | None:
+    """(key, rest) when `content` is a YAML key/value line — a colon counts
+    as a mapping separator only when followed by whitespace or
+    end-of-item, so colons INSIDE scalars (e.g. `pytest a.py::test_x`)
+    never split. None when it is not a mapping line."""
+    m = _MAP_KV_RE.match(content)
+    if not m:
+        return None
+    return m.group(1).strip(), (m.group(2) or "").strip()
+
+
 def parse_yaml_subset(text: str) -> Any:
     """Parse the small YAML subset; raises ContractParseError (bare detail,
     no prefix — extract_contract adds it)."""
@@ -187,7 +236,8 @@ def _parse_seq(lines: list[tuple[int, str]], i: int,
             raise ContractParseError(f"bad indent in sequence near {content!r}")
         item = content[2:].strip()
         i += 1
-        if ":" in item and not item.startswith(("[", '"', "'")):
+        if item and not item.startswith(("[", '"', "'")) and \
+                _mapping_split(item) is not None:
             # mapping item starting on the dash line: "- key: value"
             sub: list[tuple[int, str]] = [(indent + 2, item)]
             while i < len(lines) and lines[i][0] > indent:
@@ -213,10 +263,12 @@ def _parse_map(lines: list[tuple[int, str]], i: int,
         if ind > indent:
             raise ContractParseError(
                 f"unexpected indent at {content!r} (context {out!r:.80})")
-        m = re.match(r"([^:]+):\s*(.*)$", content)
-        if not m:
+        kv = _mapping_split(content)
+        if kv is None:
             raise ContractParseError(f"expected `key: value`, got {content!r}")
-        key, rest = m.group(1).strip(), m.group(2).strip()
+        key, rest = kv
+        if key in out:
+            raise ContractParseError(f"duplicate mapping key: {key!r}")
         i += 1
         if rest:
             out[key] = _scalar(rest)
@@ -378,7 +430,7 @@ def validate_contract(c: dict[str, Any]) -> list[str]:
                     continue
                 method, route = op.get("method"), op.get("route")
                 source, action = op.get("source"), op.get("action")
-                if method not in HTTP_METHODS:
+                if not isinstance(method, str) or method not in HTTP_METHODS:
                     errs.append("contract block: api_operations method — "
                                 f"{method!r} not in {sorted(HTTP_METHODS)}")
                 if not isinstance(route, str) or not route.startswith("/") \

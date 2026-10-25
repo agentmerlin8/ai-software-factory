@@ -40,6 +40,11 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+# Read-only law, byte-level: importing the local modules must not leave
+# __pycache__/*.pyc files on a fresh installation. Set BEFORE any local
+# import so the interpreter's default bytecode caching never triggers.
+sys.dont_write_bytecode = True
+
 try:
     from . import config_validator as CV
     from . import ledger_lib as L
@@ -251,7 +256,10 @@ def cmd_workspace_show(args: argparse.Namespace) -> int:
             "ledger": summary,
             "environments": envs,
         })
-        return 0
+        # JSON mode carries the SAME refusal semantics as text: an
+        # unresolvable pin is a finding, not a success (rc 1), so
+        # automation cannot read rc 0 while status says unresolvable.
+        return 1 if pin_status["status"] == "unresolvable" else 0
 
     print(f"workspace: {doc.get('workspace')}")
     print(f"control_home: {doc.get('control_home')}")
@@ -366,8 +374,11 @@ def cmd_env_resolve(args: argparse.Namespace) -> int:
         print("credentials:")
         for c in cred_status:
             print(f"  {c['ref']} {c['status']}")
+    # Diagnostics never pollute stdout in JSON mode (stdout stays pure
+    # JSON, parseable); text mode keeps them on stdout. rc 1 either way.
+    stream = sys.stdout if not args.json else sys.stderr
     for ref in missing:
-        print(f"missing credential reference: {ref}")
+        print(f"missing credential reference: {ref}", file=stream)
     return 1 if missing else 0
 
 

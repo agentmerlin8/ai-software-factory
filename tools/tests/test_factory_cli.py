@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,6 +45,19 @@ def run(argv: list[str]) -> tuple[int, str]:
 
 def ws_run(ws: Path, *rest: str) -> tuple[int, str]:
     return run(["--workspace", str(ws), *rest])
+
+
+CLI = Path(factory.__file__).resolve()
+
+
+def sub_run(argv: list[str], env: dict[str, str] | None = None,
+            ) -> tuple[int, str, str]:
+    """Run the CLI in a FRESH subprocess; return (rc, stdout, stderr)."""
+    e = {k: v for k, v in (env if env is not None else os.environ).items()
+         if k != "PYTHONPYCACHEPREFIX"}
+    res = subprocess.run([sys.executable, str(CLI), *argv],
+                         capture_output=True, text=True, env=e)
+    return res.returncode, res.stdout, res.stderr
 
 
 def sha256_walk(root: Path) -> dict[str, str]:
@@ -186,6 +200,34 @@ class WorkspaceShowTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn(f"factory_pin: v0.1.0 unresolvable — not found in "
                       f"{repo}", out.splitlines())
+
+    def test_unresolvable_pin_json_mode_is_refusal_rc1(self) -> None:
+        # K2: --json must carry the SAME status-dependent exit code as
+        # text — rc 0 while factory_pin.status says "unresolvable" would
+        # read as success to automation.
+        repo = make_factory_repo(self.tmp)
+        git("tag", "-d", "v0.1.0", cwd=repo)  # pin cannot resolve
+        rc, out, err = sub_run(["--workspace", str(CONCRETE),
+                                "workspace", "show", "--repo", str(repo),
+                                "--json"])
+        self.assertEqual(rc, 1)
+        data = json.loads(out)  # JSON is still emitted in full
+        self.assertEqual(data["factory_pin"]["status"], "unresolvable")
+        self.assertEqual(err, "")
+
+    def test_resolvable_and_deferred_pin_json_mode_rc0(self) -> None:
+        # K2 counterpart: resolvable pin → rc 0 ...
+        repo = make_factory_repo(self.tmp)
+        rc, out, _ = sub_run(["--workspace", str(CONCRETE),
+                              "workspace", "show", "--repo", str(repo),
+                              "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["factory_pin"]["status"], "resolved")
+        # ... deferred pin (no --repo) → rc 0
+        rc, out, _ = sub_run(["--workspace", str(self.ws),
+                              "workspace", "show", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["factory_pin"]["status"], "deferred")
 
     def test_ledger_none_when_absent(self) -> None:
         rc, out = ws_run(CONCRETE, "workspace", "show")
@@ -352,6 +394,30 @@ class EnvResolveTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("environment not found: nope", out)
 
+    def test_missing_credential_diagnostics_json_mode_go_to_stderr(self) -> None:
+        # K3: in JSON mode stdout stays pure JSON (parseable — no
+        # "Extra data" from appended plain-text diagnostics); the
+        # missing-reference lines move to stderr; rc stays 1.
+        env = {k: v for k, v in os.environ.items() if k != "CLI_WS_TEST_KEY"}
+        rc, out, err = sub_run(["--workspace", str(GOOD),
+                                "env", "resolve", "local", "--json"], env=env)
+        self.assertEqual(rc, 1)
+        data = json.loads(out)  # stdout is PURE JSON
+        self.assertEqual(data["missing"], ["env:CLI_WS_TEST_KEY"])
+        self.assertIn("missing credential reference: env:CLI_WS_TEST_KEY",
+                      err.splitlines())
+        self.assertNotIn("missing credential reference", out)
+
+    def test_missing_credential_diagnostics_text_mode_stay_on_stdout(self) -> None:
+        # K3 counterpart: text mode unchanged — diagnostics on stdout.
+        env = {k: v for k, v in os.environ.items() if k != "CLI_WS_TEST_KEY"}
+        rc, out, err = sub_run(["--workspace", str(GOOD),
+                                "env", "resolve", "local"], env=env)
+        self.assertEqual(rc, 1)
+        self.assertIn("missing credential reference: env:CLI_WS_TEST_KEY",
+                      out.splitlines())
+        self.assertEqual(err, "")
+
 
 class ReadOnlyProofTests(unittest.TestCase):
     def test_all_commands_write_nothing_under_the_workspace(self) -> None:
@@ -376,6 +442,40 @@ class ReadOnlyProofTests(unittest.TestCase):
         ws_run(BADREF, "env", "show", "local")
         ws_run(BADREF, "env", "resolve", "local")
         self.assertEqual(sha256_walk(BADREF), before)
+
+
+class NoBytecodeWritesTests(unittest.TestCase):
+    """K1: a FRESH installed-like tree must gain no __pycache__/*.pyc when
+    the documented `python3 tools/factory.py …` invocation runs — the
+    read-only guarantee holds on disk too (sys.dont_write_bytecode is set
+    before any local import)."""
+
+    MODULES = ("__init__.py", "factory.py", "config_validator.py",
+               "ledger_lib.py", "ledger_schema.py")
+
+    def test_cli_subprocess_writes_no_bytecode_under_installed_tree(self) -> None:
+        tmp = Path(tempfile.mkdtemp(prefix="t7-pyc-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        install = tmp / "install"
+        (install / "tools").mkdir(parents=True)
+        src_dir = CLI.parent
+        for name in self.MODULES:
+            shutil.copyfile(src_dir / name, install / "tools" / name)
+        ws = tmp / "ws"
+        shutil.copytree(GOOD, ws)
+
+        self.assertEqual([], list(install.rglob("*.pyc")))  # clean slate
+        res = subprocess.run(
+            [sys.executable, str(install / "tools" / "factory.py"),
+             "--workspace", str(ws), "workspace", "show"],
+            capture_output=True, text=True,
+            env={k: v for k, v in os.environ.items()
+                 if k != "PYTHONPYCACHEPREFIX"})
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual([], list(install.rglob("__pycache__")))
+        self.assertEqual([], list(install.rglob("*.pyc")))
+        # sanity: the CLI actually ran (output contract intact)
+        self.assertIn("workspace: cli-fixture", res.stdout.splitlines())
 
 
 class UsageTests(unittest.TestCase):

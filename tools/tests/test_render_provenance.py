@@ -205,7 +205,30 @@ class RenderProvenanceTests(unittest.TestCase):
                 RP.main(["STORY-201", "--root", str(self.root),
                          "--ledger", str(bad)]), 2)
         # no story ids and no --all → 2
-        self.assertEqual(RP.main(["--root", str(self.root)]), 2)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(RP.main(["--root", str(self.root)]), 2)
+        self.assertIn("usage:", err.getvalue())
+
+    def test_empty_all_discovery_is_successful_noop(self):
+        """R19-T2: --all over an empty/missing ledger discovers no story
+        ids — that is a successful no-op (rc 0), not a usage error; the
+        usage error stays for invocations WITHOUT --all."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("factory", "ledger").mkdir(parents=True)
+            empty = root / "factory" / "ledger" / "events.jsonl"
+            empty.write_bytes(b"")
+            self.assertEqual(
+                RP.main(["--all", "--check", "--root", str(root)]), 0)
+            self.assertEqual(RP.main(["--all", "--root", str(root)]), 0)
+            # missing ledger file → same no-op
+            empty.unlink()
+            self.assertEqual(
+                RP.main(["--all", "--check", "--root", str(root)]), 0)
+            self.assertEqual(RP.main(["--all", "--root", str(root)]), 0)
+            # nothing rendered
+            self.assertFalse((root / "stories").exists())
 
     # ---- story-id path confinement (B2)
     def _traversal_ledger(self, root: Path) -> Path:

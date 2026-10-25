@@ -119,6 +119,35 @@ class RiskMarkerBoundaryTests(unittest.TestCase):
             errors = CD.run_gate(root, "STORY-908", "HEAD")
             self.assertIn("bad risk marker: X", errors)
 
+    def test_multichar_severity_word_flagged(self):
+        """R19-T1: `- stale cache — CRITICAL` used to produce no
+        single-letter candidate, so the membership check never ran and
+        the invalid severity passed. The COMPLETE token after the
+        delimiter must be validated and rejected by name."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "- stale cache — CRITICAL\n")
+            errors = CD.run_gate(root, "STORY-908", "HEAD")
+            self.assertIn("bad risk marker: CRITICAL", errors)
+            # en-dash and spaced-hyphen delimiters behave the same
+            for line in ("- stale cache – CRITICAL\n",
+                         "- stale cache - CRITICAL\n"):
+                root2 = self._repo(
+                    tempfile.mkdtemp(dir=td), line)
+                errors2 = CD.run_gate(root2, "STORY-908", "HEAD")
+                self.assertIn("bad risk marker: CRITICAL", errors2)
+
+    def test_valid_single_letter_severities_still_pass(self):
+        """R19-T1: L/M/H after the delimiter remain accepted; a missing
+        severity (no delimiter) stays unchanged (no finding)."""
+        with tempfile.TemporaryDirectory() as td:
+            for sev in ("L", "M", "H"):
+                root = self._repo(tempfile.mkdtemp(dir=td),
+                                  f"- drift — {sev}\n")
+                errors = CD.run_gate(root, "STORY-908", "HEAD")
+                self.assertEqual(errors, [], sev)
+            root = self._repo(tempfile.mkdtemp(dir=td), "- drift\n")
+            self.assertEqual(CD.run_gate(root, "STORY-908", "HEAD"), [])
+
 
 class ACGrepTests(unittest.TestCase):
     def test_ac_pattern_matches_typical(self):

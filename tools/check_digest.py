@@ -290,10 +290,17 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
         errors.append("unparseable section: ## 7. Risk list")
     if rk:
         for line in rk.group(1).splitlines():
-            for m2 in re.findall(
-                    r"(?<![A-Za-z])`?([A-Z])`?(?=\s*(?:$|—|–|-))", line):
-                if m2 not in ("L", "M", "H"):
-                    errors.append(f"bad risk marker: {m2}")
+            # R19-T1: parse the COMPLETE severity token following the
+            # delimiter (—/–/spaced hyphen, per the section grammar).
+            # The old single-[A-Z] pattern produced NO candidate for
+            # `- stale cache — CRITICAL`, so the membership check never
+            # ran and an invalid severity passed. A trailing token after
+            # the last delimiter is the severity declaration; anything
+            # outside L/M/H is a named finding. No delimiter (or no
+            # single trailing token) = missing severity = unchanged.
+            m2 = re.search(r"(?:—|–|\s-\s)\s*`?(\S+?)`?\s*$", line)
+            if m2 and m2.group(1) not in ("L", "M", "H"):
+                errors.append(f"bad risk marker: {m2.group(1)}")
     return errors
 
 

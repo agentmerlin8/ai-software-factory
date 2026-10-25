@@ -68,7 +68,14 @@ def story_file_candidates(root: Path, story: str) -> list[Path]:
 DECL_KEYWORDS = frozenset({
     "async", "def", "class", "function", "fn", "func", "export",
     "public", "private", "protected", "internal", "static",
-    "abstract", "final"})
+    "abstract", "final",
+    # R18-S1: more declaration keywords — `export` alone was filtered
+    # but `interface`/`const`/`struct`/`enum` were not, so an anchor
+    # `export interface MissingShape` passed against
+    # `export interface ExistingShape {}` (only `export` was checked
+    # as the first symbol token). The DECLARED NAME must be the first
+    # checked symbol token for these declaration forms too.
+    "interface", "const", "struct", "enum"})
 
 # Same token grammar as the plan gate's base-sha ladder (plan_checks
 # SHA_RE) — the declared-vs-supplied check must parse the digest with

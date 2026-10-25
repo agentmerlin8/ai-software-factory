@@ -180,18 +180,13 @@ def pending_gates(gates: list[dict]) -> list[dict]:
     return pending
 
 
-def owner_line(assignments: list[dict]) -> str:
-    """Current owner from the assignment lifecycle: claim/handover sets it,
-    release clears it (latest row wins)."""
-    owner = None
-    for a in assignments:
-        op = a.get("op")
-        if op == "claim":
-            owner = a.get("owner")
-        elif op == "handover":
-            owner = a.get("to")
-        elif op == "release":
-            owner = None
+def owner_line(events: list[dict], sid: str) -> str:
+    """Current owner from the claim lifecycle — delegated to
+    controller.open_claim_owner (R18-S2): claim/handover sets it,
+    release clears it, and a repo-less CLOSED transition clears it
+    IMPLICITLY (latest row wins) — the card must never display a
+    former owner after an implicit release."""
+    owner = Ctl.open_claim_owner(events, sid)
     return str(owner) if owner else "(none recorded)"
 
 
@@ -238,8 +233,6 @@ def render_card_text(sid: str, events: list[dict], state: str,
     transitions = [e for e in story_events
                    if e.get("event") == "transition" and not e.get("repo")]
     gates = [e for e in story_events if e.get("event") == "human_gate"]
-    assignments = [e for e in story_events
-                   if e.get("event") == "assignment"]
     findings = L.latest_findings(story_events, sid)
 
     state_txt = state
@@ -248,7 +241,7 @@ def render_card_text(sid: str, events: list[dict], state: str,
 
     lines: list[str] = [CARD_MARKER, f"## Factory Card — {sid}", ""]
     lines.append(f"**State:** {state_txt}")
-    lines.append(f"**Owner:** {owner_line(assignments)}")
+    lines.append(f"**Owner:** {owner_line(story_events, sid)}")
     lines.append("")
 
     if transitions:

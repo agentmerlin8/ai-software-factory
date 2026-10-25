@@ -292,16 +292,64 @@ class GateSupersessionTests(unittest.TestCase):
 
 
 class OwnerLifecycleTests(unittest.TestCase):
+    """R18-S2: the card's owner line delegates to
+    controller.open_claim_owner over the STORY events — a repo-less
+    CLOSED transition clears ownership IMPLICITLY (no release row)."""
+
+    @staticmethod
+    def _assign(sid: str, **kw) -> dict:
+        return {"event": "assignment", "story_id": sid, **kw}
+
+    @staticmethod
+    def _trans(sid: str, to_state: str, repo=None) -> dict:
+        return {"event": "transition", "story_id": sid, "repo": repo,
+                "from_state": "X", "to_state": to_state,
+                "requested_by": "orchestrator"}
+
     def test_claim_handover_release(self):
-        self.assertEqual(R.owner_line([{"op": "claim", "owner": "a"}]),
-                         "a")
+        self.assertEqual(
+            R.owner_line([self._assign("STORY-970", op="claim",
+                                       owner="a")], "STORY-970"), "a")
         self.assertEqual(R.owner_line([
-            {"op": "claim", "owner": "a"},
-            {"op": "handover", "from": "a", "to": "b"}]), "b")
+            self._assign("STORY-970", op="claim", owner="a"),
+            self._assign("STORY-970", op="handover", **{"from": "a"},
+                         to="b")], "STORY-970"), "b")
         self.assertEqual(R.owner_line([
-            {"op": "claim", "owner": "a"},
-            {"op": "release", "owner": "a"}]), "(none recorded)")
-        self.assertEqual(R.owner_line([]), "(none recorded)")
+            self._assign("STORY-970", op="claim", owner="a"),
+            self._assign("STORY-970", op="release", owner="a")],
+            "STORY-970"), "(none recorded)")
+        self.assertEqual(R.owner_line([], "STORY-970"), "(none recorded)")
+
+    def test_implicit_closed_clears_owner(self):
+        """A claim followed by a story-level CLOSED transition with NO
+        separate release row displays `(none recorded)`."""
+        events = [self._assign("STORY-971", op="claim", owner="agent-a"),
+                  self._trans("STORY-971", "CLOSED")]
+        self.assertEqual(R.owner_line(events, "STORY-971"),
+                         "(none recorded)")
+        card = R.render_card_text("STORY-971", events, "CLOSED", None,
+                                  Path("/nonexistent"), "digest123456")
+        self.assertIn("**Owner:** (none recorded)", card)
+
+    def test_repo_tagged_closed_keeps_owner(self):
+        """A repo-tagged CLOSED sub-event is NOT an implicit release —
+        the story claim stays open."""
+        events = [self._assign("STORY-972", op="claim", owner="agent-a"),
+                  self._trans("STORY-972", "CLOSED", repo="app")]
+        self.assertEqual(R.owner_line(events, "STORY-972"), "agent-a")
+
+    def test_non_terminal_transition_keeps_owner(self):
+        """A claim followed by a NON-terminal transition keeps its
+        owner."""
+        events = [self._assign("STORY-973", op="claim", owner="agent-a"),
+                  self._trans("STORY-973", "MERGE_ELIGIBLE")]
+        self.assertEqual(R.owner_line(events, "STORY-973"), "agent-a")
+
+    def test_other_story_events_ignored(self):
+        events = [self._assign("STORY-974", op="claim", owner="agent-a"),
+                  self._assign("STORY-999", op="claim", owner="agent-z"),
+                  self._trans("STORY-999", "CLOSED")]
+        self.assertEqual(R.owner_line(events, "STORY-974"), "agent-a")
 
 
 class UnknownStoryTests(unittest.TestCase):

@@ -811,6 +811,75 @@ J2_SRC = ("# module\n"
           "    return sum(items)\n")
 
 
+S1_SRC = ("// mod\n"
+          "export interface ExistingShape {}\n"
+          "const existingConst = 1;\n"
+          "struct ExistingStruct { }\n"
+          "enum ExistingEnum { }\n")
+
+
+class AnchorDeclKeywordFilterTests(unittest.TestCase):
+    """R18-S1: declaration keywords `export`/`interface`/`const`/
+    `struct`/`enum` are filtered before the symbol check — the
+    DECLARED NAME is the first checked token, so a mismatched declared
+    name (e.g. `export interface MissingShape` vs a line declaring
+    `ExistingShape`) is an anchor-symbol failure, never a pass on the
+    filtered keyword tokens alone."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=S1_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_export_interface_mismatch_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-964",
+                              "- `src/app.py:2` — export interface "
+                              "MissingShape\n")
+            errors = CD.run_gate(root, "STORY-964", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['MissingShape']", errors)
+
+    def test_export_interface_match_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-965",
+                              "- `src/app.py:2` — export interface "
+                              "ExistingShape\n")
+            self.assertEqual(CD.run_gate(root, "STORY-965", "HEAD"), [])
+
+    def test_const_mismatch_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-966",
+                              "- `src/app.py:3` — const MissingConst\n")
+            errors = CD.run_gate(root, "STORY-966", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['MissingConst']", errors)
+
+    def test_struct_mismatch_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-967",
+                              "- `src/app.py:4` — struct MissingStruct\n")
+            errors = CD.run_gate(root, "STORY-967", "HEAD")
+            self.assertIn("anchor symbol not on line 4 of src/app.py: "
+                          "['MissingStruct']", errors)
+
+    def test_enum_mismatch_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-968",
+                              "- `src/app.py:5` — enum MissingEnum\n")
+            errors = CD.run_gate(root, "STORY-968", "HEAD")
+            self.assertIn("anchor symbol not on line 5 of src/app.py: "
+                          "['MissingEnum']", errors)
+
+    def test_matching_names_all_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-969",
+                              "- `src/app.py:3` — const existingConst\n"
+                              "- `src/app.py:4` — struct ExistingStruct\n"
+                              "- `src/app.py:5` — enum ExistingEnum\n")
+            self.assertEqual(CD.run_gate(root, "STORY-969", "HEAD"), [])
+
+
 class AnchorSymbolTokenMatchTests(unittest.TestCase):
     """R9-J2: the anchor symbol check compares COMPLETE tokens, not
     substrings — anchor `def total` must NOT pass against

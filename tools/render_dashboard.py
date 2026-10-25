@@ -114,6 +114,11 @@ def render(events: list[dict], root: Path, header: str,
         elif et == "transition":
             if not e.get("repo"):  # per-repo sub-events never move state
                 s["state"] = e["to_state"]
+                # R18-S2: a story-level CLOSED transition is an implicit
+                # release (controller.open_claim_owner treats it so) —
+                # the owner cell must clear even without a release row.
+                if e.get("to_state") == "CLOSED":
+                    s["owner"] = None
             s.setdefault("transitions", 0)
             s["transitions"] += 1
         elif et == "loop":

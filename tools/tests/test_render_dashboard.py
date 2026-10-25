@@ -179,6 +179,61 @@ class RenderDashboardTests(unittest.TestCase):
         text = RD.render([claim], self.root, self.header)
         self.assertIn("| STORY-220 | agent-a |", text)
 
+    # ---- R18-S2: a story-level CLOSED transition is an implicit release
+    def _trans(self, eid: str, sid: str, to_state: str, repo=None) -> dict:
+        row = {"event": "transition", "event_id": eid, "story_id": sid,
+               "repo": repo, "from_state": "CODING", "to_state": to_state,
+               "requested_by": "orchestrator", "checks_run": [],
+               "check_results": {}, "approved_by": None,
+               "approved_by_reason": "no gate required",
+               "recorded_at": "2026-09-01T06:00:00Z", "provenance": "live"}
+        return row
+
+    def test_implicit_closed_clears_owner(self):
+        claim = self._assign("assignment-STORY-220-1", op="claim",
+                             owner="agent-a", host="host-1",
+                             session="sess-1",
+                             claimed_at="2026-09-01T00:00:00Z",
+                             start_sha="a" * 40)
+        closed = self._trans("transition-STORY-220-2", "STORY-220",
+                             "CLOSED")
+        text = RD.render([claim, closed], self.root, self.header)
+        self.assertIn("| STORY-220 | — | `CLOSED`", text)
+        self.assertNotIn("| STORY-220 | agent-a |", text)
+
+    def test_repo_tagged_closed_keeps_owner(self):
+        claim = self._assign("assignment-STORY-220-1", op="claim",
+                             owner="agent-a", host="host-1",
+                             session="sess-1",
+                             claimed_at="2026-09-01T00:00:00Z",
+                             start_sha="a" * 40)
+        repo_closed = self._trans("transition-STORY-220-2", "STORY-220",
+                                  "CLOSED", repo="app")
+        text = RD.render([claim, repo_closed], self.root, self.header)
+        self.assertIn("| STORY-220 | agent-a |", text)
+
+    def test_non_terminal_transition_keeps_owner(self):
+        claim = self._assign("assignment-STORY-220-1", op="claim",
+                             owner="agent-a", host="host-1",
+                             session="sess-1",
+                             claimed_at="2026-09-01T00:00:00Z",
+                             start_sha="a" * 40)
+        merged = self._trans("transition-STORY-220-2", "STORY-220",
+                             "MERGE_ELIGIBLE")
+        text = RD.render([claim, merged], self.root, self.header)
+        self.assertIn("| STORY-220 | agent-a | `MERGE_ELIGIBLE`", text)
+
+    def test_explicit_release_still_clears(self):
+        claim = self._assign("assignment-STORY-220-1", op="claim",
+                             owner="agent-a", host="host-1",
+                             session="sess-1",
+                             claimed_at="2026-09-01T00:00:00Z",
+                             start_sha="a" * 40)
+        rel = self._assign("assignment-STORY-220-2", op="release",
+                           owner="agent-a")
+        text = RD.render([claim, rel], self.root, self.header)
+        self.assertIn("| STORY-220 | — |", text)
+
     # ---- attribution membership keyed by (story, finding_id) (B8)
     def test_attribution_keyed_by_story_and_finding_id(self):
         # two stories share the finding id F-1 (schema-permitted: finding

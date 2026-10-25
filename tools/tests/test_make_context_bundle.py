@@ -174,5 +174,88 @@ class VerbatimSourceTests(unittest.TestCase):
             self.assertIn("## Source: `src/b.py`\n\ny = 2\n", text3)
 
 
+class RawBytesTests(unittest.TestCase):
+    """R3-D5: show_at must capture stdout as RAW BYTES — text=True
+    applied universal-newline translation, so a committed CRLF file was
+    silently LF-normalized and the manifest byte count lied. The bundle
+    must carry CRLF verbatim and the manifest bytes must equal the git
+    blob size."""
+
+    def _repo_bytes(self, td: str, files: dict[str, bytes]) -> Path:
+        root = Path(td)
+        root.mkdir(parents=True, exist_ok=True)
+        for rel, data in files.items():
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", "fixture"]):
+            subprocess.run(["git", "-C", str(root), *args], check=True,
+                           capture_output=True)
+        return root
+
+    def _blob_size(self, root: Path, rel: str) -> int:
+        oid = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", f"HEAD:{rel}"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        return int(subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-s", oid],
+            capture_output=True, text=True, check=True).stdout.strip())
+
+    def test_crlf_file_verbatim_and_manifest_matches_blob(self):
+        crlf = b"one\r\ntwo\r\nthree\r\n"
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_bytes(td, {"src/crlf.txt": crlf})
+            out = Path(td) / "bundle.md"
+            rc, _stdout, stderr = run_bundle(root, out, ["src/crlf.txt"])
+            self.assertEqual(rc, 0, stderr)
+            raw = out.read_bytes()
+            # CRLF survives verbatim — no newline translation
+            self.assertIn(b"one\r\ntwo\r\nthree\r\n", raw)
+            self.assertNotIn(b"one\ntwo\nthree", raw.replace(b"\r\n", b""))
+            # manifest byte count == git blob size (18, not the
+            # LF-normalized 15)
+            size = self._blob_size(root, "src/crlf.txt")
+            self.assertEqual(size, len(crlf))
+            self.assertIn(f"| `src/crlf.txt` | {size:,} | 3 |",
+                          raw.decode("utf-8"))
+
+    def test_lf_file_unchanged(self):
+        lf = b"one\ntwo\n"
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_bytes(td, {"src/lf.txt": lf})
+            out = Path(td) / "bundle.md"
+            rc, _stdout, stderr = run_bundle(root, out, ["src/lf.txt"])
+            self.assertEqual(rc, 0, stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn(f"| `src/lf.txt` | {len(lf):,} | 2 |", text)
+            self.assertIn("## Source: `src/lf.txt`\n\none\ntwo\n", text)
+
+    def test_crlf_bundle_deterministic(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_bytes(
+                td, {"src/crlf.txt": b"a\r\nb\r\n", "src/lf.txt": b"c\n"})
+            out1, out2 = Path(td) / "b1.md", Path(td) / "b2.md"
+            rc1, _o1, e1 = run_bundle(
+                root, out1, ["src/crlf.txt", "src/lf.txt"])
+            rc2, _o2, e2 = run_bundle(
+                root, out2, ["src/crlf.txt", "src/lf.txt"])
+            self.assertEqual((rc1, rc2), (0, 0), (e1, e2))
+            self.assertEqual(
+                hashlib.sha256(out1.read_bytes()).hexdigest(),
+                hashlib.sha256(out2.read_bytes()).hexdigest())
+
+    def test_show_at_returns_raw_byte_count(self):
+        """Direct unit check: show_at returns (text, RAW byte length) —
+        the byte count includes every \\r of a CRLF blob."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_bytes(td, {"src/crlf.txt": b"x\r\ny\r\n"})
+            content, nbytes = MCB.show_at(root, "HEAD", "src/crlf.txt")
+            self.assertEqual(content, "x\r\ny\r\n")
+            self.assertEqual(nbytes, 6)
+            self.assertEqual(nbytes, self._blob_size(root, "src/crlf.txt"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

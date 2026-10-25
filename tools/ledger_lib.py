@@ -157,7 +157,11 @@ def load_ledger(ledger_path: Path | str) -> list[dict[str, Any]]:
     if not p.exists():
         return []
     events: list[dict[str, Any]] = []
-    for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+    # Split on LF ONLY: append_event writes ensure_ascii=False, so a
+    # schema-valid string can carry literal U+2028/U+2029/U+0085 — and
+    # splitlines() would tear that JSON record apart at those boundaries.
+    for i, line in enumerate(
+            p.read_text(encoding="utf-8").split("\n"), 1):
         if not line.strip():
             continue
         try:

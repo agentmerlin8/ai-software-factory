@@ -243,5 +243,120 @@ class StoryFileCandidatesTests(unittest.TestCase):
              root / "stories" / "STORY-901.md"])
 
 
+def _commit(root: Path) -> None:
+    for args in (["init", "-q"], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "fixture"]):
+        subprocess.run(["git", "-C", str(root), *args], check=True,
+                       capture_output=True)
+
+
+class LiteralHeaderSkipTests(unittest.TestCase):
+    """R3-D2: the manifest skip must exempt ONLY the literal `path`
+    header cell and separator rows — the old `startswith(("path",
+    "---"))` let `paths/config.json` / `pathlib.py` bypass the existence
+    check entirely."""
+
+    def _repo(self, td: str, manifest_rows: str) -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        sdir = root / "stories" / "STORY-906"
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            "# digest — STORY-906\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            f"{manifest_rows}\n"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            "## 4. Code anchors\n\n- `src/app.py:2` — def f\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_pathlike_ghost_entries_flagged(self):
+        rows = ("| `paths/config.json` | ghost |\n"
+                "| `pathlib.py` | ghost |")
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, rows)
+            errors = CD.run_gate(root, "STORY-906", "HEAD")
+            self.assertIn("manifest path missing at HEAD: "
+                          "paths/config.json", errors)
+            self.assertIn("manifest path missing at HEAD: pathlib.py",
+                          errors)
+
+    def test_good_manifest_still_passes(self):
+        """The literal header cell (`path`) and separator rows stay
+        exempt — a fully valid manifest reports no errors."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "")
+            self.assertEqual(CD.run_gate(root, "STORY-906", "HEAD"), [])
+
+
+class ACHeadingCountTests(unittest.TestCase):
+    """R3-D3: the AC counter must accept the heading form
+    (`### AC-1 — …`) that the controller's _AC_RE and the good-story
+    fixture use — the old `[-*] ` + `[:.)]` pattern counted such a
+    valid story as ZERO ACs, so a truthful digest failed."""
+
+    def _heading_repo(self, td: str, declared: int) -> Path:
+        root = Path(td)
+        sdir = root / "stories" / "STORY-907"
+        sdir.mkdir(parents=True)
+        good = (Path(__file__).resolve().parent / "fixtures" /
+                "controller" / "story_good.md")
+        (sdir / "story.md").write_text(good.read_text(encoding="utf-8"),
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            "# digest — STORY-907\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            "| `stories/STORY-907/story.md` | contract |\n\n"
+            "## 2. Story contract\n\n"
+            f"Acceptance criteria: exactly {declared}.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            "## 4. Code anchors\n\n- none.\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_heading_form_declaring_two_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._heading_repo(td, 2)
+            self.assertEqual(CD.run_gate(root, "STORY-907", "HEAD"), [])
+
+    def test_heading_form_declaring_zero_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._heading_repo(td, 0)
+            errors = CD.run_gate(root, "STORY-907", "HEAD")
+            self.assertIn("AC count mismatch: digest says 0, "
+                          "story file has ~2", errors)
+
+    def test_existing_bullet_and_plain_forms_still_counted(self):
+        sample = ("- AC-1: thing\n* AC-2) other\nAC-3. third\n"
+                  "### AC-4 — heading form\n"
+                  "prose mentioning AC-5 mid-line\n")
+        pat = r"^\s*(?:#{1,6}\s+|[-*]\s+\*{0,2})?AC-\d+\b"
+        actual = sum(1 for l in sample.splitlines() if re.match(pat, l))
+        self.assertEqual(actual, 4)  # mid-prose AC-5 does not match
+        # the old pattern matched the bullet/plain subset (no heading)
+        old = sum(1 for l in sample.splitlines()
+                  if re.match(r"^\s*(?:[-*] )?AC-\d+[:.)]", l))
+        self.assertEqual(old, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

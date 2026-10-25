@@ -89,7 +89,10 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             # would eat the leading dot of hidden paths (.github/…) and
             # fail valid digests
             p = p[2:] if p.startswith("./") else p
-            if not p or p.startswith(("path", "---")):
+            if not p or p.lower() == "path" or set(p) == {"-"}:
+                # skip ONLY the literal path-table header cell and
+                # separator rows — real paths like `paths/config.json`
+                # or `pathlib.py` must still hit the existence check
                 continue
             try:
                 git(root, "cat-file", "-e", f"{sha}:{p}")
@@ -117,7 +120,8 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
         except RuntimeError:  # story file may not be committed yet — working tree
             story_text = story_file.read_text(encoding="utf-8")
         actual = sum(1 for l in story_text.splitlines()
-                     if re.match(r"^\s*(?:[-*] )?AC-\d+[:.)]", l))
+                     if re.match(r"^\s*(?:#{1,6}\s+|[-*]\s+\*{0,2})?"
+                                 r"AC-\d+\b", l))
         declared = int(ac_match.group(1))
         if actual != declared:
             errors.append(f"AC count mismatch: digest says {declared}, "

@@ -54,9 +54,19 @@ def git(root: Path, *args: str) -> str:
     return r.stdout
 
 
-def show_at(root: Path, sha: str, path: str) -> str:
-    """SHA-verified file content from the object DB at `sha`."""
-    return git(root, "show", f"{sha}:{path}")
+def show_at(root: Path, sha: str, path: str) -> tuple[str, int]:
+    """SHA-verified file content from the object DB at `sha`, as
+    (decoded text, RAW byte length). stdout is captured as BYTES —
+    `text=True` would apply universal-newline translation and silently
+    LF-normalize a committed CRLF file, breaking the verbatim promise
+    and the manifest byte count. The decode does no newline
+    translation either."""
+    r = subprocess.run(["git", "-C", str(root), "show", f"{sha}:{path}"],
+                       capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"git show {sha}:{path} failed: "
+                           f"{r.stderr.decode('utf-8', 'replace').strip()}")
+    return r.stdout.decode("utf-8"), len(r.stdout)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,12 +102,12 @@ def main(argv: list[str] | None = None) -> int:
     missing: list[str] = []
     for src in args.sources:
         try:
-            content = show_at(root, full_sha, src)
+            content, nbytes = show_at(root, full_sha, src)
         except RuntimeError:
             missing.append(src)
             continue
         lines = len(content.splitlines())
-        manifest.append((src, len(content.encode()), lines))
+        manifest.append((src, nbytes, lines))
         parts += [f"\n\n<!-- ===== SOURCE {src} ({lines} lines, pinned at "
                   f"{full_sha[:12]}) ===== -->\n",
                   f"## Source: `{src}`", "", content, ""]

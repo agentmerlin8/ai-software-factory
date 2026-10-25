@@ -458,6 +458,50 @@ class TestUnknownFieldRejection(unittest.TestCase):
         self.assertEqual(L.allowed_fields("bogus"), frozenset())
 
 
+class TestLFOnlySplitting(unittest.TestCase):
+    """R3-D4: load_ledger must split on LF ONLY. append_event writes
+    ensure_ascii=False, so a schema-valid string field can carry a
+    literal U+2028/U+2029/U+0085 — splitlines() would tear that JSON
+    record apart (unreadable ledger, later appends refused)."""
+
+    def _roundtrip(self, td: str, marker: str) -> Path:
+        p = Path(td) / "events.jsonl"
+        evt = transition("t-1", "PLANNED")
+        evt["check_results"] = {"story_md": {"ok": True, "note":
+                                             f"before{marker}after"}}
+        L.append_event(p, evt)
+        # exactly ONE physical LF line: the record terminator
+        self.assertEqual(p.read_bytes().count(b"\n"), 1)
+        # the marker landed LITERALLY (ensure_ascii=False)
+        self.assertIn(marker.encode("utf-8"), p.read_bytes())
+        loaded = L.load_events(p)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(
+            loaded[0]["check_results"]["story_md"]["note"],
+            f"before{marker}after")
+        # a subsequent append still works (the ledger stayed readable)
+        L.append_event(p, transition("t-2", "CODING", "PLANNED"))
+        self.assertEqual(len(L.load_events(p)), 2)
+        self.assertEqual(p.read_bytes().count(b"\n"), 2)
+        return p
+
+    def test_u2028_line_separator_string_survives(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._roundtrip(td, "\u2028")
+
+    def test_u0085_next_line_string_survives(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._roundtrip(td, "\u0085")
+
+    def test_splitlines_would_have_torn_the_record(self):
+        """The regression's mechanism, pinned: a record containing a
+        literal U+2028 splits into 2 under splitlines() but 1 under
+        split("\\n") — the latter is what load_ledger must use."""
+        line = json.dumps({"note": "a\u2028b"}, ensure_ascii=False)
+        self.assertEqual(len(line.splitlines()), 2)
+        self.assertEqual(len(line.split("\n")), 1)
+
+
 class TestReexports(unittest.TestCase):
     def test_schema_is_the_authority(self):
         self.assertIs(L.validate_event, S.validate_event)

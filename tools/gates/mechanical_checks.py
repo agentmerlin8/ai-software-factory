@@ -231,8 +231,14 @@ def check_verify_commands(contract: dict, root: Path,
         except ValueError as exc:
             fail(str(exc))
             continue
-        if value:
-            parsed.append((raw, *value))
+        if value is None:
+            # Setup-only entry (cd/export/env-prefix with no external
+            # command): declaring it as a verify command is a contract
+            # defect — it verifies nothing. Refuse by name; never drop.
+            fail("verify command contains only setup (no external "
+                 f"command): {raw}")
+            continue
+        parsed.append((raw, *value))
     if not parsed:
         return
     injected = {r.get("command"): r for r in (injected_results or [])}

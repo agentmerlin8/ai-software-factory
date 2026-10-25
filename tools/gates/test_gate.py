@@ -457,6 +457,37 @@ class BuildLaneUnits(unittest.TestCase):
                                 findings.append, None, run_live=True)
         self.assertEqual(findings, [])
 
+    def test_setup_only_verify_command_refused(self):
+        """R3-D1: a setup-only entry (`cd .`, `export X=1`) parses to no
+        external command — it verifies nothing and must REFUSE by name,
+        never be silently dropped (the old `if not parsed: return` flow
+        dropped it without a finding)."""
+        for raw in ("cd .", "export X=1"):
+            findings = []
+            M.check_verify_commands({"verify_commands": [raw]}, REPO,
+                                    findings.append)
+            self.assertTrue(
+                any("verify command contains only setup "
+                    f"(no external command): {raw}" in f for f in findings),
+                findings)
+
+    def test_setup_only_entry_in_mixed_list_refused(self):
+        """R3-D1: a mixed list (setup-only + a real command) yields
+        exactly one fail naming the setup-only entry; the real command's
+        injected result still matches 1:1."""
+        cmd = "python3 -m unittest tests.test_widget"
+        findings = []
+        M.check_verify_commands(
+            {"verify_commands": ["cd docs", cmd]}, REPO, findings.append,
+            [{"command": cmd, "exit_code": 0, "stdout": "OK",
+              "stderr": ""}])
+        setup_fails = [f for f in findings
+                       if "contains only setup" in f]
+        self.assertEqual(len(setup_fails), 1, findings)
+        self.assertIn("cd docs", setup_fails[0])
+        self.assertEqual([f for f in findings if f not in setup_fails], [],
+                         findings)
+
     def test_bare_runner_inactive_without_declaration(self):
         findings, notes = [], []
         M.check_bare_runners({"verify_commands": ["pytest"]}, REPO, [],

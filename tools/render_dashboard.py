@@ -362,11 +362,15 @@ def main(argv: list[str] | None = None) -> int:
     text = render(events, root, header, ledger_path=ledger)
     dash = root / "factory" / "DASHBOARD.md"
     if args.check:
-        cur = dash.read_text(encoding="utf-8") if dash.exists() else ""
-        if not cur.startswith("<!-- GENERATED from"):
+        # R16-Q2: compare raw BYTES — read_text() would normalize a
+        # CRLF-mangled dashboard back to LF and let it pass --check
+        # despite violating the frozen LF byte contract (as
+        # render_state/render_provenance already do).
+        cur = dash.read_bytes() if dash.exists() else b""
+        if not cur.startswith(b"<!-- GENERATED from"):
             print("dashboard not yet generated")
             return 0
-        if cur != text:
+        if cur != text.encode("utf-8"):
             print(f"OUT OF DATE: {dash}")
             return 1
         print("dashboard up to date")

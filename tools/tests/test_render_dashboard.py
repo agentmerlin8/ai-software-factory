@@ -360,6 +360,21 @@ class RenderDashboardTests(unittest.TestCase):
             rc = RD.main(["--check", "--root", str(root)])
             self.assertEqual(rc, 0)  # not yet generated → not stale
 
+    def test_check_compares_bytes_crlf_fails(self):
+        """R16-Q2: a CRLF-converted DASHBOARD.md violates the frozen LF
+        byte contract and MUST fail --check — read_text() normalization
+        used to hide the difference."""
+        self.assertEqual(RD.main(["--root", str(self.root)]), 0)
+        dash = self.root / "factory" / "DASHBOARD.md"
+        raw = dash.read_bytes()
+        self.assertNotIn(b"\r\n", raw)  # renderer output is LF
+        dash.write_bytes(raw.replace(b"\n", b"\r\n"))
+        self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 1)
+        # re-render restores the LF bytes and --check passes again
+        self.assertEqual(RD.main(["--root", str(self.root)]), 0)
+        self.assertEqual(dash.read_bytes(), raw)
+        self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 0)
+
     def test_alt_ledger_and_refusals(self):
         with tempfile.TemporaryDirectory() as td:
             alt = Path(td) / "alt.jsonl"

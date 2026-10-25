@@ -253,6 +253,30 @@ class RenderStateTests(unittest.TestCase):
             self.assertEqual(RS.main(["STORY-201", "--root", str(self.root),
                                       "--ledger", str(bad)]), 2)
 
+    def test_empty_all_discovery_is_successful_noop(self):
+        """R16-Q3: --all over an empty/missing ledger discovers no story
+        ids — that is a successful no-op (rc 0), not a usage error; the
+        usage error stays for invocations WITHOUT --all."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("factory", "ledger").mkdir(parents=True)
+            empty = root / "factory" / "ledger" / "events.jsonl"
+            empty.write_bytes(b"")
+            self.assertEqual(RS.main(["--all", "--check", "--root",
+                                      str(root)]), 0)
+            self.assertEqual(RS.main(["--all", "--root", str(root)]), 0)
+            # missing ledger file → same no-op
+            empty.unlink()
+            self.assertEqual(RS.main(["--all", "--check", "--root",
+                                      str(root)]), 0)
+            # nothing rendered
+            self.assertFalse((root / "stories").exists())
+        # WITHOUT --all an empty id list is still the usage error
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(RS.main(["--root", str(self.root)]), 2)
+        self.assertIn("usage:", err.getvalue())
+
     # ---- story-id path confinement (B1)
     def _traversal_ledger(self, root: Path) -> Path:
         """Ledger whose rows carry a schema-valid but non-canonical

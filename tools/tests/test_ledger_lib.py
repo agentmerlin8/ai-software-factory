@@ -650,5 +650,36 @@ class TestReexports(unittest.TestCase):
         self.assertEqual(L.latest_findings(events), [])
 
 
+class TestAppendValidatesExistingLedgerFirst(unittest.TestCase):
+    """R16-Q1: auto-allocation of an event id must validate the EXISTING
+    ledger first — a malformed row used to raise TypeError inside
+    _next_seq's set construction, bypassing the documented LedgerError
+    refusal."""
+
+    def test_malformed_existing_row_named_ledger_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            bad = transition("t-1", "PLANNED")
+            bad["event_id"] = []  # unhashable — TypeError in a set build
+            write_jsonl(p, [bad])
+            before = p.read_bytes()
+            evt = transition("", "CODING", "PLANNED")
+            del evt["event_id"]
+            with self.assertRaises(L.LedgerError) as cm:  # NOT TypeError
+                L.append_event(p, evt)
+            self.assertIn("ledger rejected:", str(cm.exception))
+            self.assertEqual(p.read_bytes(), before)  # never modified
+
+    def test_valid_ledger_auto_allocation_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            write_jsonl(p, [transition(f"transition-{STORY}-1", "PLANNED")])
+            evt = transition("", "CODING", "PLANNED")
+            del evt["event_id"]
+            L.append_event(p, evt)
+            self.assertEqual(L.load_events(p)[-1]["event_id"],
+                             f"transition-{STORY}-2")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

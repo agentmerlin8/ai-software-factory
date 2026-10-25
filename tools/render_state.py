@@ -336,7 +336,10 @@ def main(argv: list[str] | None = None) -> int:
     stories_root = root / "stories"
 
     sids = stories_in_ledger(events) if args.all else args.story_ids
-    if not sids:
+    # R16-Q3: an EMPTY --all discovery (empty/missing ledger, or only
+    # non-canonical ids deliberately skipped) is a successful no-op —
+    # the usage error belongs to invocations WITHOUT --all only.
+    if not sids and not args.all:
         print("usage: render_state.py <story-id>... | --all", file=sys.stderr)
         return 2
     for sid in sids:  # refuse BEFORE building any path (no read, no write)

@@ -286,6 +286,12 @@ def append_event(ledger_path: Path | str, event: dict[str, Any]) -> None:
         raise LedgerError("dispatch events must carry their pre-spawn "
                           "dispatch_id (<story>-<role>-<attempt>-<unix>)")
     if not evt.get("event_id"):
+        # R16-Q1: validate the EXISTING ledger before the auto-allocation
+        # scan — a malformed row (e.g. an unhashable `event_id: []`) used
+        # to raise TypeError inside _next_seq's set construction,
+        # bypassing the documented LedgerError refusal. load_events names
+        # every violation; the ledger is never modified on refusal.
+        load_events(p)
         sid = evt.get("story_id") or "global"
         evt["event_id"] = (f"{etype}-{sid}-"
                            f"{_next_seq(events, etype, evt.get('story_id'))}")

@@ -1,0 +1,12 @@
+{
+  "stories": [
+    {
+      "file": "web/stories/widgets.stories.js",
+      "export": "WidgetList",
+      "assertions": [
+        {"selector": ".widget-row + .detail-region", "actual": 1},
+        {"selector": ".widget-row", "actual": 2}
+      ]
+    }
+  ]
+}

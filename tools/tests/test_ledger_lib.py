@@ -267,6 +267,100 @@ class TestAppend(unittest.TestCase):
         self.assertEqual(L.seen_ended([ended], transition("t", "PLANNED")), "")
 
 
+class TestUnknownFieldRejection(unittest.TestCase):
+    """S2 field-set strictness (architecture.md §Ledger event schemas —
+    extra-key rejection is controller-side): only allowed TOP-LEVEL keys
+    survive; nested objects stay free-form."""
+
+    def usage_row(self, **extra) -> dict:
+        return norm({"event": "usage", "event_id": "u-1",
+                     "recorded_at": "2026-10-25T00:00:00Z",
+                     "provenance": "live",
+                     "dispatch_id": "STORY-NNN-coder-1-1758800000",
+                     "input_tokens": 10, "output_tokens": 5,
+                     "cached_input_tokens": 0, "thinking_tokens": 0,
+                     "token_semantics": "estimated",
+                     "usage_source": "provider", **extra})
+
+    def test_cost_field_on_usage_refused_file_untouched(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            L.append_event(p, self.usage_row())
+            before = p.read_bytes()
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, self.usage_row(estimated_credit_low=1))
+            self.assertIn("unknown field: usage.estimated_credit_low",
+                          str(cm.exception))
+            self.assertEqual(p.read_bytes(), before)  # refused BEFORE write
+
+    def test_unknown_key_on_transition_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            evt = transition("t-1", "PLANNED")
+            evt["cost_usd"] = 0.5
+            with self.assertRaises(L.LedgerError) as cm:
+                L.append_event(p, evt)
+            self.assertIn("unknown field: transition.cost_usd",
+                          str(cm.exception))
+            self.assertFalse(p.exists())
+
+    def test_sanctioned_annotations_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            claim = norm({"event": "assignment", "story_id": STORY,
+                          "op": "claim",
+                          "recorded_at": "2026-10-25T00:00:00Z",
+                          "provenance": "live", "owner": "worker-1",
+                          "host": "h", "session": "s",
+                          "claimed_at": "2026-10-25T00:00:00Z",
+                          "start_sha": "a" * 40,
+                          "requested_by": "orchestrator",
+                          "override_used": {"scope": STORY, "by": "ops",
+                                            "blob_sha": "b" * 40}})
+            L.append_event(p, claim)
+            evt = transition("t-1", "PLANNED")
+            evt["override_used"] = {"scope": "ALL", "by": "ops",
+                                    "blob_sha": "c" * 40}
+            L.append_event(p, evt)
+            self.assertEqual(len(L.load_events(p)), 2)
+
+    def test_nested_check_results_stays_free_form(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            evt = transition("t-1", "PLANNED")
+            evt["check_results"] = {"story_md": {"ok": True},
+                                    "override_used": {"ok": False},
+                                    "anything_else": [1, 2, 3]}
+            L.append_event(p, evt)
+            self.assertEqual(L.validate_ledger(p), [])
+
+    def test_load_side_rejects_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            bad = self.usage_row(estimated_credit_low=1)
+            write_jsonl(p, [bad])
+            errs = L.validate_ledger(p)
+            self.assertIn("unknown field: usage.estimated_credit_low", errs)
+            with self.assertRaises(L.LedgerError) as cm:
+                L.load_events(p)
+            self.assertIn("unknown field: usage.estimated_credit_low",
+                          str(cm.exception))
+
+    def test_allowed_fields_derived_from_schema(self):
+        allowed = L.allowed_fields("dispatch")
+        for f in set(S.REQUIRED["dispatch"]) | S.NULLABLE["dispatch"]:
+            self.assertIn(f, allowed)
+        for f in S.NULLABLE["dispatch"]:
+            self.assertIn(f + "_reason", allowed)
+        self.assertIn("event_id", allowed)
+        self.assertIn("start_sha", L.allowed_fields("assignment"))
+        self.assertIn("start_shas", L.allowed_fields("assignment"))
+        for op_fields in S.ASSIGNMENT_OP_FIELDS.values():
+            for f in op_fields:
+                self.assertIn(f, L.allowed_fields("assignment"))
+        self.assertEqual(L.allowed_fields("bogus"), frozenset())
+
+
 class TestReexports(unittest.TestCase):
     def test_schema_is_the_authority(self):
         self.assertIs(L.validate_event, S.validate_event)

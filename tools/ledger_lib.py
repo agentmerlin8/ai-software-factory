@@ -19,6 +19,11 @@ Laws enforced at the I/O boundary:
     two-row lifecycle (pre-spawn then completion; reversed order, stale
     re-start, orphan completion refused) and non-dispatch event-id
     uniqueness. Refusals are named `LedgerError`s listing every violation.
+  * Field-set strictness (S2): an event may carry only allowed TOP-LEVEL
+    keys — envelope ∪ schema tables ∪ `<field>_reason` siblings ∪ claim
+    pins ∪ the documented ANNOTATIONS map. Anything else refuses with
+    `unknown field: <event-type>.<field>` (e.g. a cost field on a usage
+    row); nested objects (`check_results`) stay free-form.
   * Dispatch ids are pre-spawn: `<story>-<role>-<attempt>-<unix>`, supplied
     by the caller; a dispatch already recorded `ended` can never be
     re-started by a stale notification. Other event ids are auto-assigned
@@ -31,7 +36,9 @@ Determinism: same append order → same generated event ids
 """
 from __future__ import annotations
 
+import inspect
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +61,81 @@ latest_findings = S.latest_findings
 class LedgerError(ValueError):
     """Named refusal from the ledger I/O boundary (message lists every
     violation; nothing is written when append refuses)."""
+
+
+# --------------------------------------------- field-set strictness (S2) ----
+#
+# architecture.md §Ledger event schemas (the `usage` row): the schema
+# defines a tokens-only field set — no cost fields (kit law) — and
+# extra-key rejection is controller-side (S2). It is implemented HERE,
+# at the I/O boundary; ledger_schema.py stays the frozen validation
+# authority for everything it already checks. Only TOP-LEVEL keys are
+# policed; nested objects (e.g. transition `check_results`) stay
+# free-form.
+
+ENVELOPE_FIELDS = frozenset({"event", "event_id", "recorded_at",
+                             "provenance"})
+
+# Claim pins derived by inspecting the schema's exactly-one-of validator:
+# `start_sha` | `start_shas` are checked in S._claim_start_errors, not in
+# the REQUIRED table — so they are recovered from its source, never
+# hand-typed here.
+CLAIM_PIN_FIELDS = frozenset(
+    re.findall(r'"(start_shas?)"', inspect.getsource(S._claim_start_errors)))
+
+# Sanctioned extras beyond the schema tables (frozen initial entries;
+# extend only with a documented reason per key):
+ANNOTATIONS: dict[str, frozenset[str]] = {
+    # controller.py writes `requested_by` on every assignment row (who
+    # asked for the claim/handover/release) and annotates an
+    # OVERRIDE-sanctioned claim with `override_used` {scope, by, blob_sha}.
+    "assignment": frozenset({"requested_by", "override_used"}),
+    # controller.py carries the same override annotation on transitions.
+    "transition": frozenset({"override_used"}),
+}
+
+
+def allowed_fields(etype: str) -> frozenset[str]:
+    """Allowed TOP-LEVEL keys for one event type: envelope ∪ the schema's
+    required/nullable tables ∪ `<field>_reason` siblings ∪ per-op
+    assignment fields ∪ claim pins ∪ ANNOTATIONS. Derived from
+    ledger_schema — this module never re-types a schema rule."""
+    if etype not in S.EVENT_TYPES:
+        return frozenset()
+    nullable = S.NULLABLE.get(etype, frozenset())
+    allowed = (ENVELOPE_FIELDS
+               | set(S.REQUIRED.get(etype, ()))
+               | set(nullable)
+               | {f"{f}_reason" for f in nullable}
+               | set(ANNOTATIONS.get(etype, frozenset())))
+    if etype == "assignment":
+        for op_fields in S.ASSIGNMENT_OP_FIELDS.values():
+            allowed |= set(op_fields)
+        allowed |= CLAIM_PIN_FIELDS
+    return frozenset(allowed)
+
+
+def unknown_field_errors(evt: Any) -> list[str]:
+    """S2 extra-key rejection: one `unknown field: <type>.<field>` per
+    disallowed top-level key (sorted — deterministic). Non-dict rows and
+    unknown event types are left to the schema's own messages."""
+    if not isinstance(evt, dict):
+        return []
+    etype = evt.get("event")
+    if etype not in S.EVENT_TYPES:
+        return []
+    allowed = allowed_fields(etype)
+    return [f"unknown field: {etype}.{key}"
+            for key in sorted(evt) if key not in allowed]
+
+
+def _all_errors(events: list[Any]) -> list[str]:
+    """Schema validation + the S2 unknown-field check in one error list
+    (the load-side path shared by load_events and validate_ledger)."""
+    errs = S.validate_events(events)
+    for evt in events:
+        errs.extend(unknown_field_errors(evt))
+    return errs
 
 
 def utcnow() -> str:
@@ -90,11 +172,13 @@ def load_events(ledger_path: Path | str) -> list[dict[str, Any]]:
     rule plus the cross-row laws (dispatch two-row lifecycle order —
     pre-spawn then completion; reversed order, stale re-start, orphan
     completion, and >2 rows refused; non-dispatch event-id uniqueness;
-    review-attribution joins). Refuses with LedgerError listing every
-    violation; use `validate_ledger` for a non-raising error list.
+    review-attribution joins). The S2 unknown-field check
+    (`unknown_field_errors`) joins the same error list. Refuses with
+    LedgerError listing every violation; use `validate_ledger` for a
+    non-raising error list.
     """
     events = load_ledger(ledger_path)
-    errs = S.validate_events(events)
+    errs = _all_errors(events)
     if errs:
         raise LedgerError("ledger rejected:\n  " + "\n  ".join(errs))
     return events
@@ -103,7 +187,7 @@ def load_events(ledger_path: Path | str) -> list[dict[str, Any]]:
 def validate_ledger(ledger_path: Path | str) -> list[str]:
     """Validate every row + the ledger-wide laws; [] = valid. Never raises
     on content (only on unreadable files)."""
-    return S.validate_events(load_ledger(ledger_path))
+    return _all_errors(load_ledger(ledger_path))
 
 
 # ---------------------------------------------------------------- append ----
@@ -166,6 +250,9 @@ def append_event(ledger_path: Path | str, event: dict[str, Any]) -> None:
                            f"{_next_seq(events, etype, evt.get('story_id'))}")
     evt.setdefault("recorded_at", utcnow())
     evt.setdefault("provenance", "live")
+    unknown = unknown_field_errors(evt)
+    if unknown:
+        raise LedgerError("event rejected:\n  " + "\n  ".join(unknown))
     ended_id = seen_ended(events, evt)
     if ended_id:
         raise LedgerError(f"event_id {ended_id} already recorded as ended — "

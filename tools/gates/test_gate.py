@@ -456,6 +456,58 @@ class BuildLaneUnits(unittest.TestCase):
         self.assertEqual(parsed[2],
                          ["python3", "-m", "unittest", "discover"])
 
+    def test_parse_test_command_refuses_variable_expansion_in_setup_value(
+            self):
+        """R6-G1: an unsupported `$VAR` ref inside an export/env-prefix
+        VALUE stays literal after _expand_env and silently changes the
+        command's meaning — refused by name at BOTH setup forms. The
+        supported $HOME/${HOME}/$PATH/${PATH} set still expands."""
+        with self.assertRaises(ValueError) as cm:
+            M.parse_test_command(
+                "export PYTHONPATH=$PROJECT_LIB && python3 -m unittest",
+                REPO, base_env={"HOME": "/h", "PATH": "/p"})
+        self.assertIn(
+            "unsupported variable expansion in setup value: $PROJECT_LIB",
+            str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            M.parse_test_command("X=$FOO python3 -m unittest", REPO,
+                                 base_env={"HOME": "/h", "PATH": "/p"})
+        self.assertIn(
+            "unsupported variable expansion in setup value: $FOO",
+            str(cm.exception))
+        # supported refs still expand — $HOME (bare and braced) and $PATH
+        parsed = M.parse_test_command(
+            "export X=$HOME/y && python3 -m unittest", REPO,
+            base_env={"HOME": "/h", "PATH": "/p"})
+        assert parsed is not None
+        self.assertEqual(parsed[1]["X"], "/h/y")
+        parsed = M.parse_test_command(
+            "export X=${HOME} && python3 -m unittest", REPO,
+            base_env={"HOME": "/h", "PATH": "/p"})
+        assert parsed is not None
+        self.assertEqual(parsed[1]["X"], "/h")
+        parsed = M.parse_test_command(
+            "export X=${PATH}:extra && python3 -m unittest", REPO,
+            base_env={"HOME": "/h", "PATH": "/p"})
+        assert parsed is not None
+        self.assertEqual(parsed[1]["X"], "/p:extra")
+
+    def test_setup_value_refusal_flows_to_named_failure(self):
+        """R6-G1: the refusal surfaces through check_verify_commands'
+        existing named-failure path (never executed, never dropped)."""
+        findings: list[str] = []
+        M.check_verify_commands(
+            {"verify_commands": [
+                "export PYTHONPATH=$PROJECT_LIB && python3 -m unittest"]},
+            REPO, findings.append,
+            injected_results=[{
+                "command":
+                    "export PYTHONPATH=$PROJECT_LIB && python3 -m unittest",
+                "exit_code": 0}])
+        self.assertIn(
+            "unsupported variable expansion in setup value: $PROJECT_LIB",
+            findings)
+
     def test_bare_runner_target_resolves_against_preceding_cd(self):
         """command-validity: a declared runner target is resolved against
         the EFFECTIVE cwd tracked through preceding `cd` setup segments —

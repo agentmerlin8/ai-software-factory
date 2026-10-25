@@ -161,6 +161,18 @@ def _expand_env(value: str, env: dict[str, str]) -> str:
     return value.replace("$PATH", env.get("PATH", ""))
 
 
+def _expand_setup_value(value: str, env: dict[str, str]) -> str:
+    """R6-G1: expand a setup (export/env-prefix) assignment value with the
+    supported set ($HOME/$PATH only) and FAIL CLOSED on anything else —
+    an unexpanded `$VAR` would stay LITERAL in the env value and silently
+    change the command's meaning (same class as the argv refusal)."""
+    expanded = _expand_env(value, env)
+    if "$" in expanded:
+        raise ValueError(
+            f"unsupported variable expansion in setup value: {value}")
+    return expanded
+
+
 def parse_test_command(raw: str, root: Path,
                        base_env: dict[str, str] | None = None
                        ) -> tuple[Path, dict[str, str], list[str]] | None:
@@ -198,7 +210,7 @@ def parse_test_command(raw: str, root: Path,
                     raise ValueError(
                         f"invalid export assignment: {assignment!r}")
                 key, value = assignment.split("=", 1)
-                env[key] = _expand_env(value, env)
+                env[key] = _expand_setup_value(value, env)
             continue
         if segment[0] == "cd":
             if len(segment) != 2 or Path(segment[1]).is_absolute():
@@ -212,7 +224,7 @@ def parse_test_command(raw: str, root: Path,
         while segment and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*",
                                        segment[0]):
             key, value = segment.pop(0).split("=", 1)
-            env[key] = _expand_env(value, env)
+            env[key] = _expand_setup_value(value, env)
         if not segment or external is not None:
             raise ValueError(
                 f"verify command must contain one external command: "

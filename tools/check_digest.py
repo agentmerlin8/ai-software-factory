@@ -77,8 +77,15 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
     if len(lines) > LINE_CAP:
         errors.append(f"digest too long: {len(lines)} lines (>{LINE_CAP})")
 
-    # 2. manifest paths exist at sha (first cell of each table row only)
-    m = re.search(r"## 1\. File manifest\n(.*?)(?=\n## 2\.)", text, re.S)
+    # 2. manifest paths exist at sha (first cell of each table row only).
+    # R6-G2: the heading regexes tolerate trailing whitespace after the
+    # heading text, and a REQUIRED section that is present-but-unparseable
+    # fails closed with a named error instead of silently skipping its
+    # validation.
+    m = re.search(r"## 1\. File manifest[ \t]*\n(.*?)(?=\n## 2\.)",
+                  text, re.S)
+    if m is None and "## 1. File manifest" in text:
+        errors.append("unparseable section: ## 1. File manifest")
     if m:
         for line in m.group(1).splitlines():
             mm = re.match(r"^\s*\|\s*`?([^`|\n]+?)`?\s*\|", line)
@@ -127,11 +134,17 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             errors.append(f"AC count mismatch: digest says {declared}, "
                           f"story file has ~{actual}")
 
-    # 4. code anchors grep-resolve at sha
-    am = re.search(r"## 4\. Code anchors\n(.*?)(?=\n## 5\.)", text, re.S)
+    # 4. code anchors grep-resolve at sha. R6-G3: the path token drops the
+    # extension requirement — extensionless anchors (Dockerfile:12,
+    # bin/build:3) get the same existence/line-bound checks.
+    am = re.search(r"## 4\. Code anchors[ \t]*\n(.*?)(?=\n## 5\.)",
+                   text, re.S)
+    if am is None and "## 4. Code anchors" in text:
+        errors.append("unparseable section: ## 4. Code anchors")
     if am:
         for line in am.group(1).splitlines():
-            mm = re.match(r"^\s*-?\s*`?([^`:\s]+\.\w+):(\d+)`?\s*—?\s*([^—]*)", line)
+            mm = re.match(r"^\s*-?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
+                          line)
             if not mm:
                 continue
             path, lineno, desc = mm.group(1), int(mm.group(2)), mm.group(3)
@@ -155,7 +168,9 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                                   f"{path}: {tokens[:2]}")
 
     # 5. risk markers valid
-    rk = re.search(r"## 7\. Risk list\n(.*?)(?=\n## 8\.)", text, re.S)
+    rk = re.search(r"## 7\. Risk list[ \t]*\n(.*?)(?=\n## 8\.)", text, re.S)
+    if rk is None and "## 7. Risk list" in text:
+        errors.append("unparseable section: ## 7. Risk list")
     if rk:
         for line in rk.group(1).splitlines():
             for m2 in re.findall(

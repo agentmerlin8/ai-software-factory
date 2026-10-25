@@ -222,7 +222,7 @@ class HiddenPathGateTests(unittest.TestCase):
 class AnchorParseTests(unittest.TestCase):
     def test_anchor_line_grammar(self):
         line = "- `src/app/widget.py:12` — def compute_total"
-        mm = re.match(r"^\s*-?\s*`?([^`:\s]+\.\w+):(\d+)`?\s*—?\s*([^—]*)",
+        mm = re.match(r"^\s*-?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
                       line)
         self.assertIsNotNone(mm)
         self.assertEqual(mm.group(1), "src/app/widget.py")
@@ -230,9 +230,22 @@ class AnchorParseTests(unittest.TestCase):
         self.assertIn("compute_total", mm.group(3))
 
     def test_non_anchor_lines_ignored(self):
-        mm = re.match(r"^\s*-?\s*`?([^`:\s]+\.\w+):(\d+)`?\s*—?\s*([^—]*)",
+        mm = re.match(r"^\s*-?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
                       "a prose sentence without anchors")
         self.assertIsNone(mm)
+
+    def test_extensionless_anchor_grammar(self):
+        """R6-G3: the path token no longer requires a `.ext` suffix —
+        extensionless anchors parse with the same grammar."""
+        for line, path, lineno in (
+                ("- `Dockerfile:12` — FROM base", "Dockerfile", 12),
+                ("- `bin/build:3` — set -e", "bin/build", 3),
+                ("- Dockerfile:999999", "Dockerfile", 999999)):
+            mm = re.match(r"^\s*-?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
+                          line)
+            self.assertIsNotNone(mm, line)
+            self.assertEqual(mm.group(1), path)
+            self.assertEqual(int(mm.group(2)), lineno)
 
 
 class FailClosedACInputsTests(unittest.TestCase):
@@ -401,6 +414,155 @@ class ACHeadingCountTests(unittest.TestCase):
         old = sum(1 for l in sample.splitlines()
                   if re.match(r"^\s*(?:[-*] )?AC-\d+[:.)]", l))
         self.assertEqual(old, 3)
+
+
+class HeadingWhitespaceFailClosedTests(unittest.TestCase):
+    """R6-G2: a section heading with trailing whitespace must still
+    parse (its validation RUNS — a ghost manifest entry is flagged), and
+    a present-but-unparseable required section fails closed with a named
+    error instead of silently skipping its check."""
+
+    def _repo(self, td: str, sid: str, heading: str,
+              manifest_rows: str = "", anchor_lines: str = "") -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        sdir = root / "stories" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            f"# digest — {sid}\n\n"
+            f"{heading}\n\n"
+            "| path | role |\n|---|---|\n"
+            f"{manifest_rows}"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            f"## 4. Code anchors\n\n{anchor_lines or '- `src/app.py:2` — def f'}\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_trailing_space_heading_ghost_entry_flagged(self):
+        """The old `\\n`-anchored regex returned None on a trailing-space
+        heading, silently skipping manifest validation — the ghost entry
+        must now be reported."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-909", "## 1. File manifest  ",
+                              manifest_rows="| `src/ghost.py` | ghost |\n")
+            errors = CD.run_gate(root, "STORY-909", "HEAD")
+            self.assertIn("manifest path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_trailing_space_heading_valid_digest_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-909", "## 1. File manifest\t ")
+            self.assertEqual(CD.run_gate(root, "STORY-909", "HEAD"), [])
+
+    def test_unparseable_present_section_named(self):
+        """A required section present in the text but unparseable (no
+        newline after the heading — body fused into the heading line)
+        must produce the named fail-closed error."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "src").mkdir(parents=True)
+            (root / "src" / "app.py").write_text(
+                "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+            sdir = root / "stories" / "STORY-910"
+            sdir.mkdir(parents=True)
+            (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                           encoding="utf-8")
+            (sdir / "context-digest.md").write_text(
+                "# digest — STORY-910\n\n"
+                "## 1. File manifest | `src/ghost.py` | ghost |\n\n"
+                "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+                "## 3. Frozen decisions\n\n- none.\n\n"
+                "## 4. Code anchors\n\n- `src/app.py:2` — def f\n\n"
+                "## 5. Conventions\n\n- stdlib only.\n\n"
+                "## 6. Open questions\n\n- none.\n\n"
+                "## 7. Risk list\n\n- none — L\n\n"
+                "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+                encoding="utf-8")
+            _commit(root)
+            errors = CD.run_gate(root, "STORY-910", "HEAD")
+            self.assertIn("unparseable section: ## 1. File manifest",
+                          errors)
+
+
+class ExtensionlessAnchorGateTests(unittest.TestCase):
+    """R6-G3: extensionless anchors (Dockerfile:999999, bin/build:1) get
+    the same existence / line-bound / symbol checks — the old regex's
+    mandatory `.\\w+` skipped them entirely."""
+
+    def _repo(self, td: str, sid: str, anchors: str,
+              with_extras: bool = True) -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        if with_extras:
+            (root / "Dockerfile").write_text(
+                "FROM base\nRUN true\n", encoding="utf-8")
+            (root / "bin").mkdir()
+            (root / "bin" / "build").write_text(
+                "#!/bin/sh\nset -e\necho build\n", encoding="utf-8")
+        sdir = root / "stories" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            f"# digest — {sid}\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            f"## 4. Code anchors\n\n{anchors}\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_missing_extensionless_path_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-911",
+                              "- `Dockerfile:999999` — FROM base\n",
+                              with_extras=False)
+            errors = CD.run_gate(root, "STORY-911", "HEAD")
+            self.assertIn("anchor path missing at HEAD: Dockerfile", errors)
+
+    def test_extensionless_line_beyond_eof_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-912",
+                              "- `Dockerfile:999999` — FROM base\n")
+            errors = CD.run_gate(root, "STORY-912", "HEAD")
+            self.assertIn("anchor line 999999 beyond file Dockerfile "
+                          "(2 lines)", errors)
+
+    def test_valid_extensionless_anchors_resolve(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(
+                td, "STORY-913",
+                "- `Dockerfile:1` — FROM base\n"
+                "- `bin/build:2` — set -e\n")
+            self.assertEqual(CD.run_gate(root, "STORY-913", "HEAD"), [])
+
+    def test_extensionless_symbol_mismatch_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-914",
+                              "- `bin/build:1` — set -e\n")
+            errors = CD.run_gate(root, "STORY-914", "HEAD")
+            self.assertIn("anchor symbol not on line 1 of bin/build: "
+                          "['set', 'e']", errors)
 
 
 if __name__ == "__main__":

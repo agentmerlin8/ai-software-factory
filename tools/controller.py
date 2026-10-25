@@ -1004,7 +1004,7 @@ class Controller:
             "repo": None, "repo_reason": "story-level transition",
         }
         evt["approved_by_reason"] = None if approved_by else \
-            "no human gate required for this transition"
+            "no approver recorded for this transition"
         return evt
 
     def blocked(self, sid: str, reason: str, requested_by: str,

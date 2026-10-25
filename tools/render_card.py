@@ -337,10 +337,6 @@ def upsert_comment(repo: str, issue: int, body: str,
     else:
         method = "POST"
         endpoint = f"repos/{repo}/issues/{issue}/comments"
-    if dry_run:
-        print(f"{method} {endpoint}")
-        print(payload)
-        return "dry-run"
     return gh_fn("api", "--method", method, endpoint,
                  "--input", "-", stdin=payload)
 

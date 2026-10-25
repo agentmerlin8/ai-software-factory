@@ -138,6 +138,24 @@ class WorkspaceShowTests(unittest.TestCase):
         self.assertEqual(by_id["tools"]["path"], "checkout/tools")
         self.assertIsNone(by_id["app"]["path"])
 
+    def test_plain_dir_nested_in_parent_repo_is_not_git(self) -> None:
+        # P1: `present` must mean the dir IS ITSELF a checkout root — a
+        # plain dir merely nested inside a parent repo is not-git, even
+        # though `rev-parse` parent-walks and succeeds from inside it.
+        parent = Path(tempfile.mkdtemp(prefix="nested-parent-"))
+        try:
+            git("init", "-q", cwd=parent)
+            nested = parent / "plain"
+            nested.mkdir()
+            (nested / "README.md").write_text("not a checkout\n")
+            status = factory._repo_local_status(parent, "plain")
+            self.assertEqual(status, "not-git")
+            # sanity: the parent root itself IS a checkout root
+            self.assertEqual(factory._repo_local_status(parent, "."),
+                             "present")
+        finally:
+            shutil.rmtree(parent, ignore_errors=True)
+
     def test_missing_git_binary_means_not_git(self) -> None:
         git("init", "-q", cwd=self.ws / "repos" / "app")
         with mock.patch.object(factory, "_git", return_value=None):

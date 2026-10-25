@@ -88,15 +88,20 @@ def _git(args: list[str]) -> subprocess.CompletedProcess | None:
 
 def _repo_local_status(ws: Path, rel: str) -> str:
     """present | missing | not-git for a repo's local checkout dir under
-    the workspace (`git rev-parse --git-dir` probe; missing git binary
-    ⇒ not-git)."""
+    the workspace (`git rev-parse --show-toplevel` probe — `present`
+    means the directory IS ITSELF a checkout root, never a plain dir
+    nested inside some parent repo; missing git binary ⇒ not-git)."""
     d = ws / rel
     if not d.exists():
         return "missing"
-    result = _git(["-C", str(d), "rev-parse", "--git-dir"])
+    result = _git(["-C", str(d), "rev-parse", "--show-toplevel"])
     if result is None or result.returncode != 0:
         return "not-git"
-    return "present"
+    try:
+        toplevel = Path(result.stdout.strip()).resolve()
+        return "present" if toplevel == d.resolve() else "not-git"
+    except OSError:
+        return "not-git"
 
 
 def _pin_status(pin: Any, repo: str | None) -> dict:

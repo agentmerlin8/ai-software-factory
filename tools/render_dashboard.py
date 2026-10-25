@@ -154,7 +154,11 @@ def render(events: list[dict], root: Path, header: str) -> str:
                       if _names_plan_review(f.get("evidence_path"))]
         other = [f for f in fixed
                  if not _names_plan_review(f.get("evidence_path"))]
-        folded = min(len(plan_fixed), formal_loops(s))
+        # R5-F1: fold ONLY into PLAN-REVIEW loops — a code-review loop
+        # is not a fold target for a plan-review-evidenced fix.
+        plan_loops = [l for l in s.get("loops", [])
+                      if l.get("stage") == "plan_review"]
+        folded = min(len(plan_fixed), len(plan_loops))
         return formal_loops(s) + len(other) + (len(plan_fixed) - folded)
 
     merged = {sid: s for sid, s in stories.items()

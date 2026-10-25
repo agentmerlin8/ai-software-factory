@@ -367,6 +367,24 @@ class PlanReviewAssociationTests(unittest.TestCase):
         self.assertIn("| S | — | `no transitions (events only)` | 1/0 | 1 "
                       "| 2 | — | — |", text)
 
+    def test_fold_requires_plan_review_loop(self):
+        """R5-F1: a CODE-review loop is not a fold target — 0 plan loops +
+        1 code loop + 1 plan-review-evidenced fixed finding → 2 corrections
+        (1 code loop + 1 unmatched fix); the fold must not over-credit."""
+        code_loop = {"event": "loop", "event_id": "loop-S-1", "story_id": "S",
+                     "stage": "code_review", "loop_n": 1,
+                     "class": "reasoning", "root_cause_one_line": "x",
+                     "recorded_at": "t", "provenance": "live"}
+        plan_fix = {"event": "finding", "event_id": "f-1", "story_id": "S",
+                    "finding_id": "F-1", "source": "internal",
+                    "class": "reasoning", "severity": "major",
+                    "disposition": "fixed",
+                    "evidence_path": "stories/S/plan-review.md"}
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render([code_loop, plan_fix], Path(td), "H")
+        self.assertIn("| S | — | `no transitions (events only)` | 0/1 | 0 "
+                      "| 2 | — | — |", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

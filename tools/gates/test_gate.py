@@ -350,6 +350,52 @@ class BuildLaneFixtures(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("declaring obligates verification", out)
 
+    def test_ui_assertion_requires_cardinality_constraint(self):
+        """R5-F3: an expected assertion with no recognized cardinality
+        key (e.g. typo `mincount`) would match its result yet run NO
+        comparison — even actual: 0 passed. Now it fails by name, while
+        each proper key still enforces and valid declarations pass."""
+        results = {"stories": [{"file": "a.tsx", "export": "W",
+                                "assertions": [
+                                    {"selector": ".widget-row",
+                                     "actual": 0}]}]}
+        # typo case → named fail
+        findings: list[str] = []
+        M.check_ui_results(
+            {"ui_assertions": [{"file": "a.tsx", "export": "W",
+                                "assertions": [
+                                    {"selector": ".widget-row",
+                                     "mincount": 2}]}]},
+            findings.append, results)
+        self.assertTrue(any(
+            "ui assertion a.tsx::W selector .widget-row declares no "
+            "cardinality constraint (count/min_count/max_count)" in f
+            for f in findings), findings)
+        # each proper key still enforces its comparison
+        for assertion, expected in (
+                ({"selector": ".widget-row", "count": 1},
+                 "expected count 1, got 0"),
+                ({"selector": ".widget-row", "min_count": 1},
+                 "expected min_count 1, got 0"),
+                ({"selector": ".widget-row", "max_count": -1},
+                 "expected max_count -1, got 0")):
+            findings = []
+            M.check_ui_results(
+                {"ui_assertions": [{"file": "a.tsx", "export": "W",
+                                    "assertions": [assertion]}]},
+                findings.append, results)
+            self.assertTrue(any(expected in f for f in findings),
+                            (assertion, findings))
+        # a fully valid, satisfied declaration is unaffected
+        findings = []
+        M.check_ui_results(
+            {"ui_assertions": [{"file": "a.tsx", "export": "W",
+                                "assertions": [
+                                    {"selector": ".widget-row",
+                                     "min_count": 0, "max_count": 5}]}]},
+            findings.append, results)
+        self.assertEqual(findings, [])
+
 
 class BuildLaneUnits(unittest.TestCase):
     def test_parse_test_command_refuses_unsafe_syntax(self):
@@ -377,6 +423,38 @@ class BuildLaneUnits(unittest.TestCase):
         cwd, _env, argv = parsed
         self.assertEqual(cwd, (REPO / "nested").resolve())
         self.assertEqual(argv, ["python3", "-m", "unittest"])
+
+    def test_parse_test_command_refuses_variable_expansion_in_argv(self):
+        """R5-F2: argv is executed literally — a `$VAR` token in the
+        external command would silently change test selection, so it is
+        refused by name. $HOME/$PATH expansion inside export/env-prefix
+        VALUES is unaffected."""
+        with self.assertRaises(ValueError) as cm:
+            M.parse_test_command(
+                'export TEST_PATTERN=test_*.py && '
+                'python3 -m unittest discover -p "$TEST_PATTERN"', REPO)
+        self.assertIn(
+            "unsupported variable expansion in verify command: "
+            "$TEST_PATTERN", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            M.parse_test_command(
+                'python3 -m unittest discover -p "${TEST_PATTERN}"', REPO)
+        self.assertIn(
+            "unsupported variable expansion in verify command: "
+            "${TEST_PATTERN}", str(cm.exception))
+        # export VALUE expansion still works; argv carries no `$`
+        parsed = M.parse_test_command(
+            "export X=$HOME/y && python3 -m unittest", REPO,
+            base_env={"HOME": "/h", "PATH": "/p"})
+        assert parsed is not None
+        _cwd, env, argv = parsed
+        self.assertEqual(env["X"], "/h/y")
+        self.assertEqual(argv, ["python3", "-m", "unittest"])
+        # plain commands unaffected
+        parsed = M.parse_test_command("python3 -m unittest discover", REPO)
+        assert parsed is not None
+        self.assertEqual(parsed[2],
+                         ["python3", "-m", "unittest", "discover"])
 
     def test_bare_runner_target_resolves_against_preceding_cd(self):
         """command-validity: a declared runner target is resolved against

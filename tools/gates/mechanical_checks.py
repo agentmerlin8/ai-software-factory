@@ -218,6 +218,15 @@ def parse_test_command(raw: str, root: Path,
                 f"verify command must contain one external command: "
                 f"{raw!r}")
         external = segment
+        # R5-F2: fail closed on unsupported variable expansion — argv is
+        # executed literally, so a `$VAR` token would silently change
+        # test selection (only $HOME/$PATH are expanded, and ONLY inside
+        # export/env-prefix VALUES, never in the external command).
+        for token in external:
+            if "$" in token:
+                raise ValueError(
+                    "unsupported variable expansion in verify command: "
+                    f"{token}")
     if not external:
         return None
     return cwd, env, external
@@ -361,6 +370,13 @@ def check_ui_results(contract: dict, fail: Callable[[str], None],
             key = (item.get("file"), item.get("export"),
                    assertion.get("selector"))
             expected_keys.add(key)
+            # R5-F3: an assertion with no recognized cardinality key
+            # would match its result yet run no comparison — require one.
+            if not any(k in assertion
+                       for k in ("count", "min_count", "max_count")):
+                fail(f"ui assertion {item.get('file')}::{item.get('export')} "
+                     f"selector {assertion.get('selector')} declares no "
+                     "cardinality constraint (count/min_count/max_count)")
             value = actual.get(key)
             if value is None:
                 fail(f"missing ui assertion result for {key!r}")

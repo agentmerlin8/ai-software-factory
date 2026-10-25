@@ -240,8 +240,13 @@ def render(events: list[dict], sid: str, header: str,
     # ---- human gates
     gates = [e for e in evs if e["event"] == "human_gate"]
     if gates:
+        # R15-P3: the state table carries the DECISION and the RESPONDENT —
+        # an approved and a rejected gate must render distinguishably.
+        # Pending gates show the house-rule null form (`— (<reason>)`)
+        # from their sibling <field>_reason, never an invented value.
         out += ["## Human gates", "",
-                "| Gate | Question | Asked | Answered |", "|---|---|---|---|"]
+                "| Gate | Question | Asked | Answered | Decision | Answered by |",
+                "|---|---|---|---|---|---|"]
         for i, g in enumerate(gates):
             answered = g.get("answered_at") or "PENDING"
             if not g.get("answered_at"):
@@ -253,8 +258,14 @@ def render(events: list[dict], sid: str, header: str,
                           and s.get("answered_at")]
                 if supers:
                     answered = f"superseded by {supers[0]}"
+            if g.get("answered_at"):
+                dec = g["decision"]
+                aby = g["answered_by"]
+            else:
+                dec = fmt_null(g.get("decision"), "decision_reason", g)
+                aby = fmt_null(g.get("answered_by"), "answered_by_reason", g)
             out.append(f"| {g['gate']} | {g['question']} | {g['asked_at']} "
-                       f"| {answered} |")
+                       f"| {answered} | {dec} | {aby} |")
         out.append("")
 
     # ---- outcome

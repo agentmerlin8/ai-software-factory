@@ -183,22 +183,40 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
     # 3. AC count matches story file — BOTH inputs are REQUIRED (fail
     # closed): without the declaration or without the ground-truth story
     # file the honesty check cannot run, and "cannot check" is a refusal.
+    # R15-P1: the ground truth is the PINNED TREE — probe the canonical
+    # candidates at the sha first (`git cat-file -e <sha>:<path>`) and read
+    # the winner from the pinned tree. Probing the working tree first let a
+    # local layout change (delete the committed two-AC spec.md, drop in a
+    # one-AC story.md) hide the spec that exists at the supplied SHA and
+    # pass a digest declaring the wrong count. Only when NO candidate
+    # exists at the sha does the INTENTIONAL uncommitted-story fallback
+    # (working tree, same candidate order) apply.
     ac_match = re.search(r"Acceptance criteria: exactly (\d+)", text)
-    story_file = next((f for f in story_file_candidates(root, story)
-                       if f.exists()), None)
+    pinned_rel = None
+    for f in story_file_candidates(root, story):
+        rel = f.relative_to(root).as_posix()
+        try:
+            git(root, "cat-file", "-e", f"{sha}:{rel}")
+        except RuntimeError:
+            continue
+        pinned_rel = rel
+        break
+    story_file = None
+    if pinned_rel is None:
+        story_file = next((f for f in story_file_candidates(root, story)
+                           if f.exists()), None)
     if ac_match is None:
         errors.append('missing AC-count declaration '
                       '("Acceptance criteria: exactly N")')
-    elif story_file is None:
+    elif pinned_rel is None and story_file is None:
         cands = ", ".join(f.relative_to(root).as_posix()
                           for f in story_file_candidates(root, story))
         errors.append("story file not found for AC-count ground truth "
                       f"(looked at {cands})")
     else:
-        rel = story_file.relative_to(root).as_posix()
-        try:
-            story_text = git(root, "show", f"{sha}:{rel}")
-        except RuntimeError:  # story file may not be committed yet — working tree
+        if pinned_rel is not None:
+            story_text = git(root, "show", f"{sha}:{pinned_rel}")
+        else:  # uncommitted story — intentional working-tree fallback
             story_text = story_file.read_text(encoding="utf-8")
         actual = sum(1 for l in story_text.splitlines()
                      if re.match(r"^\s*(?:#{1,6}\s+|[-*]\s+\*{0,2})?"

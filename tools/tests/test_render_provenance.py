@@ -317,6 +317,34 @@ class RenderProvenanceTests(unittest.TestCase):
         text = RP.render([ask], "STORY-210", self.header)
         self.assertIn("PENDING — no reason recorded", text)
 
+    # ---- gate decision + respondent in the trace (R15-P2)
+    def test_gate_decision_and_respondent_rendered(self):
+        _ask, answer, _lone = self._gate_rows()
+        text = RP.render([answer], "STORY-210", self.header)
+        self.assertIn("| Gate | Question | Asked | Answered | Decision "
+                      "| Answered by |", text)
+        self.assertIn("|---|---|---|---|---|---|", text)
+        self.assertIn("| approved | approver-1 |", text)
+
+    def test_approved_and_rejected_gates_render_differently(self):
+        _ask, answer, _lone = self._gate_rows()
+        rejected = {**answer, "event_id": "human_gate-STORY-210-4",
+                    "decision": "rejected", "answered_by": "approver-2"}
+        ok = RP.render([answer], "STORY-210", self.header)
+        bad = RP.render([rejected], "STORY-210", self.header)
+        self.assertNotEqual(ok, bad)
+        self.assertIn("| rejected | approver-2 |", bad)
+        self.assertNotIn("rejected", ok)
+
+    def test_pending_gate_decision_and_respondent_show_null_reasons(self):
+        ask, _answer, _lone = self._gate_rows()
+        text = RP.render([ask], "STORY-210", self.header)
+        self.assertIn("not recorded: unanswered", text)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| merge |"))
+        self.assertIn("not recorded: unanswered | not recorded: unanswered |",
+                      row)
+
     # ---- nullable token totals with reasons (B6)
     def test_null_token_totals_render_reasons(self):
         dispatch = {

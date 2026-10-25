@@ -339,5 +339,48 @@ class RenderStateTests(unittest.TestCase):
         self.assertIn("**CODING** | — | orchestrator", text)
 
 
+    # ---- gate decision + respondent columns (R15-P3)
+    def _gate(self, **over):
+        g = {"event": "human_gate", "event_id": "human_gate-STORY-201-1",
+             "story_id": "STORY-201", "gate": "merge",
+             "question": "Merge approved diff?",
+             "asked_at": "2026-09-02T00:00:00Z",
+             "answered_at": "2026-09-02T00:30:00Z",
+             "decision": "approved", "answered_by": "approver-1",
+             "recorded_at": "2026-09-02T00:00:00Z", "provenance": "live"}
+        return {**g, **over}
+
+    def test_gate_decision_and_respondent_columns(self):
+        text = self.render("STORY-201")
+        self.assertIn("| Gate | Question | Asked | Answered | Decision "
+                      "| Answered by |", text)
+        self.assertIn("| 2026-09-02T00:30:00Z | approved | approver-1 |",
+                      text)
+
+    def test_approved_and_rejected_gates_render_distinguishably(self):
+        events = self.events
+        ok = RS.render(events, "STORY-201", self.header, self.stories)
+        bad_events = [self._gate(decision="rejected",
+                                 answered_by="approver-2")
+                      if e.get("event_id") == "human_gate-STORY-201-1"
+                      else e for e in events]
+        bad = RS.render(bad_events, "STORY-201", self.header, self.stories)
+        self.assertNotEqual(ok, bad)
+        self.assertIn("| rejected | approver-2 |", bad)
+        self.assertNotIn("rejected", ok)
+
+    def test_pending_gate_row_shows_null_reasons(self):
+        pending = self._gate(event_id="human_gate-STORY-201-5",
+                             answered_at=None,
+                             answered_at_reason="awaiting approver",
+                             decision=None, decision_reason="unanswered",
+                             answered_by=None,
+                             answered_by_reason="unanswered")
+        text = RS.render([pending], "STORY-201", self.header, self.stories)
+        row = next(l for l in text.splitlines() if l.startswith("| merge |"))
+        self.assertIn("PENDING", row)
+        self.assertIn("— (unanswered) | — (unanswered) |", row)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

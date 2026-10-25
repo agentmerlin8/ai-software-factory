@@ -1153,5 +1153,94 @@ class NumberedAnchorTests(unittest.TestCase):
                              if "ghost" in line else "src/app.py")
 
 
+def _p1_repo(root: Path, sid: str, spec_acs: int | None,
+             digest_acs: int) -> None:
+    """Repo builder for the R15-P1 pinned-tree regression tests: commits
+    src/app.py, the digest (declaring `digest_acs`) and — when spec_acs is
+    not None — stories/<sid>/spec.md with that many ACs."""
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "app.py").write_text(
+        "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+    sdir = root / "stories" / sid
+    sdir.mkdir(parents=True)
+    if spec_acs is not None:
+        body = "".join(f"- AC-{i}: crit {i}.\n" for i in range(1, spec_acs + 1))
+        (sdir / "spec.md").write_text(f"# s\n\n{body}", encoding="utf-8")
+    (sdir / "context-digest.md").write_text(
+        f"# digest — {sid}\n\n"
+        "## 1. File manifest\n\n"
+        "| path | role |\n|---|---|\n"
+        "| `src/app.py` | subject |\n\n"
+        f"## 2. Story contract\n\nAcceptance criteria: exactly {digest_acs}.\n\n"
+        "## 3. Frozen decisions\n\n- none.\n\n"
+        "## 4. Code anchors\n\n- `src/app.py:2` — def f\n\n"
+        "## 5. Conventions\n\n- stdlib only.\n\n"
+        "## 6. Open questions\n\n- none.\n\n"
+        "## 7. Risk list\n\n- drift — M\n\n"
+        "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+        encoding="utf-8")
+    _commit(root)
+
+
+class PinnedTreeGroundTruthTests(unittest.TestCase):
+    """R15-P1: canonical story-file candidates are probed at the PINNED
+    sha first — a working-tree layout change must not hide the spec that
+    exists at the supplied SHA."""
+
+    def test_local_swap_cannot_bypass_pinned_spec(self):
+        """Bypass regression: two-AC spec.md committed at the pin; spec.md
+        deleted locally and a one-AC story.md added in the working tree; a
+        digest declaring one AC must FAIL (count comes from the pinned
+        spec.md = 2)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _p1_repo(root, "STORY-960", spec_acs=2, digest_acs=1)
+            (root / "stories" / "STORY-960" / "spec.md").unlink()
+            (root / "stories" / "STORY-960" / "story.md").write_text(
+                "# s\n\n- AC-1: only one.\n", encoding="utf-8")
+            errors = CD.run_gate(root, "STORY-960", "HEAD")
+            self.assertIn("AC count mismatch: digest says 1, "
+                          "story file has ~2", errors)
+
+    def test_uncommitted_story_working_tree_fallback_still_passes(self):
+        """No candidate at the sha → the INTENTIONAL uncommitted-story
+        fallback reads the working tree (existing behavior)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _p1_repo(root, "STORY-961", spec_acs=None, digest_acs=1)
+            (root / "stories" / "STORY-961" / "story.md").write_text(
+                "# s\n\n- AC-1: only one.\n", encoding="utf-8")
+            self.assertEqual(CD.run_gate(root, "STORY-961", "HEAD"), [])
+
+    def test_committed_spec_at_pin_wins_over_committed_story(self):
+        """Normal committed case: spec.md leads the candidate order AT the
+        pin even when story.md also exists (two ACs from spec.md pass;
+        the one-AC story.md is never consulted)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _p1_repo(root, "STORY-962", spec_acs=2, digest_acs=2)
+            (root / "stories" / "STORY-962" / "story.md").write_text(
+                "# s\n\n- AC-1: only one.\n", encoding="utf-8")
+            _commit(root)
+            self.assertEqual(CD.run_gate(root, "STORY-962", "HEAD"), [])
+
+    def test_pinned_probe_uses_supplied_sha_not_head(self):
+        """The probe keys off the SUPPLIED sha: HEAD adds a one-AC
+        story.md, but at the older pin only the two-AC spec.md exists —
+        a digest declaring one AC still fails against the pin."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _p1_repo(root, "STORY-963", spec_acs=2, digest_acs=1)
+            pin = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            (root / "stories" / "STORY-963" / "story.md").write_text(
+                "# s\n\n- AC-1: only one.\n", encoding="utf-8")
+            _commit(root)
+            errors = CD.run_gate(root, "STORY-963", pin)
+            self.assertIn("AC count mismatch: digest says 1, "
+                          "story file has ~2", errors)
+
+
 if __name__ == "__main__":
     unittest.main()

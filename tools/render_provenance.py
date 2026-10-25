@@ -206,7 +206,12 @@ def render(events: list[dict], sid: str, header: str) -> str:
     gates = [e for e in evs if e["event"] == "human_gate"]
     out += [f"### Human gates ({len(gates)})", ""]
     if gates:
-        out += ["| Gate | Question | Asked | Answered |", "|---|---|---|---|"]
+        # R15-P2: the trace carries the DECISION and the RESPONDENT —
+        # identical approved and rejected gates must not render
+        # byte-identical PROVENANCE.md. Pending gates render the
+        # house-rule null form from their sibling <field>_reason.
+        out += ["| Gate | Question | Asked | Answered | Decision | Answered by |",
+                "|---|---|---|---|---|---|"]
         for i, g in enumerate(gates):
             if g.get("answered_at"):
                 ans = g["answered_at"]
@@ -219,8 +224,15 @@ def render(events: list[dict], sid: str, header: str) -> str:
                           and s.get("answered_at")]
                 ans = f"superseded by {supers[0]}" if supers else \
                     f"PENDING — {g.get('answered_at_reason') or 'no reason recorded'}"
+            if g.get("answered_at"):
+                dec = _cell(g["decision"])
+                aby = _cell(g["answered_by"])
+            else:
+                dec = fmt_null(g.get("decision"), "decision_reason", g)
+                aby = fmt_null(g.get("answered_by"), "answered_by_reason", g)
             out.append(f"| {g['gate']} | {_cell(g['question'])} "
-                       f"| {g['asked_at']} | {_cell(ans)} |")
+                       f"| {g['asked_at']} | {_cell(ans)} "
+                       f"| {dec} | {aby} |")
         out.append("")
 
     contexts = [e for e in evs if e["event"] == "review_context"]

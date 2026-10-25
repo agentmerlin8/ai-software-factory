@@ -366,6 +366,25 @@ One generated markdown per dispatch. Schema (six sections):
 
 Generation: **one assembler owns the final package file**; the prep tools (`plan_prep`, `dispatch_prep`, `build_handoff`, `make_context_bundle`) produce its inputs. Consumption: **any** executor — adapter or human. Parity rule: same package through any adapter → same artifact paths + same contract shape (contract shape = required artifact paths + required sections/front-matter keys per role output).
 
+### Plan contract block (frozen schema)
+
+The impl plan's fenced ```contract.yaml block — extracted with a small YAML subset (block/flow sequences, block mappings, scalars, comments; anything else is a parse error the gate rejects).
+
+| Key | Required | Null-allowed (`<field>_reason`) | Enums / type rules |
+|---|---|---|---|
+| `contract_version` | yes | — | must be `1` |
+| `files` | yes, non-empty | — | entries: `path` (repo-relative, not absolute, no `..`) + `op` ∈ {CREATE, EXTEND} |
+| `tests` | yes, non-empty | — | entries: `ac` + `name` required; optional `project` (repo-relative), `asserts` |
+| `invariants` | yes, non-empty | — | entries: `id` + `text` |
+| `verify_commands` | yes, non-empty | — | non-empty strings; command grammar is project-declared, never interpreted here |
+| `decisions` | yes, non-empty | — | entries: `decision` required; `rejected` optional |
+| `failure_model` | optional | — | entries: `risk` + `discriminating_test`; a project gate profile may declare conditions making it required |
+| `api_operations` | optional | — | entries: `method` ∈ {GET, POST, PUT, PATCH, DELETE}, `route` (starts `/`, no `?`/`..`), repo-relative `source`, `action`, non-empty `responses` (status int 100–599 + type; `removed: true` exempts); duplicate (method, route) and duplicate status refused |
+
+Refusals: `malformed contract block: <detail>` (parse/schema) · `contract block: <check> — <detail>` (semantic). Layout/toolchain-specific rules (source-tree prefixes, extensions, test-runner grammar) are NOT hardcoded — they are project gate declarations (hook points documented in the module).
+
+Machine-readable form: `tools/contract_lib.py`; this section and the module are the same contract.
+
 ## Adapter interface
 
 Each adapter directory declares:

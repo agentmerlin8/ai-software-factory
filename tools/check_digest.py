@@ -70,6 +70,29 @@ DECL_KEYWORDS = frozenset({
     "public", "private", "protected", "internal", "static",
     "abstract", "final"})
 
+# Same token grammar as the plan gate's base-sha ladder (plan_checks
+# SHA_RE) — the declared-vs-supplied check must parse the digest with
+# the identical rules plan_checks.resolve_base_sha() applies to it.
+SHA_RE = r"[0-9a-f]{7,40}"
+
+
+def declared_base_sha(text: str) -> str | None:
+    """The base sha the digest DECLARES, parsed with the digest-side
+    rules of plan_checks.resolve_base_sha() (same ladder, digest rungs
+    only): the `BASE_SHA` token first, then the §8 verification block's
+    `git rev-parse <sha>` / `pinned … <sha>` forms. None when the digest
+    declares no base (that case is unchanged — nothing to compare)."""
+    m = re.search(rf"\bBASE_SHA\b[^\S\n]*[:=]?[^\S\n]*({SHA_RE})\b", text)
+    if m:
+        return m.group(1)
+    m8 = re.search(r"## 8\. Verification block\n(.*)", text, re.S)
+    section = m8.group(1) if m8 else text
+    rm = re.search(rf"git rev-parse\s+({SHA_RE})\b", section)
+    if rm:
+        return rm.group(1)
+    pm = re.search(rf"\b(?:pinned at|pinned|at)\s+({SHA_RE})\b", section)
+    return pm.group(1) if pm else None
+
 
 def run_gate(root: Path, story: str, sha: str) -> list[str]:
     """Pure gate body: returns the list of failure reasons ([] = pass).
@@ -88,6 +111,26 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
         return [f"no digest at {digest_path.relative_to(root)}"]
     text = digest_path.read_text(encoding="utf-8")
     errors: list[str] = []
+
+    # 0b. R11-L2: declared-vs-supplied base must be the SAME commit — a
+    # digest declaring `BASE_SHA: <B>` validated against supplied commit
+    # A would let plan_checks.resolve_base_sha() consume a DIFFERENT
+    # snapshot than this gate validated. Both sides resolve to commit
+    # ids (`rev-parse --verify <rev>^{commit}`), so a matching
+    # full/abbrev pair passes. A digest with NO declared base is
+    # unchanged (nothing to compare).
+    declared = declared_base_sha(text)
+    if declared is not None:
+        try:
+            declared_id = git(root, "rev-parse", "--verify",
+                              f"{declared}^{{commit}}").strip()
+        except RuntimeError:
+            return [f"unresolvable declared base sha: {declared}"]
+        supplied_id = git(root, "rev-parse", "--verify",
+                          f"{sha}^{{commit}}").strip()
+        if declared_id != supplied_id:
+            return [f"base sha mismatch: digest declares {declared}, "
+                    f"invocation supplied {sha}"]
 
     # 1. sections present
     for s in SECTIONS:
@@ -161,14 +204,16 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
 
     # 4. code anchors grep-resolve at sha. R6-G3: the path token drops the
     # extension requirement — extensionless anchors (Dockerfile:12,
-    # bin/build:3) get the same existence/line-bound checks.
+    # bin/build:3) get the same existence/line-bound checks. R11-L3: the
+    # bullet marker accepts all Markdown unordered-list forms (`-`, `*`,
+    # `+`) — a `*`-bulleted ghost anchor must not be silently skipped.
     am = re.search(r"## 4\. Code anchors[ \t]*\n(.*?)(?=\n## 5\.)",
                    text, re.S)
     if am is None and "## 4. Code anchors" in text:
         errors.append("unparseable section: ## 4. Code anchors")
     if am:
         for line in am.group(1).splitlines():
-            mm = re.match(r"^\s*-?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
+            mm = re.match(r"^\s*[-*+]?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
                           line)
             if not mm:
                 continue

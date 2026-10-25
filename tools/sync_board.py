@@ -16,11 +16,17 @@ Commands (frozen):
     python3 tools/sync_board.py [--root R] [--project P]
             set --issue <n> --stage <STATE> [--dry-run]
 
-Project id resolution (no hardcoded project/org ids anywhere):
+Project id resolution (no hardcoded project ids anywhere):
   * `--project <org>/projects/<n>` on the command line, else
   * `board.project_id` in the control home's `workspace.toml`
     (architecture.md §Configuration). Absent, deferred (`<...>`), or
     malformed is a named fail-closed refusal (rc 2).
+  * The locator is the CONFIG surface only: GitHub GraphQL's `node(id:)`
+    and `projectId` inputs require the OPAQUE ProjectV2 node id, so
+    Board resolves `<org>/projects/<n>` to that id once at construction
+    (organization(login:).projectV2(number:)); an unresolvable locator
+    is a named refusal (`project not found: <locator>`). Every wire
+    call carries the resolved opaque id, never the locator.
 
 Stage vocabulary: the state names from tools/state_machine.py (imported —
 never re-typed here). `--stage` accepts them case-insensitively.
@@ -143,6 +149,19 @@ def build_issue_id_query(owner: str, name: str, number: int) -> str:
     )
 
 
+def build_project_node_id_query() -> str:
+    """The exact locator-resolution query: `<org>/projects/<n>` →
+    the OPAQUE ProjectV2 node id (the only form `node(id:)` and the
+    `projectId` mutation inputs accept)."""
+    return (
+        "query($org: String!, $n: Int!) {\n"
+        "  organization(login: $org) {\n"
+        "    projectV2(number: $n) { id }\n"
+        "  }\n"
+        "}"
+    )
+
+
 def normalize_stage(value: str) -> str:
     """Normalize a stage input case-insensitively to the canonical state
     name. Raises ValueError listing every valid state on bad input."""
@@ -237,10 +256,36 @@ def load_repo(root: Path, cli_value: Optional[str] = None) -> tuple[str, str]:
 class Board:
     def __init__(self, project_id: str,
                  gql: Optional[Callable[..., dict]] = None):
-        self.project_id = project_id
+        self.project_id = project_id  # config surface: <org>/projects/<n>
         self._gql = gql or gh_graphql  # the ONE injectable transport
         self._fields: dict[str, dict[str, Any]] = {}
+        # R11-L1: the locator is NOT a node id — `node(id:)` and the
+        # `projectId` mutation inputs require the OPAQUE ProjectV2 id.
+        # Resolve once at construction; every wire call below carries
+        # the resolved id, never the locator.
+        self.node_id = self._resolve_node_id()
         self._load()
+
+    def _resolve_node_id(self) -> str:
+        """Resolve `<org>/projects/<n>` → the opaque ProjectV2 node id.
+        Unresolvable (unknown org, missing/incorrect project number,
+        null response) → named fail-closed refusal; nothing is written
+        and no further query runs."""
+        m = re.fullmatch(r"([A-Za-z0-9-]+)/projects/(\d+)",
+                         self.project_id)
+        if not m:
+            raise ConfigError(
+                f"REFUSED: bad project locator {self.project_id!r} — "
+                "must match <org>/projects/<n>")
+        org, number = m.group(1), int(m.group(2))
+        data = self._gql(build_project_node_id_query(), org=org, n=number)
+        node = ((data.get("organization") or {}).get("projectV2")
+                or {})
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            raise BoardError(
+                f"REFUSED: project not found: {self.project_id}")
+        return node_id
 
     def _load(self) -> None:
         q = """
@@ -260,7 +305,7 @@ class Board:
           }
         }
         """
-        data = self._gql(q, id=self.project_id)
+        data = self._gql(q, id=self.node_id)
         for f in data["node"]["fields"]["nodes"]:
             name = f.get("name")
             if not name:
@@ -310,7 +355,7 @@ class Board:
           }
         }
         """
-        data = self._gql(q, p=self.project_id)
+        data = self._gql(q, p=self.node_id)
         for node in data["node"]["items"]["nodes"]:
             if node.get("content") and \
                     node["content"].get("number") == number:
@@ -352,7 +397,7 @@ class Board:
           }
         }
         """
-        proj = self._gql(q, p=self.project_id)["node"]
+        proj = self._gql(q, p=self.node_id)["node"]
         items = []
         for node in proj["items"]["nodes"]:
             c = node.get("content") or {}
@@ -387,7 +432,7 @@ def cmd_add(board: Board, number: int, repo: tuple[str, str],
             dry_run: bool = False) -> int:
     owner, name = repo
     issue_id = board.issue_node_id(owner, name, number)
-    payload = build_add_item_payload(board.project_id, issue_id)
+    payload = build_add_item_payload(board.node_id, issue_id)
     if dry_run:
         print(payload)
         print(f"dry-run: would add issue #{number} to project "
@@ -412,7 +457,7 @@ def cmd_set(board: Board, number: int, stage: str,
         raise BoardError(
             f"REFUSED: issue #{number} is not on the board — run "
             f"`add --issue {number}` first")
-    payload = build_set_stage_payload(board.project_id, item_id,
+    payload = build_set_stage_payload(board.node_id, item_id,
                                       field["id"], option_id)
     if dry_run:
         print(payload)

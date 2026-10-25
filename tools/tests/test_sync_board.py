@@ -46,18 +46,28 @@ ITEMS_RESPONSE = {"node": {
 
 ISSUE_RESPONSE = {"repository": {"issue": {"id": "I_42"}}}
 
+# The OPAQUE ProjectV2 node id the locator resolution returns — the only
+# form `node(id:)` / `projectId` inputs accept (R11-L1).
+NODE_ID = "PVT_kwDON8RfA87LOCATED"
+
 
 class FakeTransport:
     """In-memory GraphQL recorder — the ONE seam Board uses."""
 
-    def __init__(self, schema=None, items=None, issue=None):
+    def __init__(self, schema=None, items=None, issue=None,
+                 resolution=None):
         self.schema = schema if schema is not None else SCHEMA_RESPONSE
         self.items = items if items is not None else ITEMS_RESPONSE
         self.issue = issue if issue is not None else ISSUE_RESPONSE
+        self.resolution = (resolution if resolution is not None
+                           else {"organization": {"projectV2":
+                                                 {"id": NODE_ID}}})
         self.calls: list[tuple[str, dict]] = []
 
     def __call__(self, query: str, **variables) -> dict:
         self.calls.append((query, variables))
+        if "projectV2(number:" in query:
+            return self.resolution
         if "fields(first: 100)" in query:
             return self.schema
         if "items(first: 100)" in query:
@@ -236,7 +246,7 @@ class CmdSetTests(unittest.TestCase):
             rc = SB.cmd_set(self.board, 42, "coding")
         self.assertEqual(rc, 0)
         self.assertEqual(self.t.mutations(), [
-            SB.build_set_stage_payload("fixture-org/projects/7", "PVTI_1",
+            SB.build_set_stage_payload(NODE_ID, "PVTI_1",
                                        "F_STAGE", "OPT_CODING")])
         self.assertIn("updated #42: Stage=CODING", out.getvalue())
 
@@ -248,7 +258,7 @@ class CmdSetTests(unittest.TestCase):
         self.assertEqual(self.t.mutations(), [])
         printed = out.getvalue()
         self.assertIn(SB.build_set_stage_payload(
-            "fixture-org/projects/7", "PVTI_1", "F_STAGE", "OPT_MERGED"),
+            NODE_ID, "PVTI_1", "F_STAGE", "OPT_MERGED"),
             printed)
         self.assertIn("dry-run: would set issue #42 Stage=MERGED", printed)
 
@@ -280,7 +290,7 @@ class CmdAddTests(unittest.TestCase):
             rc = SB.cmd_add(self.board, 42, ("fixture-org", "app"))
         self.assertEqual(rc, 0)
         self.assertEqual(self.t.mutations(), [
-            SB.build_add_item_payload("fixture-org/projects/7", "I_42")])
+            SB.build_add_item_payload(NODE_ID, "I_42")])
         self.assertIn("added #42 to board (item PVTI_NEW)", out.getvalue())
 
     def test_dry_run_prints_payload_and_writes_nothing(self):
@@ -290,8 +300,8 @@ class CmdAddTests(unittest.TestCase):
                             dry_run=True)
         self.assertEqual(rc, 0)
         self.assertEqual(self.t.mutations(), [])
-        self.assertIn(SB.build_add_item_payload("fixture-org/projects/7",
-                                                "I_42"), out.getvalue())
+        self.assertIn(SB.build_add_item_payload(NODE_ID, "I_42"),
+                      out.getvalue())
         self.assertIn("no write performed", out.getvalue())
 
     def test_missing_issue_refused(self):
@@ -329,6 +339,95 @@ class CmdStatusTests(unittest.TestCase):
                                     "stage": "CODING"})
         self.assertEqual(items[1]["stage"], None)
         self.assertEqual(items[2]["title"], "(draft)")
+
+
+class LocatorResolutionTests(unittest.TestCase):
+    """R11-L1: `<org>/projects/<n>` is the CONFIG surface; the wire
+    (`node(id:)` / `projectId`) requires the OPAQUE ProjectV2 node id.
+    Board resolves the locator ONCE at construction and every subsequent
+    query/mutation carries the resolved id; an unresolvable locator is a
+    named refusal with no further I/O."""
+
+    def test_resolution_query_fires_once_with_org_and_number(self):
+        t = FakeTransport()
+        board = board_with(t)
+        resolutions = [(q, v) for q, v in t.calls
+                       if "projectV2(number:" in q]
+        self.assertEqual(len(resolutions), 1)
+        q, v = resolutions[0]
+        self.assertEqual(q, SB.build_project_node_id_query())
+        self.assertEqual(v, {"org": "fixture-org", "n": 7})
+        self.assertEqual(board.node_id, NODE_ID)
+
+    def test_field_query_carries_opaque_id_not_locator(self):
+        t = FakeTransport()
+        board_with(t)
+        field_calls = [(q, v) for q, v in t.calls
+                       if "fields(first: 100)" in q]
+        self.assertEqual(len(field_calls), 1)
+        self.assertEqual(field_calls[0][1], {"id": NODE_ID})
+        for q, v in t.calls:  # the locator never hits the wire
+            self.assertNotIn("fixture-org/projects/7", json.dumps(v))
+
+    def test_item_and_status_queries_carry_opaque_id(self):
+        t = FakeTransport()
+        board = board_with(t)
+        board.item_for_issue(42)
+        board.status_items()
+        item_calls = [v for q, v in t.calls if "items(first: 100)" in q]
+        self.assertTrue(item_calls)
+        for v in item_calls:
+            self.assertEqual(v, {"p": NODE_ID})
+
+    def test_add_and_set_mutations_carry_opaque_id(self):
+        t = FakeTransport()
+        board = board_with(t)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            SB.cmd_add(board, 42, ("fixture-org", "app"))
+            SB.cmd_set(board, 42, "CODING")
+        for m in t.mutations():
+            self.assertIn(f'projectId: "{NODE_ID}"', m)
+            self.assertNotIn("fixture-org/projects/7", m)
+
+    def test_dry_run_payload_shows_opaque_id(self):
+        t = FakeTransport()
+        board = board_with(t)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            SB.cmd_set(board, 42, "MERGED", dry_run=True)
+        printed = out.getvalue()
+        self.assertIn(f'projectId: "{NODE_ID}"', printed)
+        self.assertNotIn("fixture-org/projects/7\", ", printed)
+
+    def test_unresolvable_locator_is_named_refusal(self):
+        for resolution in ({"organization": {"projectV2": None}},
+                           {"organization": None},
+                           {}):
+            t = FakeTransport(resolution=resolution)
+            with self.assertRaises(SB.BoardError) as ctx:
+                SB.Board("fixture-org/projects/7", gql=t)
+            self.assertEqual(
+                str(ctx.exception),
+                "REFUSED: project not found: fixture-org/projects/7")
+            # no further query runs after the failed resolution
+            self.assertEqual(len(t.calls), 1)
+
+    def test_malformed_locator_is_config_refusal(self):
+        t = FakeTransport()
+        with self.assertRaises(SB.ConfigError) as ctx:
+            SB.Board("not-a-locator", gql=t)
+        self.assertIn("bad project locator", str(ctx.exception))
+        self.assertEqual(ctx.exception.rc, 2)
+        self.assertEqual(t.calls, [])  # refused before any transport I/O
+
+    def test_resolution_query_exact_text(self):
+        self.assertEqual(SB.build_project_node_id_query(),
+                         "query($org: String!, $n: Int!) {\n"
+                         "  organization(login: $org) {\n"
+                         "    projectV2(number: $n) { id }\n"
+                         "  }\n"
+                         "}")
 
 
 class MainCliTests(unittest.TestCase):
@@ -405,8 +504,10 @@ class MainCliTests(unittest.TestCase):
             ["--root", str(self.root), "--project", "cli-org/projects/2",
              "status"])
         self.assertEqual(rc, 0)
-        schema_call = self.t.calls[0]
-        self.assertEqual(schema_call[1], {"id": "cli-org/projects/2"})
+        resolve_call = self.t.calls[0]
+        self.assertEqual(resolve_call[1], {"org": "cli-org", "n": 2})
+        schema_call = self.t.calls[1]
+        self.assertEqual(schema_call[1], {"id": NODE_ID})
 
 
 if __name__ == "__main__":

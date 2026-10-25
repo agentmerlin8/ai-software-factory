@@ -855,5 +855,172 @@ class AnchorSymbolTokenMatchTests(unittest.TestCase):
             self.assertEqual(CD.run_gate(root, "STORY-935", "HEAD"), [])
 
 
+class DeclaredBaseMismatchTests(unittest.TestCase):
+    """R11-L2: a digest declaring `BASE_SHA: <B>` must NOT pass
+    validation against supplied commit A — plan_checks.resolve_base_sha()
+    would then consume a DIFFERENT snapshot than this gate validated.
+    Declared and supplied both resolve to commit ids, so a matching
+    full/abbrev pair passes; a digest with NO declared base (the
+    uppercase `BASE_SHA: HEAD` fixtures) is unchanged."""
+
+    def _two_commit_repo(self, td: str, sid: str, decl_block: str) -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        sdir = root / "stories" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            f"# digest — {sid}\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            "## 4. Code anchors\n\n- `src/app.py:2` — def f\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- none — L\n\n"
+            f"## 8. Verification block\n\n{decl_block}\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def _sha(self, root: Path, rev: str) -> str:
+        r = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", rev],
+            check=True, capture_output=True, text=True)
+        return r.stdout.strip()
+
+    def _second_commit(self, root: Path) -> None:
+        (root / "src" / "app.py").write_text(
+            "# a2\ndef f(x):\n    return x\n", encoding="utf-8")
+        for args in (["add", "-A"],
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", "second"]):
+            subprocess.run(["git", "-C", str(root), *args], check=True,
+                           capture_output=True)
+
+    def test_mismatch_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._two_commit_repo(td, "STORY-936", "BASE_SHA: HEAD")
+            first = self._sha(root, "HEAD")
+            (root / "stories" / "STORY-936" / "context-digest.md").write_text(
+                (root / "stories" / "STORY-936"
+                 / "context-digest.md").read_text(encoding="utf-8")
+                .replace("BASE_SHA: HEAD", f"BASE_SHA: {first}"),
+                encoding="utf-8")
+            _commit(root)
+            self._second_commit(root)
+            second = self._sha(root, "HEAD")
+            errors = CD.run_gate(root, "STORY-936", second)
+            self.assertEqual(errors, [
+                f"base sha mismatch: digest declares {first}, "
+                f"invocation supplied {second}"])
+
+    def test_matching_full_abbrev_pair_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._two_commit_repo(td, "STORY-937", "BASE_SHA: HEAD")
+            first = self._sha(root, "HEAD")
+            (root / "stories" / "STORY-937" / "context-digest.md").write_text(
+                (root / "stories" / "STORY-937"
+                 / "context-digest.md").read_text(encoding="utf-8")
+                .replace("BASE_SHA: HEAD", f"BASE_SHA: {first}"),
+                encoding="utf-8")
+            _commit(root)
+            self._second_commit(root)
+            # declared FULL sha, supplied its 7-char abbreviation — same
+            # commit id, so no mismatch (and the story/anchors still
+            # resolve at the supplied rev)
+            errors = CD.run_gate(root, "STORY-937", first[:7])
+            self.assertFalse(any("base sha mismatch" in e for e in errors),
+                             errors)
+
+    def test_no_declaration_unchanged(self):
+        """The uppercase `BASE_SHA: HEAD` fixture form declares no
+        lowercase-hex sha (identical parse to plan_checks) — validation
+        proceeds against the supplied sha exactly as before."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._two_commit_repo(td, "STORY-938", "BASE_SHA: HEAD")
+            self._second_commit(root)
+            self.assertEqual(CD.run_gate(root, "STORY-938", "HEAD"), [])
+
+    def test_declared_parser_matches_plan_checks_ladder(self):
+        """declared_base_sha uses the digest-side rules of
+        plan_checks.resolve_base_sha(): BASE_SHA token first, then the
+        §8 `git rev-parse <sha>` / `pinned … <sha>` forms."""
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        self.assertEqual(
+            CD.declared_base_sha(f"x\nBASE_SHA: {sha}\n"), sha)
+        self.assertEqual(
+            CD.declared_base_sha(
+                "## 8. Verification block\nrun: git rev-parse "
+                f"{sha}\n"), sha)
+        self.assertEqual(
+            CD.declared_base_sha(
+                f"## 8. Verification block\npinned at {sha}\n"), sha)
+        # BASE_SHA token wins over a §8 form
+        self.assertEqual(
+            CD.declared_base_sha(
+                f"BASE_SHA: {sha}\n## 8. Verification block\n"
+                f"git rev-parse {'f' * 40}\n"), sha)
+        self.assertIsNone(CD.declared_base_sha("no base anywhere\n"))
+
+
+class AnchorBulletFormsTests(unittest.TestCase):
+    """R11-L3: the §4 anchor grammar accepts ALL Markdown unordered-list
+    bullets (`-`, `*`, `+`) — a `*`-bulleted ghost anchor is no longer
+    silently skipped, and valid `*`/`+` anchors resolve. The existing
+    `-` form is unchanged."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=J2_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_star_bullet_ghost_anchor_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-939",
+                              "* src/ghost.py:999 — def nonexistent\n")
+            errors = CD.run_gate(root, "STORY-939", "HEAD")
+            self.assertIn("anchor path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_plus_bullet_ghost_anchor_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-940",
+                              "+ `src/ghost.py:999` — def nonexistent\n")
+            errors = CD.run_gate(root, "STORY-940", "HEAD")
+            self.assertIn("anchor path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_valid_star_and_plus_anchors_resolve(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(
+                td, "STORY-941",
+                "* `src/app.py:2` — def compute_total\n"
+                "+ `src/app.py:3` — return\n")
+            self.assertEqual(CD.run_gate(root, "STORY-941", "HEAD"), [])
+
+    def test_existing_dash_form_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-942",
+                              "- `src/app.py:2` — def compute_total\n")
+            self.assertEqual(CD.run_gate(root, "STORY-942", "HEAD"), [])
+
+    def test_grammar_accepts_all_bullet_markers(self):
+        pat = r"^\s*[-*+]?\s*`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)"
+        for line in ("- `src/app.py:12` — def f",
+                     "* `src/app.py:12` — def f",
+                     "+ `src/app.py:12` — def f",
+                     "  * src/app.py:12 — def f"):
+            mm = re.match(pat, line)
+            self.assertIsNotNone(mm, line)
+            self.assertEqual(mm.group(1), "src/app.py")
+            self.assertEqual(int(mm.group(2)), 12)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -250,9 +250,10 @@ class MetricsReportTests(unittest.TestCase):
         rc, err = self._diff_rc({"totals": {"input_tokens": "invalid"},
                                  "per_story": {}, "per_role": {}})
         self.assertEqual(rc, 1)
+        # token totals may be null (unknown) but never a non-numeric string
         self.assertIn("error: malformed baseline snapshot: "
-                      "`totals.input_tokens` must be numeric, got 'invalid'",
-                      err)
+                      "`totals.input_tokens` must be numeric or null, "
+                      "got 'invalid'", err)
         rc, err = self._diff_rc({"per_story": {}, "per_role": {}})
         self.assertEqual(rc, 1)
         self.assertIn("error: malformed baseline snapshot: missing "
@@ -289,6 +290,127 @@ class MetricsReportTests(unittest.TestCase):
             text = (root / "factory" / "metrics" /
                     "TOKEN-METRICS.md").read_text(encoding="utf-8")
             self.assertIn("# factory — Token & Efficiency Metrics", text)
+
+    # ---- round-20 U1: multi-row dispatches aggregate identically at
+    # every scope (sum everywhere — never last-row-wins per dispatch)
+    _DISPATCH_U1 = {
+        "event": "dispatch", "event_id": "STORY-U1-coder-1-1789004000",
+        "story_id": "STORY-U1", "role": "coder",
+        "requested_model": "model-x", "reported_model": "model-x",
+        "model_unverified": False}
+
+    @staticmethod
+    def _usage_u(eid, it, ot, it_reason=None, ot_reason=None):
+        return {"event": "usage", "event_id": eid,
+                "dispatch_id": "STORY-U1-coder-1-1789004000",
+                "input_tokens": it, "input_tokens_reason": it_reason,
+                "output_tokens": ot, "output_tokens_reason": ot_reason,
+                "cached_input_tokens": None,
+                "cached_input_tokens_reason": "not itemized"}
+
+    def test_multi_usage_rows_sum_at_every_scope(self):
+        c = MT.collect([self._DISPATCH_U1,
+                        self._usage_u("u1", 100, 10),
+                        self._usage_u("u2", 200, 20)])
+        self.assertEqual(c["totals"]["input_tokens"], 300)
+        st = c["per_story"]["STORY-U1"]
+        self.assertEqual(st["input_tokens"], 300)
+        self.assertEqual(st["output_tokens"], 30)
+        self.assertEqual(st["per_lane"]["build"]["input_tokens"], 300)
+        self.assertEqual(c["per_role"]["coder"]["input_tokens"], 300)
+        self.assertEqual(c["per_role"]["coder"]["output_tokens"], 30)
+        # a SINGLE usage row still lands unchanged (no fixture drift)
+        c1 = MT.collect([self._DISPATCH_U1, self._usage_u("u1", 100, 10)])
+        self.assertEqual(c1["totals"]["input_tokens"], 100)
+        self.assertEqual(c1["per_story"]["STORY-U1"]["input_tokens"], 100)
+        self.assertEqual(c1["per_role"]["coder"]["input_tokens"], 100)
+        # dispatches counted once regardless of usage-row count
+        self.assertEqual(c["totals"]["dispatches"], 1)
+        self.assertEqual(st["dispatches"], 1)
+        self.assertEqual(c["totals"]["usage_rows"], 2)
+
+    # ---- round-20 U2: unknown token counts preserved end-to-end
+    def test_null_counts_stay_unknown_never_zero(self):
+        c = MT.collect([self._DISPATCH_U1,
+                        self._usage_u("u1", None, 5, "provider withheld")])
+        self.assertIsNone(c["totals"]["input_tokens"])
+        self.assertEqual(c["totals"]["input_tokens_unknown"], 1)
+        self.assertEqual(c["totals"]["input_tokens_reasons"],
+                         {"provider withheld": 1})
+        self.assertIsNone(c["per_story"]["STORY-U1"]["input_tokens"])
+        self.assertIsNone(c["per_role"]["coder"]["input_tokens"])
+        # a MEASURED zero stays a numeric zero — not unknown
+        c0 = MT.collect([self._DISPATCH_U1, self._usage_u("u0", 0, 0)])
+        self.assertEqual(c0["totals"]["input_tokens"], 0)
+        self.assertNotIn("input_tokens_unknown", c0["totals"])
+
+    def test_partial_totals_sum_known_and_mark_unknown_rows(self):
+        c = MT.collect([self._DISPATCH_U1,
+                        self._usage_u("u1", 100, 10),
+                        self._usage_u("u2", None, 5, "executor truncated")])
+        t = c["totals"]
+        self.assertEqual(t["input_tokens"], 100)
+        self.assertEqual(t["input_tokens_unknown"], 1)
+        md = MT.render_md(c, "t", self.header, 3)
+        self.assertIn("| input_tokens | 100 partial (1 unknown rows) |", md)
+
+    def test_report_renders_unknown_with_reason(self):
+        c = MT.collect([self._DISPATCH_U1,
+                        self._usage_u("u1", None, 5, "provider withheld")])
+        md = MT.render_md(c, "t", self.header, 2)
+        self.assertIn("| input_tokens | unknown (provider withheld) |", md)
+        self.assertIn("| STORY-U1 | 1 | unknown (provider withheld) | 5 |",
+                      md)
+        self.assertIn("| coder | 1 | unknown (provider withheld) | 5 |", md)
+        # never a bare numeric zero for the unknown field
+        self.assertNotIn("| input_tokens | 0 |", md)
+
+    def test_snapshot_round_trip_keeps_null(self):
+        c = MT.collect([self._DISPATCH_U1,
+                        self._usage_u("u1", None, 5, "provider withheld")])
+        snap = MT.to_jsonable(c)
+        payload = MT.snapshot_bytes(snap)
+        doc = json.loads(payload)
+        self.assertIsNone(doc["totals"]["input_tokens"])
+        self.assertEqual(doc["totals"]["input_tokens_reasons"],
+                         {"provider withheld": 1})
+        self.assertIsNone(doc["per_story"]["STORY-U1"]["input_tokens"])
+        # the snapshot survives baseline validation and re-parses to the
+        # same bytes (deterministic null serialization)
+        self.assertIsNone(MT.validate_baseline(doc))
+        self.assertEqual(MT.snapshot_bytes(doc), payload)
+
+    def test_diff_never_claims_delta_against_unknown(self):
+        known = {"totals": {"input_tokens": 500, "output_tokens": 10,
+                            "dispatches": 1},
+                 "per_story": {}, "per_role": {}}
+        c_unknown = MT.collect([self._DISPATCH_U1,
+                                self._usage_u("u1", None, 5,
+                                              "provider withheld"),
+                                self._usage_u("u2", None, 5,
+                                              "provider withheld")])
+        cur = {"totals": c_unknown["totals"], "per_story": {},
+               "per_role": {}}
+        out = MT.diff(known, cur, None)
+        self.assertIn("| TOTAL input_tokens | 500 | unknown (provider "
+                      "withheld ×2) | unknown |", out)
+        self.assertNotIn("-500", out)
+        # partial vs known → partial, still no numeric delta
+        c_partial = MT.collect([self._DISPATCH_U1,
+                                self._usage_u("u1", 100, 10),
+                                self._usage_u("u2", None, 5, "truncated")])
+        out2 = MT.diff(known, {"totals": c_partial["totals"],
+                               "per_story": {}, "per_role": {}}, None)
+        self.assertIn("| TOTAL input_tokens | 500 | 100 partial "
+                      "(1 unknown rows) | partial |", out2)
+        self.assertNotIn("-400", out2)
+        # both sides known → numeric delta unchanged
+        out3 = MT.diff(known, {"totals": {"input_tokens": 400,
+                                          "output_tokens": 10,
+                                          "dispatches": 1},
+                               "per_story": {}, "per_role": {}}, None)
+        self.assertIn("| TOTAL input_tokens | 500 | 400 | -100 (-20%) |",
+                      out3)
 
 
 if __name__ == "__main__":

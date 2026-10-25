@@ -79,6 +79,72 @@ def lane_of(role: str) -> str:
     return LANES.get(role, "other")
 
 
+# Token-count fields carried by usage rows (tokens-only law).
+TOKEN_FIELDS = ("input_tokens", "output_tokens", "cached_input_tokens")
+
+
+class TokSum:
+    """Aggregated token count that preserves unknown measurements.
+
+    A null count with a recorded reason is an UNAVAILABLE measurement,
+    never a measured zero: known values sum into `known`; null rows are
+    censused in `unknown`/`reasons`. `value` is None only when rows
+    existed and every one was unknown — partial scope sums keep the known
+    total plus the unknown-row marker.
+    """
+
+    __slots__ = ("known", "has_known", "unknown", "reasons")
+
+    def __init__(self) -> None:
+        self.known = 0
+        self.has_known = False
+        self.unknown = 0
+        self.reasons: dict[str, int] = {}
+
+    def add(self, v: Any, reason: Any = None) -> None:
+        if v is None:
+            self.unknown += 1
+            key = str(reason) if reason is not None else "?"
+            self.reasons[key] = self.reasons.get(key, 0) + 1
+        else:
+            self.has_known = True
+            self.known += int(v)
+
+    def merge(self, other: "TokSum") -> None:
+        self.known += other.known
+        self.has_known = self.has_known or other.has_known
+        self.unknown += other.unknown
+        for k, n in other.reasons.items():
+            self.reasons[k] = self.reasons.get(k, 0) + n
+
+    @property
+    def value(self) -> int | None:
+        # no rows at all → 0 (nothing recorded); every row unknown → None
+        return self.known if (self.has_known or self.unknown == 0) else None
+
+    def resolve_into(self, d: dict, key: str) -> None:
+        d[key] = self.value
+        if self.unknown:
+            d[key + "_unknown"] = self.unknown
+            d[key + "_reasons"] = dict(sorted(self.reasons.items()))
+
+
+def tok_cell(scope: dict, field: str) -> str:
+    """Render one token count preserving unknown/partial status:
+    `unknown (<reason>)` when no row was measurable, `<sum> partial
+    (N unknown rows)` when some were, plain `<sum>` when all known."""
+    v = scope.get(field)
+    unk = scope.get(field + "_unknown") or 0
+    if v is None:
+        reasons = scope.get(field + "_reasons") or {}
+        why = "; ".join(r if n == 1 else f"{r} ×{n}"
+                        for r, n in sorted(reasons.items()))
+        return f"unknown ({why})" if why else "unknown"
+    if unk:
+        return f"{v:,} partial ({unk} unknown rows)"
+    return f"{v:,}"
+
+
 def collect(events: list[dict]) -> dict[str, Any]:
     # dispatch lifecycle: last row per event_id wins (the completion row
     # supersedes the pre-spawn row; fields merge so pre-spawn values
@@ -90,43 +156,47 @@ def collect(events: list[dict]) -> dict[str, Any]:
                                          **e}
     # usage rows: keep ALL of them in ledger order for totals (a null
     # dispatch_id is still a real usage row — never collapsed away); the
-    # by-id join dict is built ONLY for non-null dispatch_ids.
+    # by-id join groups EVERY row of a dispatch (a dispatch may carry
+    # several usage events — they SUM at every scope, never overwrite).
     usage_rows: list[dict] = [e for e in events
                               if e.get("event") == "usage"]
-    usage: dict[str, dict] = {}
+    usage_by_did: dict[str, list[dict]] = {}
     for e in usage_rows:
         did = e.get("dispatch_id")
         if did is not None:
-            usage[str(did)] = e
+            usage_by_did.setdefault(str(did), []).append(e)
     loops = [e for e in events if e.get("event") == "loop"]
     findings = L.latest_findings(events)
     outcomes = [e for e in events if e.get("event") == "outcome"]
 
+    def fresh_tok() -> dict[str, TokSum]:
+        return {f: TokSum() for f in TOKEN_FIELDS}
+
     per_story: dict[str, dict] = defaultdict(lambda: {
-        "dispatches": 0, "input_tokens": 0, "output_tokens": 0,
-        "cached_input_tokens": 0,
-        "per_lane": defaultdict(lambda: {"dispatches": 0, "input_tokens": 0,
-                                         "output_tokens": 0}),
+        "dispatches": 0, "tok": fresh_tok(),
+        "per_lane": defaultdict(lambda: {"dispatches": 0, "tok": fresh_tok()}),
         "loops": defaultdict(int), "findings": 0,
         "routed": 0, "unrouted": 0, "unrouted_ids": [],
         "usage_recorded": 0, "served_model_known": 0, "merged": None,
     })
     per_role: dict[str, dict] = defaultdict(lambda: {
-        "dispatches": 0, "input_tokens": 0, "output_tokens": 0,
+        "dispatches": 0, "tok": fresh_tok(),
         "models": defaultdict(int)})
 
     for did, d in sorted(dispatches.items()):
         sid = str(d.get("story_id") or "?")
         role = norm_role(d.get("role"))
-        u = usage.get(did, {})
-        it = int(u.get("input_tokens") or 0)
-        ot = int(u.get("output_tokens") or 0)
-        ct = int(u.get("cached_input_tokens") or 0)
+        rows = usage_by_did.get(did, [])
+        # sum EVERY usage row of this dispatch, preserving null counts as
+        # unknown (never coerced to a measured zero)
+        per_field = fresh_tok()
+        for u in rows:
+            for f in TOKEN_FIELDS:
+                per_field[f].add(u.get(f), u.get(f + "_reason"))
         st = per_story[sid]
         st["dispatches"] += 1
-        st["input_tokens"] += it
-        st["output_tokens"] += ot
-        st["cached_input_tokens"] += ct
+        for f in TOKEN_FIELDS:
+            st["tok"][f].merge(per_field[f])
         # unrouted census: requested_model absent/null = routing not
         # recorded — never guessed (null+reason law)
         if d.get("requested_model") is not None:
@@ -134,18 +204,18 @@ def collect(events: list[dict]) -> dict[str, Any]:
         else:
             st["unrouted"] += 1
             st["unrouted_ids"].append(did)
-        st["usage_recorded"] += 1 if u else 0
+        st["usage_recorded"] += 1 if rows else 0
         st["served_model_known"] += \
             1 if d.get("reported_model") and not d.get("model_unverified") \
             else 0
         ln = st["per_lane"][lane_of(role)]
         ln["dispatches"] += 1
-        ln["input_tokens"] += it
-        ln["output_tokens"] += ot
+        for f in TOKEN_FIELDS:
+            ln["tok"][f].merge(per_field[f])
         pr = per_role[role]
         pr["dispatches"] += 1
-        pr["input_tokens"] += it
-        pr["output_tokens"] += ot
+        for f in TOKEN_FIELDS:
+            pr["tok"][f].merge(per_field[f])
         # a requested model is not a served model — tally reported_model
         # only; dispatches without one are `(unreported)`, never guessed
         pr["models"][str(d.get("reported_model"))
@@ -160,19 +230,34 @@ def collect(events: list[dict]) -> dict[str, Any]:
     for o in outcomes:
         per_story[str(o.get("story_id"))]["merged"] = \
             (o.get("merged_sha") or "?")[:10]
-    return {"per_story": per_story, "per_role": per_role,
-            "totals": {
-                "dispatches": len(dispatches),
-                "usage_rows": len(usage_rows),
-                "input_tokens": sum(int(u.get("input_tokens") or 0)
-                                    for u in usage_rows),
-                "output_tokens": sum(int(u.get("output_tokens") or 0)
-                                     for u in usage_rows),
-                "cached_input_tokens": sum(
-                    int(u.get("cached_input_tokens") or 0)
-                    for u in usage_rows),
-                "loops": len(loops),
-            }}
+
+    # resolve accumulators → plain snapshot-safe values (None = unknown;
+    # `_unknown`/`_reasons` markers only where a null row was recorded)
+    def resolve(acc: dict, tok: dict[str, TokSum]) -> dict:
+        out = dict(acc)
+        for f, ts in tok.items():
+            ts.resolve_into(out, f)
+        return out
+
+    story_out = {}
+    for sid, st in per_story.items():
+        d = resolve({k: v for k, v in st.items()
+                     if k not in ("tok", "per_lane")}, st["tok"])
+        d["per_lane"] = {name: resolve({k: v for k, v in ln.items()
+                                        if k != "tok"}, ln["tok"])
+                         for name, ln in st["per_lane"].items()}
+        story_out[sid] = d
+    role_out = {r: resolve({k: v for k, v in d.items() if k != "tok"},
+                           d["tok"])
+                for r, d in per_role.items()}
+    total_tok = fresh_tok()
+    for u in usage_rows:
+        for f in TOKEN_FIELDS:
+            total_tok[f].add(u.get(f), u.get(f + "_reason"))
+    totals = resolve({"dispatches": len(dispatches),
+                      "usage_rows": len(usage_rows),
+                      "loops": len(loops)}, total_tok)
+    return {"per_story": story_out, "per_role": role_out, "totals": totals}
 
 
 def to_jsonable(c: dict) -> dict:
@@ -201,9 +286,15 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
     t = c["totals"]
     out += ["| Measure | Value |", "|---|---|"]
     for k in sorted(t):
+        if k.endswith("_unknown") or k.endswith("_reasons"):
+            continue  # folded into the token field's cell below
         v = t[k]
-        out.append(f"| {k} | {v:,} |" if isinstance(v, int)
-                   else f"| {k} | {v} |")
+        if k in TOKEN_FIELDS:
+            out.append(f"| {k} | {tok_cell(t, k)} |")
+        elif isinstance(v, int):
+            out.append(f"| {k} | {v:,} |")
+        else:
+            out.append(f"| {k} | {v} |")
     out += ["", "## Per story", "",
             "| Story | Dispatches | Input tok | Output tok | Routed | "
             "Usage rows | Served model known | Loops | Merged |",
@@ -212,7 +303,8 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
         loops = ",".join(f"{k}:{v}" for k, v in sorted(st["loops"].items())) \
             or "0"
         out.append(f"| {sid} | {st['dispatches']} | "
-                   f"{st['input_tokens']:,} | {st['output_tokens']:,} | "
+                   f"{tok_cell(st, 'input_tokens')} | "
+                   f"{tok_cell(st, 'output_tokens')} | "
                    f"{st['routed']}/{st['dispatches']} | "
                    f"{st['usage_recorded']}/{st['dispatches']} | "
                    f"{st['served_model_known']}/{st['dispatches']} | "
@@ -224,7 +316,7 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
         out += ["| Story | " + " | ".join(lanes) + " |",
                 "|---|" + "---|" * len(lanes)]
         for sid, st in sorted(c["per_story"].items()):
-            cells = [f"{st['per_lane'][ln]['input_tokens']:,}"
+            cells = [tok_cell(st["per_lane"][ln], "input_tokens")
                      if ln in st["per_lane"] else "—" for ln in lanes]
             out.append(f"| {sid} | " + " | ".join(cells) + " |")
     else:
@@ -243,8 +335,9 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
             "|---|---|---|---|---|"]
     for r, d in sorted(c["per_role"].items()):
         models = ", ".join(f"{m}×{n}" for m, n in sorted(d["models"].items()))
-        out.append(f"| {r} | {d['dispatches']} | {d['input_tokens']:,} | "
-                   f"{d['output_tokens']:,} | {models} |")
+        out.append(f"| {r} | {d['dispatches']} | "
+                   f"{tok_cell(d, 'input_tokens')} | "
+                   f"{tok_cell(d, 'output_tokens')} | {models} |")
     out += ["", "_Regenerate: `python3 factory/tools/metrics_report.py`_", ""]
     return "\n".join(out)
 
@@ -280,7 +373,19 @@ def validate_baseline(base: Any) -> str | None:
                 return (f"`per_story.{st}.{nk}` must be numeric, got "
                         f"{nv!r}")
     for tk, tv in base["totals"].items():
-        if not isinstance(tv, (int, float)) or isinstance(tv, bool):
+        if tk in TOKEN_FIELDS:
+            # an unknown total is null (never coerced) — allowed
+            if tv is not None and \
+                    (not isinstance(tv, (int, float)) or isinstance(tv, bool)):
+                return f"`totals.{tk}` must be numeric or null, got {tv!r}"
+        elif tk.endswith("_unknown"):
+            if not isinstance(tv, int) or isinstance(tv, bool):
+                return f"`totals.{tk}` must be an integer, got {tv!r}"
+        elif tk.endswith("_reasons"):
+            if not isinstance(tv, dict):
+                return (f"`totals.{tk}` must be an object, got "
+                        f"{type(tv).__name__}")
+        elif not isinstance(tv, (int, float)) or isinstance(tv, bool):
             return f"`totals.{tk}` must be numeric, got {tv!r}"
     return None
 
@@ -289,16 +394,35 @@ def diff(base: dict, cur: dict, story: str | None) -> str:
     out = ["# Delta vs baseline", "",
            "| Metric | Baseline | Current | Δ |", "|---|---|---|---|"]
 
+    def side(scope: dict, name: str) -> dict:
+        """One metric on one side: value (None = unknown), plus the
+        unknown/partial status that suppresses a numeric delta."""
+        v = scope.get(name, 0)
+        unk = scope.get(name + "_unknown") or 0
+        return {"value": v, "unk": unk}
+
+    def fmt(scope: dict, name: str, val: Any) -> str:
+        return tok_cell(scope, name) if name in TOKEN_FIELDS \
+            else format(val, ",")
+
     def rows(scope_base, scope_cur, label):
-        pairs = [
-            ("input_tokens", scope_base.get("input_tokens", 0),
-             scope_cur.get("input_tokens", 0)),
-            ("output_tokens", scope_base.get("output_tokens", 0),
-             scope_cur.get("output_tokens", 0)),
-            ("dispatches", scope_base.get("dispatches", 0),
-             scope_cur.get("dispatches", 0)),
-        ]
-        for name, b, c in pairs:
+        for name in ("input_tokens", "output_tokens", "dispatches"):
+            sb, sc = side(scope_base, name), side(scope_cur, name)
+            # unknown/partial on either side → no numeric delta ever:
+            # an unavailable measurement can never back a savings claim
+            if None in (sb["value"], sc["value"]):
+                status = "unknown"
+            elif sb["unk"] or sc["unk"]:
+                status = "partial"
+            else:
+                status = None
+            if status:
+                out.append(f"| {label} {name} | "
+                           f"{fmt(scope_base, name, sb['value'])} | "
+                           f"{fmt(scope_cur, name, sc['value'])} | "
+                           f"{status} |")
+                continue
+            b, c = sb["value"], sc["value"]
             d = c - b
             pct = f" ({d / b * 100:+.0f}%)" if b else ""
             out.append(f"| {label} {name} | {b:,} | {c:,} | {d:+,}{pct} |")

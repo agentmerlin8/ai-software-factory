@@ -218,10 +218,21 @@ def validate_ledger(ledger_path: Path | str) -> list[str]:
 # ---------------------------------------------------------------- append ----
 
 def _next_seq(events: list[dict], etype: str, story_id: Any) -> int:
+    """Next auto-allocation suffix for `<etype>-<sid>-<seq>`. R8-I1: the
+    row count alone does NOT determine the suffix — an explicitly present
+    id (e.g. a hand-recorded `<etype>-<sid>-2`) can collide with a later
+    auto-allocation, so the sequence INCREMENTS until the candidate id is
+    unused in the ledger (an auto id is never one already present). The
+    deterministic `<type>-<story>-<seq>` shape is unchanged."""
+    sid = story_id or "global"
+    used = {e.get("event_id") for e in events if isinstance(e, dict)}
     n = sum(1 for e in events
             if isinstance(e, dict) and e.get("event") == etype
             and e.get("story_id") == story_id)
-    return n + 1
+    seq = n + 1
+    while f"{etype}-{sid}-{seq}" in used:
+        seq += 1
+    return seq
 
 
 def seen_ended(events: list[dict], evt: dict) -> str:

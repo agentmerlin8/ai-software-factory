@@ -131,7 +131,21 @@ def render(events: list[dict], root: Path, header: str,
         story["findings"] = L.latest_findings(events, sid)
 
     def formal_loops(s: dict) -> int:
-        return len(s.get("loops", []))
+        """Loop rows win; when a story recorded an outcome `totals`
+        aggregate WITHOUT loop rows (R8-I5), the aggregate is the count
+        — an outcome with `plan_loops: 2` and no rows is NOT loop-free.
+        Aggregate = sum of non-negative int values under the supported
+        keys `plan_loops`/`code_loops` (bools are not counts)."""
+        rows = s.get("loops", [])
+        if rows:
+            return len(rows)
+        totals = s.get("outcome", {}).get("totals")
+        if not isinstance(totals, dict):
+            return 0
+        return sum(v for k, v in totals.items()
+                   if k in ("plan_loops", "code_loops")
+                   and isinstance(v, int) and not isinstance(v, bool)
+                   and v >= 0)
 
     def instrumented(s: dict) -> bool:
         """Was loop/finding data actually recorded for this story?

@@ -481,5 +481,91 @@ class PlanReviewAssociationTests(unittest.TestCase):
                       "| 2 | — | — |", text)
 
 
+class AggregateLoopTotalsTests(unittest.TestCase):
+    """R8-I5: an outcome recording `totals: {"plan_loops": 2}` with NO
+    loop rows is instrumented, yet both loop calculations returned zero
+    — the story was listed correction-free / formal-loop-free despite
+    recorded loops. The aggregate now counts when there are no rows."""
+
+    HEADER = "H"
+
+    def _outcome_row(self, totals):
+        return {"event": "outcome", "event_id": "outcome-S-1",
+                "story_id": "S", "merged_sha": "deadbeef",
+                "merged_at": "2026-09-02T01:00:00Z",
+                "live_proof_status": None, "totals": totals,
+                "recorded_at": "2026-09-02T01:30:00Z", "provenance": "live"}
+
+    def _render(self, events):
+        with tempfile.TemporaryDirectory() as td:
+            return RD.render(events, Path(td), self.HEADER)
+
+    def test_totals_only_plan_loops_not_loop_free(self):
+        text = self._render([self._outcome_row({"plan_loops": 2})])
+        # aggregate counts as formal loops
+        self.assertIn("| Formal loops recorded | 2 (plan: 0, code: 0) |",
+                      text)
+        # NOT listed as correction-free or formal-loop-free
+        self.assertNotIn("Formal-loop-free deliveries (0 plan/code loops; "
+                         "external rounds counted separately; instrumented "
+                         "stories only) | 1", text)
+        merged_line = next(l for l in text.splitlines()
+                           if l.startswith("| Formal-loop-free deliveries"))
+        self.assertIn("0 — none", merged_line)
+        cf_line = next(l for l in text.splitlines()
+                       if l.startswith("| Correction-free deliveries"))
+        self.assertIn("0 — none", cf_line)
+
+    def test_totals_code_loops_sum_too(self):
+        text = self._render([self._outcome_row({"plan_loops": 1,
+                                                "code_loops": 3})])
+        self.assertIn("| Formal loops recorded | 4 (plan: 0, code: 0) |",
+                      text)
+
+    def test_bool_and_negative_values_ignored(self):
+        text = self._render([self._outcome_row({"plan_loops": True,
+                                                "code_loops": -3})])
+        self.assertIn("| Formal loops recorded | 0 (plan: 0, code: 0) |",
+                      text)
+        # still instrumented (totals dict present) → loop-free list is
+        # the honest zero here, not an uninstrumented exclusion
+        self.assertNotIn("1 — S", text.split("WITHOUT loop/finding "
+                                             "instrumentation")[1]
+                         .splitlines()[1])
+
+    def test_unsupported_total_keys_ignored(self):
+        text = self._render([self._outcome_row({"review_loops": 5,
+                                                "plan_loops": 1})])
+        self.assertIn("| Formal loops recorded | 1 (plan: 0, code: 0) |",
+                      text)
+
+    def test_loop_rows_win_over_totals(self):
+        """A story WITH loop rows is unchanged — the rows are the count,
+        not the aggregate (STORY-201 fixture behavior preserved)."""
+        loop = {"event": "loop", "event_id": "loop-S-1", "story_id": "S",
+                "stage": "plan_review", "loop_n": 1, "class": "reasoning",
+                "root_cause_one_line": "x", "recorded_at": "t",
+                "provenance": "live"}
+        text = self._render([loop, self._outcome_row({"plan_loops": 9})])
+        self.assertIn("| Formal loops recorded | 1 (plan: 1, code: 0) |",
+                      text)
+
+    def test_fixture_201_rendering_unchanged(self):
+        """The sample fixture's STORY-201 (1 loop row + totals
+        {plan_loops: 1}) renders identically to the pre-fix expectation."""
+        text = self._render(self.events_201())
+        self.assertIn("| Formal loops recorded | 1 (plan: 1, code: 0) |",
+                      text)
+        self.assertIn("| STORY-201 | agent-a | `MERGED` | 1/0 | 1 | 2 | "
+                      "deadbeef1234 | proven |", text)
+
+    @staticmethod
+    def events_201():
+        from tools.tests.test_render_state import build_ledger
+        with tempfile.TemporaryDirectory() as td:
+            ledger = build_ledger(Path(td))
+            return L.load_events(ledger)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

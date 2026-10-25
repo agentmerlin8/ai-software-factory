@@ -24,9 +24,11 @@ Genericization notes:
   * The 8-section schema wording is project-neutral and kept as-is; the
     kit does not (yet) ship its own context-digest template, so this list
     IS the kit's digest format until one is frozen elsewhere.
-  * Story-file ground truth is looked for at `stories/<sid>/story.md`
-    first (kit transition-table layout), then `stories/<sid>.md`
-    (reference layout).
+  * Story-file ground truth is looked for at the canonical spec path
+    `stories/<sid>/spec.md` first (architecture.md §Installed control
+    home; same order as the plan gate's `resolve_spec()`), then
+    `stories/<sid>/story.md` (kit transition-table layout), then
+    `stories/<sid>.md` (reference layout).
 
 USAGE: python3 tools/check_digest.py <STORY-ID> [BASE_SHA] [--root DIR]
   (installed control-home form: python3 factory/tools/check_digest.py ...)
@@ -54,13 +56,33 @@ LINE_CAP = 150
 
 
 def story_file_candidates(root: Path, story: str) -> list[Path]:
-    """Ground-truth story file locations, kit layout first."""
-    return [root / "stories" / story / "story.md", root / "stories" / f"{story}.md"]
+    """Ground-truth story file locations, canonical spec path first
+    (R8-I2: `stories/<sid>/spec.md` per architecture.md §Installed
+    control home — the same order as the plan gate's `resolve_spec()`),
+    then the kit transition-table layout, then the reference layout."""
+    return [root / "stories" / story / "spec.md",
+            root / "stories" / story / "story.md",
+            root / "stories" / f"{story}.md"]
+
+
+DECL_KEYWORDS = frozenset({
+    "async", "def", "class", "function", "fn", "func", "export",
+    "public", "private", "protected", "internal", "static",
+    "abstract", "final"})
 
 
 def run_gate(root: Path, story: str, sha: str) -> list[str]:
     """Pure gate body: returns the list of failure reasons ([] = pass).
     Raises RuntimeError only when git itself is unusable."""
+    # 0. R8-I3: validate the base revision AT ENTRY — with an empty-path
+    # manifest and `- none` anchors the only git reads left are ones whose
+    # failures fall back to the working tree, so a NONEXISTENT base sha
+    # could otherwise pass every check. Unresolvable → named failure and
+    # no further checks.
+    try:
+        git(root, "rev-parse", "--verify", f"{sha}^{{commit}}")
+    except RuntimeError:
+        return [f"unresolvable base sha: {sha}"]
     digest_path = root / "stories" / story / "context-digest.md"
     if not digest_path.exists():
         return [f"no digest at {digest_path.relative_to(root)}"]
@@ -166,9 +188,17 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                 continue
             tokens = re.findall(r"\w+", desc)
             if tokens:
-                if not all(t in src_lines[lineno - 1] for t in tokens[:2]):
+                # R8-I4: skip leading declaration keywords/modifiers —
+                # `async def missing_symbol` must NOT pass against
+                # `async def existing():` because only the keyword tokens
+                # were checked. The first remaining SYMBOL token must
+                # appear on the line; when every token is a keyword the
+                # check degrades to the old first-two-tokens behavior.
+                symbols = [t for t in tokens if t not in DECL_KEYWORDS]
+                check = symbols[:1] if symbols else tokens[:2]
+                if not all(t in src_lines[lineno - 1] for t in check):
                     errors.append(f"anchor symbol not on line {lineno} of "
-                                  f"{path}: {tokens[:2]}")
+                                  f"{path}: {check}")
 
     # 5. risk markers valid
     rk = re.search(r"## 7\. Risk list[ \t]*\n(.*?)(?=\n## 8\.)", text, re.S)

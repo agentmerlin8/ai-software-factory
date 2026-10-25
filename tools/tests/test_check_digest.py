@@ -265,7 +265,8 @@ class FailClosedACInputsTests(unittest.TestCase):
             root = build_repo(td, "no-story-file", "STORY-904")
             errors = CD.run_gate(root, "STORY-904", "HEAD")
             self.assertIn("story file not found for AC-count ground truth "
-                          "(looked at stories/STORY-904/story.md, "
+                          "(looked at stories/STORY-904/spec.md, "
+                          "stories/STORY-904/story.md, "
                           "stories/STORY-904.md)", errors)
 
     def test_both_inputs_present_no_ac_errors(self):
@@ -292,12 +293,16 @@ class ZeroAnchorTests(unittest.TestCase):
 
 
 class StoryFileCandidatesTests(unittest.TestCase):
-    def test_kit_layout_first(self):
+    def test_canonical_spec_path_first(self):
+        """R8-I2: `stories/<sid>/spec.md` leads (architecture.md §Installed
+        control home; same order as the plan gate's `resolve_spec()`), then
+        the kit story.md, then the reference layout."""
         root = Path("/tmp/x")
         cands = CD.story_file_candidates(root, "STORY-901")
         self.assertEqual(
             cands,
-            [root / "stories" / "STORY-901" / "story.md",
+            [root / "stories" / "STORY-901" / "spec.md",
+             root / "stories" / "STORY-901" / "story.md",
              root / "stories" / "STORY-901.md"])
 
 
@@ -562,7 +567,7 @@ class ExtensionlessAnchorGateTests(unittest.TestCase):
                               "- `bin/build:1` — set -e\n")
             errors = CD.run_gate(root, "STORY-914", "HEAD")
             self.assertIn("anchor symbol not on line 1 of bin/build: "
-                          "['set', 'e']", errors)
+                          "['set']", errors)
 
 
 class AlignedSeparatorSkipTests(unittest.TestCase):
@@ -634,6 +639,171 @@ class AlignedSeparatorSkipTests(unittest.TestCase):
                               extra_rows="| `x:y` | odd |\n")
             errors = CD.run_gate(root, "STORY-920", "HEAD")
             self.assertIn("manifest path missing at HEAD: x:y", errors)
+
+
+def _r8_repo(root: Path, sid: str, *, src_lines: str, story_text: str | None,
+             anchors: str, spec_only: bool = False) -> Path:
+    """R8 inline fixture: minimal repo for the round-8 digest-gate tests.
+    `src/app.py` content is `src_lines`; the story ground truth is written
+    as story.md, spec.md (spec_only), or omitted (None)."""
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "app.py").write_text(src_lines, encoding="utf-8")
+    sdir = root / "stories" / sid
+    sdir.mkdir(parents=True, exist_ok=True)
+    if story_text is not None:
+        name = "spec.md" if spec_only else "story.md"
+        (sdir / name).write_text(story_text, encoding="utf-8")
+    (sdir / "context-digest.md").write_text(
+        f"# digest — {sid}\n\n"
+        "## 1. File manifest\n\n"
+        "| path | role |\n|---|---|\n"
+        "| `src/app.py` | subject |\n\n"
+        "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+        "## 3. Frozen decisions\n\n- none.\n\n"
+        f"## 4. Code anchors\n\n{anchors}\n\n"
+        "## 5. Conventions\n\n- stdlib only.\n\n"
+        "## 6. Open questions\n\n- none.\n\n"
+        "## 7. Risk list\n\n- none — L\n\n"
+        "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+        encoding="utf-8")
+    _commit(root)
+    return root
+
+
+R8_SRC = ("# app\n"
+          "class Widget:\n"
+          "    async def existing(self):\n"
+          "        return 1\n"
+          "\n"
+          "// public static Foo Bar() { return new Foo(); }\n")
+
+
+class SpecPathPreferenceTests(unittest.TestCase):
+    """R8-I2: ground truth prefers the canonical `stories/<sid>/spec.md`
+    (architecture.md §Installed control home; plan-gate resolve_spec
+    order) — a spec-only story resolves instead of failing the digest
+    gate, and both-files repos count the spec, not a stale draft."""
+
+    def test_spec_only_story_resolves(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-921", src_lines=R8_SRC,
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- none.", spec_only=True)
+            self.assertEqual(CD.run_gate(root, "STORY-921", "HEAD"), [])
+
+    def test_spec_preferred_over_story_md_draft(self):
+        """Both files present: the spec's AC count is the ground truth —
+        the story.md draft with a DIFFERENT count must not be counted."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _r8_repo(root, "STORY-922", src_lines=R8_SRC,
+                     story_text="# s\n\n- AC-1: one.\n",
+                     anchors="- none.")
+            (root / "stories" / "STORY-922" / "spec.md").write_text(
+                "# spec\n\n- AC-1: one.\n- AC-2: two.\n", encoding="utf-8")
+            _commit(root)
+            # digest declares 1 — matches story.md but NOT the preferred
+            # spec.md (2 ACs) → the mismatch proves the spec was used
+            errors = CD.run_gate(root, "STORY-922", "HEAD")
+            self.assertIn("AC count mismatch: digest says 1, "
+                          "story file has ~2", errors)
+
+
+class BaseShaValidationTests(unittest.TestCase):
+    """R8-I3: the base revision is validated at gate entry — a
+    NONEXISTENT base sha is a named failure even when the manifest and
+    anchors perform no git reads whose failure would surface."""
+
+    def _quiet_repo(self, td: str, sid: str) -> Path:
+        # `- none` anchors: without the entry check the only git read
+        # (story lookup) falls back to the working tree and a bogus sha
+        # would pass every check
+        return _r8_repo(Path(td), sid, src_lines=R8_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors="- none.")
+
+    def test_bogus_sha_named_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._quiet_repo(td, "STORY-923")
+            bogus = "0" * 40
+            errors = CD.run_gate(root, "STORY-923", bogus)
+            self.assertEqual(errors, [f"unresolvable base sha: {bogus}"])
+
+    def test_bogus_ref_named_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._quiet_repo(td, "STORY-924")
+            errors = CD.run_gate(root, "STORY-924", "no-such-ref")
+            self.assertEqual(errors,
+                             ["unresolvable base sha: no-such-ref"])
+
+    def test_valid_sha_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._quiet_repo(td, "STORY-925")
+            self.assertEqual(CD.run_gate(root, "STORY-925", "HEAD"), [])
+
+    def test_story_working_tree_fallback_still_applies(self):
+        """An UNCOMMITTED story file still counts via the working-tree
+        fallback — the entry check only rejects unreadable revisions."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-926", src_lines=R8_SRC,
+                            story_text=None, anchors="- none.")
+            (root / "stories" / "STORY-926" / "story.md").write_text(
+                "# s\n\n- AC-1: one.\n", encoding="utf-8")
+            # not committed — exists only in the working tree
+            self.assertEqual(CD.run_gate(root, "STORY-926", "HEAD"), [])
+
+
+class AnchorKeywordSkipTests(unittest.TestCase):
+    """R8-I4: declaration keywords/modifiers are skipped when checking
+    anchor description tokens — the first remaining SYMBOL token must
+    appear on the line (`async def not_present_anywhere` no longer passes
+    against `async def existing():`)."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=R8_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_async_def_missing_symbol_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-927",
+                              "- `src/app.py:3` — async def "
+                              "not_present_anywhere\n")
+            errors = CD.run_gate(root, "STORY-927", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['not_present_anywhere']", errors)
+
+    def test_async_def_existing_symbol_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-928",
+                              "- `src/app.py:3` — async def existing\n")
+            self.assertEqual(CD.run_gate(root, "STORY-928", "HEAD"), [])
+
+    def test_public_static_missing_symbol_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-929",
+                              "- `src/app.py:6` — public static Missing "
+                              "Bar\n")
+            errors = CD.run_gate(root, "STORY-929", "HEAD")
+            self.assertIn("anchor symbol not on line 6 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_public_static_existing_symbols_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-930",
+                              "- `src/app.py:6` — public static Foo Bar\n")
+            self.assertEqual(CD.run_gate(root, "STORY-930", "HEAD"), [])
+
+    def test_all_keyword_description_keeps_old_behavior(self):
+        """When every token is a declaration keyword the check degrades
+        to the old first-two-tokens behavior."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-931",
+                              "- `src/app.py:2` — class def\n")
+            # line 2 is `class Widget:` — contains `class` but not `def`
+            errors = CD.run_gate(root, "STORY-931", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['class', 'def']", errors)
 
 
 if __name__ == "__main__":

@@ -290,6 +290,73 @@ class TestAppend(unittest.TestCase):
             self.assertEqual(events[0]["event_id"],
                              f"transition-{STORY}-1")
 
+    def test_auto_event_id_skips_existing_ids(self):
+        """R8-I1: an explicitly present id can occupy the row-count
+        suffix (one row carrying `<type>-<story>-2`) — the old
+        row-count allocation emitted that DUPLICATE and the append was
+        refused by the candidate-ledger law. Auto ids now increment
+        until the candidate is unused, never emitting a present id."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            write_jsonl(p, [transition(f"transition-{STORY}-2", "PLANNED")])
+            evt = transition("", "CODING", "PLANNED")
+            del evt["event_id"]
+            L.append_event(p, evt)
+            self.assertEqual(L.load_events(p)[-1]["event_id"],
+                             f"transition-{STORY}-3")
+
+    def test_auto_event_id_explicit_prefix_ids_no_collision(self):
+        """The spec case: explicit `-1` and `-2` present → the next
+        auto-allocation is `-3`, with no duplicate."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            write_jsonl(p, [transition(f"transition-{STORY}-1", "PLANNED"),
+                            transition(f"transition-{STORY}-2", "CODING",
+                                       "PLANNED")])
+            evt = transition("", "BUILD_GREEN", "CODING")
+            del evt["event_id"]
+            L.append_event(p, evt)
+            events = L.load_events(p)
+            self.assertEqual(events[-1]["event_id"],
+                             f"transition-{STORY}-3")
+
+    def test_auto_event_id_skips_gap_and_overlap(self):
+        """Explicit ids AHEAD of the row count (a gap `-5` with one row)
+        still never collide: the allocation skips every used suffix."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            write_jsonl(p, [transition(f"transition-{STORY}-5", "PLANNED")])
+            evt = transition("", "CODING", "PLANNED")
+            del evt["event_id"]
+            L.append_event(p, evt)
+            # 1 row → base suffix 2; `-2` unused → allocated as-is
+            self.assertEqual(L.load_events(p)[-1]["event_id"],
+                             f"transition-{STORY}-2")
+            # next auto: 2 rows → base 3, but `-5` is taken further on;
+            # `-3` itself is free → allocated
+            evt2 = transition("", "BUILD_GREEN", "CODING")
+            del evt2["event_id"]
+            L.append_event(p, evt2)
+            self.assertEqual(L.load_events(p)[-1]["event_id"],
+                             f"transition-{STORY}-3")
+
+    def test_auto_event_id_other_story_ids_unaffected(self):
+        """The skip-existing scan is per generated candidate — ids of
+        OTHER stories/types never occupy this story's sequence beyond
+        the exact-collision case."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "events.jsonl"
+            write_jsonl(p, [transition(f"transition-{STORY}-1", "PLANNED"),
+                            transition("transition-OTHER-1", "PLANNED",
+                                       story="OTHER")])
+            evt = transition("", "CODING", "PLANNED")
+            del evt["event_id"]
+            L.append_event(p, evt)
+            # 1 row for STORY → base suffix 2, `-2` unused despite the
+            # other story's `-1`
+            self.assertEqual(L.load_events(p)[-1]["event_id"],
+                             f"transition-{STORY}-2")
+
     def test_defaults_recorded_at_utc_and_provenance_live(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "events.jsonl"

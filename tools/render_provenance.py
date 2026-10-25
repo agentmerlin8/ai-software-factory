@@ -308,9 +308,10 @@ def render(events: list[dict], sid: str, header: str) -> str:
         distinct_usage = len({u.get("dispatch_id") for u in usage})
         out += ["| Measure | Value |", "|---|---|",
                 f"| Dispatches with usage | {distinct_usage} |",
-                f"| Input tokens | {_total_s('input_tokens')} |",
-                f"| Output tokens | {_total_s('output_tokens')} |",
-                f"| Cached input tokens | {_total_s('cached_input_tokens')} |",
+                f"| Input tokens | {_cell(_total_s('input_tokens'))} |",
+                f"| Output tokens | {_cell(_total_s('output_tokens'))} |",
+                f"| Cached input tokens | "
+                f"{_cell(_total_s('cached_input_tokens'))} |",
                 "",
                 "### Per-dispatch usage", "",
                 "| Dispatch | Role | Model | Input | Output | Cached |",
@@ -326,9 +327,9 @@ def render(events: list[dict], sid: str, header: str) -> str:
             role = d.get("role") or (did.rsplit("-", 3)[-3]
                                      if did and did.count("-") >= 3 else "—")
             out.append(f"| {_cell(did)} | {_cell(role)} | {_cell(model)} "
-                       f"| {fmt_null(u.get('input_tokens'), 'input_tokens_reason', u)} "
-                       f"| {fmt_null(u.get('output_tokens'), 'output_tokens_reason', u)} "
-                       f"| {fmt_null(u.get('cached_input_tokens'), 'cached_input_tokens_reason', u)} |")
+                       f"| {_cell(fmt_null(u.get('input_tokens'), 'input_tokens_reason', u))} "
+                       f"| {_cell(fmt_null(u.get('output_tokens'), 'output_tokens_reason', u))} "
+                       f"| {_cell(fmt_null(u.get('cached_input_tokens'), 'cached_input_tokens_reason', u))} |")
         out += ["", f"_token_semantics: {usage[0].get('token_semantics')} · "
                 f"usage_source: `{usage[0].get('usage_source')}`_", ""]
     else:

@@ -465,5 +465,55 @@ class RenderProvenanceTests(unittest.TestCase):
         self.assertIn("| Dispatches with usage | 2 |", text2)
 
 
+    # ---- round 25 Z2: token-cell escaping (Measure + per-dispatch rows)
+    def test_reason_with_pipe_and_newline_stays_in_its_cell(self):
+        """A schema-valid reason containing `|`/newline must not add
+        columns or split rows in either token table."""
+        usage = {
+            "event": "usage", "event_id": "usage-STORY-214-coder-1",
+            "dispatch_id": "STORY-214-coder-1-1789007000",
+            "input_tokens": None,
+            "input_tokens_reason": "executor said a|b\nc",
+            "output_tokens": None,
+            "output_tokens_reason": "executor said a|b\nc",
+            "cached_input_tokens": None,
+            "cached_input_tokens_reason": "executor said a|b\nc",
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        text = RP.render([usage], "STORY-214", self.header)
+        # Measure table: escaped pipe, newline flattened to a space
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| Input tokens |"))
+        self.assertIn("unknown (executor said a\\|b c)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 3)  # 2 columns
+        # Per-dispatch table: fmt_null reason cell escaped, 6 columns hold
+        drow = next(l for l in text.splitlines()
+                    if l.startswith("| STORY-214-coder-1-1789007000 |"))
+        self.assertIn("not recorded: executor said a\\|b c", drow)
+        self.assertEqual(drow.replace("\\|", "").count("|"), 7)
+        # the row was not split by the embedded newline
+        self.assertNotIn("c |", drow.replace("a\\|b c", ""))
+
+    def test_plain_token_cells_render_unchanged(self):
+        """Reasons without pipes/newlines render byte-identically."""
+        usage = {
+            "event": "usage", "event_id": "usage-STORY-215-coder-1",
+            "dispatch_id": "STORY-215-coder-1-1789008000",
+            "input_tokens": 1000, "output_tokens": 200,
+            "cached_input_tokens": None,
+            "cached_input_tokens_reason": "no cache in use",
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        text = RP.render([usage], "STORY-215", self.header)
+        self.assertIn("| Input tokens | 1000 |", text)
+        drow = next(l for l in text.splitlines()
+                    if l.startswith("| STORY-215-coder-1-1789008000 |"))
+        self.assertIn("| not recorded: no cache in use |", drow)
+        self.assertNotIn("\\|", drow)
+        self.assertEqual(drow.replace("\\|", "").count("|"), 7)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

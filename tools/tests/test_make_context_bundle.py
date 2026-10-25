@@ -257,5 +257,66 @@ class RawBytesTests(unittest.TestCase):
             self.assertEqual(nbytes, self._blob_size(root, "src/crlf.txt"))
 
 
+class DestinationConfinementTests(unittest.TestCase):
+    """Round 25 Z1: story_id becomes a path component of the default
+    destination — a traversal id (`../../outside`) must refuse with a
+    named error and write NOTHING outside <root>/stories."""
+
+    def _run_default(self, root: Path, story_id: str,
+                     sources: list[str]) -> tuple[int, str, str]:
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), story_id, "--root", str(root),
+             "--sha", "HEAD", *sources],
+            capture_output=True, text=True)
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_traversal_id_refused_nothing_written_outside(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            rc, _stdout, stderr = self._run_default(
+                root, "../../outside", ["src/a.py"])
+            self.assertEqual(rc, 2)
+            self.assertIn("refusing story id '../../outside'", stderr)
+            self.assertIn("escapes the stories directory", stderr)
+            # canonical-shape guidance in the same message
+            self.assertIn("STORY-NNN", stderr)
+            # nothing created outside the repo (nor inside it)
+            self.assertFalse((Path(td) / "outside").exists())
+            self.assertFalse((root / "stories").exists())
+
+    def test_canonical_id_default_dest_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            dest = root / "stories" / "STORY-NNN" / "context-bundle.md"
+            rc, stdout, stderr = self._run_default(
+                root, "STORY-NNN", ["src/a.py"])
+            self.assertEqual(rc, 0, stderr)
+            self.assertIn(f"wrote {dest}", stdout)
+            self.assertTrue(dest.exists())
+
+    def test_noncanonical_but_confined_id_still_writes_under_stories(self):
+        """A non-canonical id that resolves strictly under <root>/stories
+        (no separators, no traversal) keeps working — confinement, not a
+        canonical-only gate, is the safety property."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            rc, _stdout, stderr = self._run_default(
+                root, "draft-notes", ["src/a.py"])
+            self.assertEqual(rc, 0, stderr)
+            dest = root / "stories" / "draft-notes" / "context-bundle.md"
+            self.assertTrue(dest.exists())
+
+    def test_explicit_out_override_is_the_callers_own_path(self):
+        """--out is an explicit caller-chosen destination, not id-derived:
+        it is taken as given (documented override), including paths
+        outside <root>/stories — the same file the caller could write."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            out = Path(td) / "explicit.md"
+            rc, _stdout, stderr = run_bundle(root, out, ["src/a.py"])
+            self.assertEqual(rc, 0, stderr)
+            self.assertTrue(out.exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

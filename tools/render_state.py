@@ -176,10 +176,10 @@ def render(events: list[dict], sid: str, header: str,
         for s in stages:
             out.append(
                 f"| {s.get('stage')} "
-                f"| {fmt_null(s.get('tests_passed'), 'tests_passed_reason', s)} "
-                f"| {fmt_null(s.get('tests_failed'), 'tests_failed_reason', s)} "
-                f"| {fmt_null(s.get('tests_skipped'), 'tests_skipped_reason', s)} "
-                f"| {fmt_null(s.get('tests_excluded'), 'tests_excluded_reason', s)} "
+                f"| {_cell(fmt_null(s.get('tests_passed'), 'tests_passed_reason', s))} "
+                f"| {_cell(fmt_null(s.get('tests_failed'), 'tests_failed_reason', s))} "
+                f"| {_cell(fmt_null(s.get('tests_skipped'), 'tests_skipped_reason', s))} "
+                f"| {_cell(fmt_null(s.get('tests_excluded'), 'tests_excluded_reason', s))} "
                 f"| {s.get('commit_sha') or '—'} "
                 f"| {s.get('evidence_path') or '—'} |")
         out.append("")

@@ -449,5 +449,49 @@ class RenderStateTests(unittest.TestCase):
         self.assertIn("| reasoning | plan omitted a migration step |", text)
 
 
+    # ---- round 25 Z3: nullable stage-cell escaping
+    def _stage(self, **overrides) -> dict:
+        st = {"event": "stage", "event_id": "stage-STORY-201-20",
+              "story_id": "STORY-201", "stage": "full_suite",
+              "started_at": "2026-09-01T03:00:00Z",
+              "ended_at": "2026-09-01T03:05:00Z",
+              "commit_sha": "e" * 40,
+              "tests_passed": None,
+              "tests_passed_reason": "not measured | executor stopped",
+              "tests_failed": 0, "tests_skipped": 0, "tests_excluded": 0,
+              "evidence_path": "stories/STORY-201/evidence/full-suite.txt",
+              "recorded_at": "2026-09-01T03:05:00Z", "provenance": "live"}
+        st.update(overrides)
+        return st
+
+    def test_stage_reason_pipe_stays_in_column(self):
+        """A tests_passed_reason containing `|` must not add a column to
+        the stage report row."""
+        text = RS.render([self._stage()], "STORY-201", self.header,
+                         self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| full_suite |"))
+        self.assertIn("not measured \\| executor stopped", row)
+        # exactly the 7 declared columns: 8 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_stage_reason_newline_stays_in_cell(self):
+        text = RS.render(
+            [self._stage(tests_failed=None,
+                         tests_failed_reason="flaky\nrunner crashed")],
+            "STORY-201", self.header, self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| full_suite |"))
+        self.assertIn("flaky runner crashed", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_plain_stage_cells_render_unchanged(self):
+        """The fixture's plain stage row keeps its exact form."""
+        text = self.render("STORY-201")
+        self.assertIn("| full_suite | 42 | 0 | 0 | 0 |", text)
+        self.assertNotIn("\\|", next(l for l in text.splitlines()
+                                     if l.startswith("| full_suite |")))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

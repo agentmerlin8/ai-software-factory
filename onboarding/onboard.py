@@ -130,7 +130,10 @@ def make_forge(fixture: Optional[str]) -> FP.Forge:
 
 def git_fact(target: Path, *args: str) -> Optional[str]:
     """Tolerated git one-liner: stripped stdout, or None on any failure."""
-    out = run_argv(["git", "-C", str(target), *args])
+    try:
+        out = run_argv(["git", "-C", str(target), *args])
+    except OSError:
+        return None
     if out.returncode == 0 and out.stdout.strip():
         return out.stdout.strip()
     return None
@@ -288,15 +291,22 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         checks.append(("target-git-worktree", False,
                        f"target not found: {args.target}"))
     else:
-        out = run_argv(["git", "-C", str(target), "rev-parse", "--git-dir"])
-        if out.returncode == 0:
-            checks.append(("target-git-worktree", True,
-                           f"git work tree ({out.stdout.strip()})"))
-        else:
-            detail = out.stderr.strip().splitlines()
+        try:
+            out = run_argv(["git", "-C", str(target), "rev-parse",
+                            "--git-dir"])
+        except OSError as exc:
+            out = None
             checks.append(("target-git-worktree", False,
-                           "not inside a git work tree — "
-                           + (detail[-1] if detail else "rev-parse failed")))
+                           f"cannot probe the work tree: {exc}"))
+        if out is not None:
+            if out.returncode == 0:
+                checks.append(("target-git-worktree", True,
+                               f"git work tree ({out.stdout.strip()})"))
+            else:
+                detail = out.stderr.strip().splitlines()
+                checks.append(("target-git-worktree", False,
+                               "not inside a git work tree — "
+                               + (detail[-1] if detail else "rev-parse failed")))
 
     failed = False
     for name, ok, detail in checks:
@@ -327,7 +337,7 @@ def render_workspace_draft(facts: dict, args: argparse.Namespace) -> str:
                             f'url = "{args.repo_url}"', 1)
     # the template's example member binding is illustrative only — a
     # drafted workspace declares the ONE inspected primary binding.
-    text = _MEMBER_BLOCK_RE.sub("\n", text)
+    text = _MEMBER_BLOCK_RE.sub("", text)
     return text
 
 

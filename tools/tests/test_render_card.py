@@ -292,6 +292,63 @@ class GateSupersessionTests(unittest.TestCase):
         self.assertEqual(R.pending_gates([ask, reply, other]), [other])
 
 
+class Round39GateIdentityTests(unittest.TestCase):
+    """AN4 (round 39): gate supersession matches the REQUEST IDENTITY
+    (story_id, gate, question) — identical to render_state.py and
+    render_dashboard.py. An answer to scope question A no longer removes
+    a distinct pending question B on the same gate from the card."""
+
+    @staticmethod
+    def _gate(gate, question, asked, answered=None, sid="STORY-901"):
+        return {"event": "human_gate", "story_id": sid, "gate": gate,
+                "question": question, "asked_at": asked,
+                "answered_at": answered}
+
+    def test_answer_to_A_leaves_B_pending(self):
+        a = self._gate("scope", "scope A?", "t1")
+        b = self._gate("scope", "scope B?", "t2")
+        a_reply = self._gate("scope", "scope A?", "t3", answered="t4")
+        self.assertEqual(R.pending_gates([a, b, a_reply]), [b])
+
+    def test_card_shows_B_as_pending_gate(self):
+        events = [
+            {"event": "transition", "story_id": "STORY-901", "repo": None,
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator"},
+            self._gate("scope", "scope A?", "t1"),
+            self._gate("scope", "scope B?", "t2"),
+            self._gate("scope", "scope A?", "t3", answered="t4"),
+        ]
+        card = R.render_card_text("STORY-901", events, "CODING", None,
+                                  Path("/nonexistent"), "digest123456")
+        self.assertIn("**Pending human gate:** scope — “scope B?”", card)
+        self.assertNotIn("scope A?", card.split("**Pending human gate:**")[1]
+                         .splitlines()[0])
+
+    def test_exact_repeat_still_folds(self):
+        # identical identity (story, gate, question) re-asked + answered:
+        # both earlier asks fold exactly as before
+        g1 = self._gate("merge", "merge?", "t1")
+        g2 = self._gate("merge", "merge?", "t2")
+        g3 = self._gate("merge", "merge?", "t3", answered="t4")
+        self.assertEqual(R.pending_gates([g1, g2, g3]), [])
+
+    def test_normal_solo_lifecycle_unchanged(self):
+        ask = self._gate("merge", "merge?", "t1")
+        reply = self._gate("merge", "merge?", "t3", answered="t4")
+        self.assertEqual(R.pending_gates([ask, reply]), [])
+        self.assertEqual(R.pending_gates([ask]), [ask])
+
+    def test_different_story_answer_does_not_supersede(self):
+        # same gate+question text but a different story's answer must
+        # never supersede this story's pending ask (defensive: callers
+        # filter by story, but the identity term is compared anyway)
+        mine = self._gate("merge", "merge?", "t1")
+        theirs = self._gate("merge", "merge?", "t2", answered="t3",
+                            sid="STORY-902")
+        self.assertEqual(R.pending_gates([mine, theirs]), [mine])
+
+
 class OwnerLifecycleTests(unittest.TestCase):
     """R18-S2: the card's owner line delegates to
     controller.open_claim_owner over the STORY events — a repo-less

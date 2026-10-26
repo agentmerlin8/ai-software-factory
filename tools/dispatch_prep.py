@@ -155,18 +155,96 @@ def raw_contract(text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def _test_glob(entry: dict) -> tuple[str, ...]:
+def _pinned_type(root: Path, sha: str, path: str) -> str | None:
+    """`git cat-file -t <sha>:<path>` -> 'tree' | 'blob' | None when the
+    path is absent at the pinned sha (AN1, round 39)."""
+    r = subprocess.run(["git", "-C", str(root), "cat-file", "-t",
+                        f"{sha}:{path}"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _test_glob(entry: dict, root: Path, sha: str) -> tuple[str, ...]:
     """Grep glob for one contract test entry: the declared `project`
     directory when present (any path shape — structural normalization,
-    no project-file extension rules), else the whole tree."""
+    no project-file extension rules), else the whole tree.
+
+    Tree-vs-file is decided at the PINNED SHA (`git cat-file -t`), never
+    by the dotted-suffix heuristic (AN1, round 39): a project DIRECTORY
+    whose name carries a suffix (`tests/unit.v1`) stays itself —
+    reducing it to `tests/` would report a sibling project's tests
+    (`tests/unit.v2`) as EXISTS for the WRONG project and pull the
+    sibling file into the allowed reads. Only an actual FILE reduces to
+    its parent directory. A path absent at the sha is treated as a
+    directory (nothing to reduce; the grep simply finds no hits)."""
     proj = entry.get("project") or ""
     if not isinstance(proj, str) or not proj.strip():
         return ()
-    g = proj
-    if Path(g).suffix:  # a declared project FILE — use its directory
-        g = str(Path(g).parent)
-    g = g.removeprefix("./").rstrip("/")
+    g = proj.removeprefix("./").rstrip("/")
+    if g and _pinned_type(root, sha, g) == "blob":
+        g = str(Path(g).parent).removeprefix("./").rstrip("/")  # project FILE
     return (g + "/",) if g else ()
+
+
+def _member_decl_lines(src: list[str], owner: str, member: str) -> list[int]:
+    """1-based line numbers where `member` is DECLARED inside the
+    indentation block of an `owner` declaration (AN2/AN3, round 39).
+    BOTH identifiers must appear in a declaration shape (a
+    `DECL_KEYWORDS` keyword followed by the name) — a bare reference
+    (call site, comment, string mention) never counts. Definition-only
+    evidence; deliberately NO signature enforcement (an EXTEND seam
+    legitimately changes shape)."""
+    owner_re = re.compile(rf"\b{DECL_KEYWORDS}\s+{re.escape(owner)}\b")
+    member_re = re.compile(rf"\b{DECL_KEYWORDS}\s+{re.escape(member)}\b")
+    found: list[int] = []
+    i, n = 0, len(src)
+    while i < n:
+        line = src[i]
+        if owner_re.search(line):
+            oind = len(line) - len(line.lstrip())
+            j = i + 1
+            while j < n:
+                body = src[j]
+                if body.strip():
+                    if len(body) - len(body.lstrip()) <= oind:
+                        break  # dedent — left the owner's block
+                    if member_re.search(body):
+                        found.append(j + 1)
+                j += 1
+            i = j
+        else:
+            i += 1
+    return found
+
+
+def _qualified_test_locs(root: Path, name: str, sha: str,
+                         globs: tuple[str, ...]) -> list[str]:
+    """Resolve a qualified test name `Owner.member` WITHIN its declared
+    owner (AN2, round 39): locate the owner declaration at the pinned
+    sha, then the member declaration inside the owner's block. Evidence
+    is the MEMBER definition line only (definition-only, same standard
+    as the unqualified grep) — the old whole-name declaration pattern
+    reported an existing `ParserTests.test_x` as MISSING because no
+    declaration keyword ever precedes the DOTTED form. A same-named
+    member of a DIFFERENT class is not evidence."""
+    owner, member = name.rsplit(".", 1)
+    locs: list[str] = []
+    ohits = grep_tree(root, rf"\b{DECL_KEYWORDS}\s+{re.escape(owner)}\b",
+                      sha, globs)
+    seen: set[str] = set()
+    for h in ohits:
+        parts = h.split(":", 3)  # sha:path:line:content
+        if len(parts) < 3 or parts[1] in seen:
+            continue
+        seen.add(parts[1])
+        try:
+            src = git(root, "show", f"{sha}:{parts[1]}").splitlines()
+        except RuntimeError:
+            continue
+        for ln in _member_decl_lines(src, owner, member):
+            locs.append(f"{parts[1]}:{ln}")
+            if len(locs) >= 3:
+                return locs
+    return locs
 
 
 def test_inventory(root: Path, contract: dict, sha: str) -> list[dict]:
@@ -180,13 +258,19 @@ def test_inventory(root: Path, contract: dict, sha: str) -> list[dict]:
     for t in contract.get("tests") or []:
         name = t.get("name") or ""
         proj = t.get("project") or ""
-        pattern = rf"\b{DECL_KEYWORDS}\s+{re.escape(name)}\b"
-        hits = grep_tree(root, pattern, sha, _test_glob(t))
-        locs = []
-        for h in hits[:3]:
-            parts = h.split(":", 3)  # sha:path:line:content
-            if len(parts) >= 3:
-                locs.append(f"{parts[1]}:{parts[2]}")
+        globs = _test_glob(t, root, sha)
+        if "." in name:
+            # qualified `Owner.member`: resolve the member WITHIN its
+            # owner's declaration block (AN2, round 39)
+            locs = _qualified_test_locs(root, name, sha, globs)
+        else:
+            pattern = rf"\b{DECL_KEYWORDS}\s+{re.escape(name)}\b"
+            hits = grep_tree(root, pattern, sha, globs)
+            locs = []
+            for h in hits[:3]:
+                parts = h.split(":", 3)  # sha:path:line:content
+                if len(parts) >= 3:
+                    locs.append(f"{parts[1]}:{parts[2]}")
         status = "EXISTS" if locs else "MISSING"
         # a MISSING name the contract declares via a CREATE test file is
         # expected — the coder creates it (TDD). Action column says so.
@@ -216,8 +300,10 @@ def seam_verify(root: Path, contract: dict, sha: str,
         part of the symbol must not already resolve tree-wide at <sha>,
         otherwise WARN with the collision locations.
       EXTEND: file must exist at <sha> (FAIL otherwise); the symbol must
-        resolve IN that file — member-level grep when the symbol
-        contains '.', declaration-level otherwise. There is deliberately
+        resolve IN that file — a QUALIFIED symbol `Owner.member`
+        requires an OWNER-MATCHED MEMBER DECLARATION (the member
+        declared inside the owner's declaration block; AN3 round 39),
+        declaration-level grep otherwise. There is deliberately
         NO signature equality check — an EXTEND seam legitimately changes
         shape; the frozen signature is the target, the base evidence is
         the starting point.
@@ -264,9 +350,35 @@ def seam_verify(root: Path, contract: dict, sha: str,
             rows.append(row)
             continue
         if "." in sym:
-            pattern = rf"\b{re.escape(sym.rsplit('.', 1)[-1])}\b"
-        else:
-            pattern = rf"\b{DECL_KEYWORDS}\s+{re.escape(sym)}\b"
+            # Qualified seam `Owner.member` (AN3, round 39): require an
+            # OWNER-MATCHED MEMBER DECLARATION — the member must be
+            # declared INSIDE the owner's block in this file. The old
+            # bare member grep accepted `MissingParser.parse_data` when
+            # only `Parser.parse_data` existed, and a call site or a
+            # comment carrying the member token also satisfied it.
+            # No signature enforcement (an EXTEND legitimately changes
+            # shape) — declaration presence only.
+            owner, member = sym.rsplit(".", 1)
+            try:
+                src = git(root, "show", f"{sha}:{f}").splitlines()
+            except RuntimeError:
+                src = []
+            member_lines = _member_decl_lines(src, owner, member)
+            if member_lines:
+                row["detail"] = f"declared signature: {sig}"
+                row["evidence"] = [
+                    _evidence_line(f"{sha}:{f}:{ln}:{src[ln - 1].strip()}")
+                    for ln in member_lines[:3]]
+            else:
+                row["status"] = "FAIL"
+                row["detail"] = (
+                    f"symbol `{sym}` does not resolve in `{f}`@{sha[:12]}"
+                    f" — no `{member}` DECLARATION inside an `{owner}` "
+                    "declaration (references/calls do not count); "
+                    "misnamed, wrong owner, or needs CREATE")
+            rows.append(row)
+            continue
+        pattern = rf"\b{DECL_KEYWORDS}\s+{re.escape(sym)}\b"
         hits = _grep_file(root, pattern, sha, f)
         if not hits:
             row["status"] = "FAIL"

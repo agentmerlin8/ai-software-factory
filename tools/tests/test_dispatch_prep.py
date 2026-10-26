@@ -489,5 +489,212 @@ class DestConfinementTests(unittest.TestCase):
         self.assertTrue(out.exists())
 
 
+def _commit(root: Path, msg: str) -> str:
+    _git(root, "add", "-A")
+    _git(root, "-c", "user.name=test", "-c", "user.email=test@example.test",
+         "commit", "-q", "-m", msg)
+    return _git(root, "rev-parse", "HEAD")
+
+
+PLAN_DOTTED = """\
+# Impl plan — STORY-101 (dotted project directory)
+
+```contract.yaml
+contract_version: 1
+files:
+  - path: src/app/widget.py
+    op: CREATE
+tests:
+  - ac: AC-1
+    name: test_only_in_v2
+    project: tests/unit.v1
+    asserts: "sibling project test is never evidence"
+```
+"""
+
+
+class DottedProjectDirTests(unittest.TestCase):
+    """AN1 (round 39): a project DIRECTORY with a dotted name
+    (`tests/unit.v1`) is NOT a file — tree-vs-file is decided at the
+    PINNED sha (`git cat-file -t`), never by the suffix heuristic, so
+    the glob is never reduced to `tests/` (which would report the
+    sibling project's tests as EXISTS for the wrong project and pull
+    the sibling into the allowed reads)."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root, _ = make_repo(self._td.name)
+        (self.root / "tests" / "unit.v1").mkdir()
+        (self.root / "tests" / "unit.v1" / "test_a.py").write_text(
+            "def test_only_in_v1():\n    pass\n", encoding="utf-8")
+        (self.root / "tests" / "unit.v2").mkdir()
+        (self.root / "tests" / "unit.v2" / "test_b.py").write_text(
+            "def test_only_in_v2():\n    pass\n", encoding="utf-8")
+        self.sha = _commit(self.root, "dotted project dirs")
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_dotted_dir_glob_is_not_reduced(self):
+        self.assertEqual(
+            P._test_glob({"project": "tests/unit.v1"}, self.root, self.sha),
+            ("tests/unit.v1/",))
+
+    def test_sibling_test_is_not_evidence_wrong_project(self):
+        # test_only_in_v2 lives ONLY in the sibling tests/unit.v2 —
+        # declaring project tests/unit.v1 must report MISSING (the old
+        # tests/ glob reported EXISTS at tests/unit.v2/test_b.py).
+        contract = {"files": [], "tests": [
+            {"ac": "AC-1", "name": "test_only_in_v2",
+             "project": "tests/unit.v1"}]}
+        inv = P.test_inventory(self.root, contract, self.sha)
+        self.assertEqual(inv[0]["status"], "MISSING")
+        self.assertEqual(inv[0]["at"], [])
+
+    def test_right_scoped_exists_for_own_project(self):
+        contract = {"files": [], "tests": [
+            {"ac": "AC-1", "name": "test_only_in_v1",
+             "project": "tests/unit.v1"}]}
+        inv = P.test_inventory(self.root, contract, self.sha)
+        self.assertEqual(inv[0]["status"], "EXISTS")
+        self.assertTrue(inv[0]["at"][0].startswith(
+            "tests/unit.v1/test_a.py:"))
+
+    def test_sibling_never_enters_allowed_reads(self):
+        (self.root / "stories" / STORY / "impl-plan.md").write_text(
+            PLAN_DOTTED, encoding="utf-8")
+        self.sha = _commit(self.root, "dotted plan")
+        out = Path(self._td.name) / "prep.md"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = P.main([STORY, "--root", str(self.root), "--sha", self.sha,
+                         "--out", str(out)])
+        self.assertEqual(rc, 0)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("| AC-1 | `test_only_in_v2` | `tests/unit.v1` | "
+                      "MISSING | CREATE |", text)
+        gate = text.split("## 5. Hard read gate")[1]
+        self.assertNotIn("tests/unit.v2", gate)
+        self.assertIn("- `src/app/widget.py`", gate)
+
+    def test_genuine_project_file_still_reduces(self):
+        (self.root / "proj").mkdir()
+        (self.root / "proj" / "tests.proj").write_text(
+            "a real project FILE\n", encoding="utf-8")
+        sha = _commit(self.root, "project file")
+        self.assertEqual(
+            P._test_glob({"project": "proj/tests.proj"}, self.root, sha),
+            ("proj/",))
+        # plain directory project unchanged
+        self.assertEqual(
+            P._test_glob({"project": "tests"}, self.root, sha), ("tests/",))
+        # path absent at the sha: treated as a directory (nothing to
+        # reduce) — the grep then simply finds no hits
+        self.assertEqual(
+            P._test_glob({"project": "tests/unit.v9"}, self.root, sha),
+            ("tests/unit.v9/",))
+
+
+class QualifiedTestNameTests(unittest.TestCase):
+    """AN2 (round 39): a qualified Python test name `Owner.member`
+    resolves the MEMBER within its declared owner (definition-only
+    evidence) — the old whole-name pattern reported an existing
+    `ParserTests.test_rejects_malformed_input` as MISSING because no
+    declaration keyword ever precedes the DOTTED form."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root, self.sha = make_repo(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _inv(self, name: str, project: str = "tests") -> dict:
+        contract = {"files": [], "tests": [
+            {"ac": "AC-1", "name": name, "project": project}]}
+        inv = P.test_inventory(self.root, contract, self.sha)
+        self.assertEqual(len(inv), 1)
+        return inv[0]
+
+    def test_qualified_member_in_owner_exists(self):
+        row = self._inv("ParserTests.test_rejects_malformed_input")
+        self.assertEqual(row["status"], "EXISTS")
+        self.assertTrue(row["at"][0].startswith("tests/test_parser.py:"))
+
+    def test_qualified_member_wrong_owner_missing(self):
+        row = self._inv("OtherTests.test_rejects_malformed_input")
+        self.assertEqual(row["status"], "MISSING")
+
+    def test_reference_only_is_not_evidence(self):
+        (self.root / "tests" / "mentions.py").write_text(
+            "class Refs:\n    pass\n\n\nx = Refs.test_rejects_malformed_input"
+            "  # reference only\n", encoding="utf-8")
+        self.sha = _commit(self.root, "reference only")
+        row = self._inv("Refs.test_rejects_malformed_input")
+        self.assertEqual(row["status"], "MISSING")
+
+    def test_unqualified_name_behavior_unchanged(self):
+        self.assertEqual(
+            self._inv("test_rejects_malformed_input")["status"], "EXISTS")
+        self.assertEqual(
+            self._inv("test_round_trip_preserves_order")["status"], "MISSING")
+
+
+class OwnerMatchedExtendSeamTests(unittest.TestCase):
+    """AN3 (round 39): a qualified EXTEND seam requires an OWNER-MATCHED
+    MEMBER DECLARATION — the old bare member grep accepted
+    `MissingParser.parse_data` when only `Parser.parse_data` existed,
+    and a call site or comment carrying the member token also
+    satisfied it."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root, self.sha = make_repo(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _seam(self, symbol: str, sig: str = "def x()",
+              f: str = "src/app/parser.py") -> dict:
+        contract = {"files": [], "seams": [
+            {"symbol": symbol, "signature": sig, "file": f}]}
+        rows = P.seam_verify(self.root, contract, self.sha)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["op"], "EXTEND")
+        return rows[0]
+
+    def test_wrong_owner_rejected(self):
+        # parse_data IS declared — but in `Parser`, not `MissingParser`
+        row = self._seam("MissingParser.parse_data")
+        self.assertEqual(row["status"], "FAIL")
+        self.assertIn("does not resolve", row["detail"])
+        self.assertIn("MissingParser", row["detail"])
+        self.assertEqual(row["evidence"], [])
+
+    def test_reference_only_rejected(self):
+        # `load()` calls parser.parse_data(...) — a call site with the
+        # member token is not a declaration inside `load`
+        row = self._seam("load.parse_data")
+        self.assertEqual(row["status"], "FAIL")
+        self.assertIn("references/calls do not count", row["detail"])
+
+    def test_exact_owner_member_declaration_accepted(self):
+        row = self._seam("Parser.parse_data",
+                         sig="parse_data(self, raw) -> dict")
+        self.assertEqual(row["status"], "OK")
+        self.assertEqual(row["detail"],
+                         "declared signature: parse_data(self, raw) -> dict")
+        self.assertTrue(row["evidence"])
+        self.assertRegex(row["evidence"][0],
+                         r"^src/app/parser\.py:\d+ — ")
+        self.assertIn("def parse_data", row["evidence"][0])
+
+    def test_unqualified_seam_unchanged(self):
+        row = self._seam("Parser")
+        self.assertEqual(row["status"], "OK")
+        row = self._seam("NoSuchType")
+        self.assertEqual(row["status"], "FAIL")
+        self.assertIn("does not resolve", row["detail"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

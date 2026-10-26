@@ -25,8 +25,10 @@ Behaviors:
   no same-author pin yet → POST. `--dry-run` prints the exact payload and
   performs no API call.
 * Unanswered human_gate rows superseded by a later answered row for the
-  same gate are NOT pending — the ledger is append-only, so resolution is
-  a new row, never an edit.
+  same request identity — (story_id, gate, question), identical to
+  render_state/render_dashboard — are NOT pending; the ledger is
+  append-only, so resolution is a new row, never an edit. A distinct
+  question on the same gate stays pending.
 * Unknown story ids (no ledger events, no story file, no intake mention)
   render an explanatory refusal card and are NEVER pinned.
 * Next-move hints use the installed CLI form:
@@ -180,12 +182,22 @@ def next_moves(sid: str, state: str, blocked_from: str | None,
 
 def pending_gates(gates: list[dict]) -> list[dict]:
     """Truly-pending human_gate rows: unanswered and not superseded by a
-    later answered row for the same gate (append-only semantics)."""
+    later answered row for the SAME REQUEST IDENTITY (append-only
+    semantics). Round 39 AN4: identity is the documented combination
+    (story_id, gate, question) — IDENTICAL to render_state.py and
+    render_dashboard.py. An answer to scope question A supersedes only
+    A's ask; a distinct question B on the same story+gate stays
+    PENDING. Callers pass one story's gate rows, so the story_id term is
+    a constant here, but it is compared anyway to keep the three
+    renderers byte-for-byte the same rule."""
     pending: list[dict] = []
     for i, g in enumerate(gates):
         if g.get("answered_at"):
             continue
-        superseded = any(s.get("answered_at") and s.get("gate") == g.get("gate")
+        superseded = any(s.get("answered_at")
+                         and s.get("story_id") == g.get("story_id")
+                         and s.get("gate") == g.get("gate")
+                         and s.get("question") == g.get("question")
                          for s in gates[i + 1:])
         if not superseded:
             pending.append(g)

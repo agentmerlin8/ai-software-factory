@@ -453,5 +453,113 @@ class DeterminismTests(TempStoryMixin):
         self.assertIn("generated 2026-10-25T00:00:00Z", a)
 
 
+class WithheldArtifactsInRepoTests(unittest.TestCase):
+    """Round 38 AM1 (HIGH): the control home sits INSIDE the reviewed Git
+    tree — a committed impl-plan.md change must stay out of EVERY supplied
+    behavior-review input (diff, manifest, digest, fallback diff
+    instructions), per the package's allowed/withheld boundary. The old
+    fixture kept the plan outside the reviewed tree, so it could not see
+    the leak."""
+
+    sid = "STORY-101"
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root = Path(self._td.name) / "control-repo"  # == the repo
+        (self.root / "stories" / self.sid).mkdir(parents=True)
+        _git(self.root, "init", "-q", "-b", "main")
+        (self.root / "seed.txt").write_text("seed\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "-c", "user.name=test",
+             "-c", "user.email=test@example.test",
+             "commit", "-q", "-m", "base")
+        # plan committed INSIDE the reviewed tree + an allowed code change
+        # (on a work branch so main..target is a real diff range)
+        _git(self.root, "checkout", "-q", "-b", "work")
+        plan = self.root / "stories" / self.sid / "impl-plan.md"
+        plan.write_text("# plan\n\nSECRET-PLAN-PROSE in-repo leak.\n",
+                        encoding="utf-8")
+        (self.root / "src").mkdir()
+        (self.root / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "-c", "user.name=test",
+             "-c", "user.email=test@example.test",
+             "commit", "-q", "-m", "work + plan")
+        self.target = _git(self.root, "rev-parse", "HEAD")
+        L.append_event(
+            self.root / "factory" / "ledger" / "events.jsonl",
+            norm({"event": "transition", "story_id": self.sid,
+                  "recorded_at": TS, "provenance": "live",
+                  "from_state": "CODING", "to_state": "BUILD_GREEN",
+                  "requested_by": "orchestrator",
+                  "checks_run": ["commit_sha"],
+                  "check_results": {"evidence_supplied": {
+                      "ok": True, "detail": {
+                          "commit_sha": self.target}}},
+                  "repo": None, "repo_reason": "story-level transition"}))
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_manifest_excludes_committed_plan_change(self):
+        manifest = BH.build_review_context_manifest(
+            self.root, self.root, self.sid, "behavior_reviewer",
+            target_sha=self.target, base_ref="main")
+        paths = [f["path"] for f in manifest["files"]]
+        # allowed file still supplied; withheld plan excluded
+        self.assertEqual(paths, ["src/app.py"])
+        self.assertNotIn(f"stories/{self.sid}/impl-plan.md", paths)
+        self.assertEqual(manifest["withheld_paths"],
+                         ["stories/", "factory/ledger/"])
+        # the digest covers ONLY the filtered canonical patch
+        filtered = BH.git(self.root, "diff", "--binary", "--unified=0",
+                          manifest["base_sha"], self.target,
+                          ":(exclude)stories/", ":(exclude)factory/ledger/")
+        import hashlib
+        self.assertEqual(manifest["diff_sha256"],
+                         hashlib.sha256(filtered.encode()).hexdigest())
+
+    def test_package_supplied_inputs_carry_no_plan_content_or_path(self):
+        text = BH.build_behavior_reviewer(self.root, self.root, self.sid,
+                                          "50", base_ref="main")
+        self.assertNotIn("SECRET-PLAN-PROSE", text)
+        self.assertNotIn("impl-plan.md", text)
+        self.assertNotIn("stories/STORY-101", text)
+        self.assertNotIn("SECRET", text)
+        # allowed change IS supplied inline
+        self.assertIn("+x = 1", text)
+        # the supplied read command carries the withheld boundary
+        self.assertIn("':(exclude)stories/'", text)
+
+    def test_fallback_diff_instructions_exclude_withheld_paths(self):
+        manifest = BH.build_review_context_manifest(
+            self.root, self.root, self.sid, "behavior_reviewer",
+            target_sha=self.target, base_ref="main")
+        block = BH.inline_diff_block(self.root, manifest, cap_lines=0)
+        joined = "\n".join(block)
+        self.assertIn("TOO LARGE to inline", joined)
+        self.assertNotIn("impl-plan.md", joined)
+        self.assertIn(":(exclude)stories/", joined)
+        self.assertIn(":(exclude)factory/ledger/", joined)
+
+    def test_contract_reviewer_diff_flow_unchanged(self):
+        # contract review withholds NOTHING from its diff — the plan paths
+        # are explicitly supplied inputs (additional_supplied_paths)
+        manifest = BH.build_review_context_manifest(
+            self.root, self.root, self.sid, "contract_reviewer",
+            target_sha=self.target, base_ref="main")
+        paths = sorted(f["path"] for f in manifest["files"])
+        self.assertEqual(paths, ["src/app.py",
+                                 f"stories/{self.sid}/impl-plan.md"])
+        self.assertEqual(manifest["withheld_paths"], [])
+        self.assertEqual(manifest["additional_supplied_paths"], [
+            f"stories/{self.sid}/impl-plan.md",
+            f"stories/{self.sid}/test-plan.md"])
+        block = BH.inline_diff_block(self.root, manifest, cap_lines=0)
+        joined = "\n".join(block)
+        self.assertIn("impl-plan.md", joined)
+        self.assertNotIn(":(exclude)", joined)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

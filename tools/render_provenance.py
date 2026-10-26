@@ -74,11 +74,27 @@ def stories_in_ledger(events: list[dict]) -> list[str]:
     return seen
 
 
+def _orphan_story_component(dispatch_id: str) -> str | None:
+    """Story component of an orphan (dispatch-row-missing) usage id.
+
+    Round 38 AM4: a dispatch id is `<story>-<role>-<attempt>-<unix>` —
+    the FINAL THREE hyphen components are role/attempt/timestamp and the
+    REMAINDER is the story component, compared EXACTLY. A bare
+    `startswith(f"{sid}-")` prefix match attributed an id whose story
+    component is `<sid>-followup` to `<sid>`. Returns None when the id
+    has fewer than 4 components.
+    """
+    parts = dispatch_id.split("-")
+    if len(parts) < 4:
+        return None
+    return "-".join(parts[:-3])
+
+
 def usage_for_story(events: list[dict], sid: str) -> list[dict]:
     """usage rows carry dispatch_id, not story_id — join them to the story
-    through their dispatch row; fall back to the dispatch_id prefix
-    (<story>-<role>-<attempt>-<unix>) for usage rows whose dispatch row is
-    missing."""
+    through their dispatch row; fall back to the EXACT story component of
+    the dispatch_id (<story>-<role>-<attempt>-<unix>) for usage rows whose
+    dispatch row is missing."""
     dispatch_story = {e["event_id"]: e.get("story_id")
                       for e in events if e.get("event") == "dispatch"}
     out = []
@@ -89,8 +105,11 @@ def usage_for_story(events: list[dict], sid: str) -> list[dict]:
         if did is None:
             continue
         owner = dispatch_story.get(did)
-        if owner is None and isinstance(did, str) and did.startswith(f"{sid}-"):
-            owner = sid
+        if owner is None and isinstance(did, str):
+            # orphan recovery: EXACT story-component match only — a
+            # prefix match leaks ids like `<sid>-followup-…` into `sid`
+            if _orphan_story_component(did) == sid:
+                owner = sid
         if owner == sid:
             out.append(e)
     return out

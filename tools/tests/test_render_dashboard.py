@@ -1075,5 +1075,116 @@ class Round34LFNormalizationTests(unittest.TestCase):
         self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 0)
 
 
+class MergedThenBlockedTests(unittest.TestCase):
+    """Round 38 AM2: `Controller.blocked()` permits MERGED → BLOCKED;
+    without an outcome row the merged count used to flip 1→0 because
+    membership was derived from the CURRENT state. Membership is now
+    merged-delivery HISTORY: a story that ever reached MERGED (or
+    LIVE_PROVEN/CLOSED) stays a merged delivery."""
+
+    @staticmethod
+    def _trans(sid, frm, to, repo=None):
+        return {"event": "transition", "story_id": sid, "repo": repo,
+                "from_state": frm, "to_state": to,
+                "recorded_at": "2026-09-01T00:00:00Z",
+                "provenance": "live"}
+
+    def _merged_line(self, events) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render(events, Path(td), "H")
+        return next(l for l in text.splitlines()
+                    if l.startswith("| Merged (git-verified outcomes)"))
+
+    def test_merged_then_blocked_no_outcome_still_merged(self):
+        line = self._merged_line([
+            self._trans("S-1", "MERGE_ELIGIBLE", "MERGED"),
+            self._trans("S-1", "MERGED", "BLOCKED")])
+        self.assertIn("| 1 |", line)
+
+    def test_block_before_merge_not_merged(self):
+        line = self._merged_line([
+            self._trans("S-1", "CODING", "BLOCKED"),
+            self._trans("S-1", "BLOCKED", "CODING")])
+        self.assertIn("| 0 |", line)
+
+    def test_merged_with_outcome_unchanged(self):
+        line = self._merged_line([
+            self._trans("S-1", "MERGE_ELIGIBLE", "MERGED"),
+            {"event": "outcome", "story_id": "S-1",
+             "merged_sha": "deadbeef"}])
+        self.assertIn("| 1 |", line)
+
+    def test_outcome_only_still_merged(self):
+        # no transitions at all — the outcome arm is unchanged
+        line = self._merged_line([
+            {"event": "outcome", "story_id": "S-1", "merged_sha": "abc"}])
+        self.assertIn("| 1 |", line)
+
+    def test_per_repo_sub_event_does_not_set_history(self):
+        # per-repo sub-events never move story state (existing rule) —
+        # they must not fabricate merged history either
+        line = self._merged_line([
+            self._trans("S-1", "CODING", "MERGED", repo="backend")])
+        self.assertIn("| 0 |", line)
+
+    def test_blocked_state_cell_still_shows_blocked(self):
+        events = [self._trans("S-1", "MERGE_ELIGIBLE", "MERGED"),
+                  self._trans("S-1", "MERGED", "BLOCKED")]
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render(events, Path(td), "H")
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| S-1 |"))
+        self.assertIn("`BLOCKED`", row)
+
+
+class AggregateListEscapeTests(unittest.TestCase):
+    """Round 38 AM3: the correction-free / formal-loop-free /
+    uninstrumented aggregate cells joined raw story ids, bypassing
+    `_cell` — a pipe added a column, a newline split the row. Every
+    joined list is now `_cell`-escaped."""
+
+    @staticmethod
+    def _out_evt(sid, **extra) -> dict:
+        return {"event": "outcome", "story_id": sid, "merged_sha": "m1",
+                **extra}
+
+    def _metric_lines(self, events) -> dict[str, str]:
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render(events, Path(td), "H")
+        out = {}
+        for l in text.splitlines():
+            for key in ("| Correction-free deliveries",
+                        "| Formal-loop-free deliveries",
+                        "| Merged stories WITHOUT"):
+                if l.startswith(key):
+                    out[key] = l
+        return out
+
+    def test_pipe_and_newline_ids_escaped_in_every_list(self):
+        lines = self._metric_lines([
+            self._out_evt("EV|L\nID", totals={"plan_loops": 0,
+                                              "code_loops": 0}),
+            self._out_evt("P|PE")])
+        # correction-free + formal-loop-free carry the instrumented id
+        for key in ("| Correction-free deliveries",
+                    "| Formal-loop-free deliveries"):
+            line = lines[key]
+            self.assertIn("EV\\|L ID", line)
+            self.assertNotIn("EV|L\n", line)
+            # exactly the 2 declared columns: 3 unescaped pipes
+            self.assertEqual(line.replace("\\|", "").count("|"), 3)
+            self.assertNotIn("\n", line)
+        # uninstrumented list carries the pipe id
+        un = lines["| Merged stories WITHOUT"]
+        self.assertIn("P\\|PE", un)
+        self.assertEqual(un.replace("\\|", "").count("|"), 3)
+
+    def test_plain_ids_unchanged(self):
+        lines = self._metric_lines([self._out_evt("S-1")])
+        self.assertIn("S-1", lines["| Merged stories WITHOUT"])
+        for line in lines.values():
+            self.assertNotIn("\\|", line)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

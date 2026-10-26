@@ -134,6 +134,13 @@ def render(events: list[dict], root: Path, header: str,
         elif et == "transition":
             if not e.get("repo"):  # per-repo sub-events never move state
                 s["state"] = e["to_state"]
+                # Round 38 AM2: merged-delivery membership is HISTORY, not
+                # the current state — a story that ever reached MERGED
+                # stays a merged delivery even if a later transition moves
+                # it to BLOCKED (Controller.blocked permits MERGED →
+                # BLOCKED). The per-story state cell still shows BLOCKED.
+                if e.get("to_state") in ("MERGED", "LIVE_PROVEN", "CLOSED"):
+                    s["ever_merged"] = True
                 # R18-S2: a story-level CLOSED transition is an implicit
                 # release (controller.open_claim_owner treats it so) —
                 # the owner cell must clear even without a release row.
@@ -249,8 +256,14 @@ def render(events: list[dict], root: Path, header: str,
         folded = min(len(plan_fixed), len(plan_loops))
         return formal_loops(s) + len(other) + (len(plan_fixed) - folded)
 
+    # Round 38 AM2: membership = merged-delivery HISTORY — an outcome with
+    # merged_sha, the current state in the delivered set, OR any story-level
+    # transition that ever reached the delivered set. Without the history
+    # arm, a later BLOCKED transition (permitted by Controller.blocked)
+    # flipped the merged count 1→0 with no outcome row.
     merged = {sid: s for sid, s in stories.items()
               if s.get("outcome", {}).get("merged_sha")
+              or s.get("ever_merged")
               or (s.get("state") in ("MERGED", "LIVE_PROVEN", "CLOSED"))}
 
     # ---------- metrics (raw counts + breakdowns, never a pooled percentage)
@@ -263,15 +276,21 @@ def render(events: list[dict], root: Path, header: str,
     ff = [sid for sid, s in merged.items()
           if instrumented(s) and formal_loops(s) == 0]
     uninstr = sorted(sid for sid, s in merged.items() if not instrumented(s))
+    # Round 38 AM3: story ids are free-form ledger data — every joined
+    # list cell goes through `_cell` so a pipe/newline in an id cannot
+    # add a column or split a row (same rule as the per-story cells).
     out.append(f"| Correction-free deliveries (0 correction rounds of any "
                f"source/class; instrumented stories only — unavailable ≠ 0) "
-               f"| {len(cf)} — {', '.join(sorted(cf)) or 'none'} |")
+               f"| {len(cf)} — "
+               f"{', '.join(_cell(s) for s in sorted(cf)) or 'none'} |")
     out.append(f"| Formal-loop-free deliveries (0 plan/code loops; external "
                f"rounds counted separately; instrumented stories only) | "
-               f"{len(ff)} — {', '.join(sorted(ff)) or 'none'} |")
+               f"{len(ff)} — "
+               f"{', '.join(_cell(s) for s in sorted(ff)) or 'none'} |")
     out.append(f"| Merged stories WITHOUT loop/finding instrumentation "
                f"(excluded from both measures above, never counted as zero) "
-               f"| {len(uninstr)} — {', '.join(uninstr) or 'none'} |")
+               f"| {len(uninstr)} — "
+               f"{', '.join(_cell(s) for s in uninstr) or 'none'} |")
     plan_sum = sum(loop_breakdown(s)[0] for s in merged.values())
     code_sum = sum(loop_breakdown(s)[1] for s in merged.values())
     out.append(f"| Formal loops recorded | "

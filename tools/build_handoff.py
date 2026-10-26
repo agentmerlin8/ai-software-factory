@@ -75,6 +75,29 @@ BUILD_ROLES = ("coder", "behavior_reviewer", "contract_reviewer")
 REVIEW_ROLES = ("behavior_reviewer", "contract_reviewer")
 DELIVERY_SURFACE = "dispatch-package"
 
+# Round 38 AM1: WITHHELD artifacts must stay out of EVERY supplied review
+# input (diff, manifest, digest, fallback diff instructions) — not just out
+# of the package prose. The behavior reviewer's withheld list names the
+# plan, prior verdicts, coder justifications, and contract reviewer's
+# notes; story artifacts live under `stories/` and verdict/finding rows in
+# the ledger, so when the control home sits INSIDE the reviewed tree both
+# are excluded from the supplied diff context via git pathspecs. Contract
+# review withholds nothing from its diff (its plan paths are EXPLICITLY
+# supplied inputs, listed in additional_supplied_paths).
+WITHHELD_DIFF_PATHS = {
+    "behavior_reviewer": ("stories/", "factory/ledger/"),
+}
+
+
+def withheld_paths(role: str) -> tuple[str, ...]:
+    """Repo paths withheld from the supplied diff inputs for `role`."""
+    return WITHHELD_DIFF_PATHS.get(RC.canonical_role(role), ())
+
+
+def withheld_pathspecs(role: str) -> list[str]:
+    """Git exclude pathspecs for `role`'s withheld diff paths."""
+    return [f":(exclude){p}" for p in withheld_paths(role)]
+
 RESUME_PREAMBLE = """\
 ## Resume protocol (DEFAULT preamble)
 
@@ -304,6 +327,9 @@ def build_review_context_manifest(root: Path, repo: Path, story_id: str,
         "diff_sha256": None,
         "files": [],
         "additional_supplied_paths": [],
+        # Round 38 AM1: the withheld boundary is explicit in the manifest —
+        # paths excluded from every supplied input for this role.
+        "withheld_paths": list(withheld_paths(role)),
     }
     if role == "contract_reviewer":
         manifest["additional_supplied_paths"] = [
@@ -318,9 +344,14 @@ def build_review_context_manifest(root: Path, repo: Path, story_id: str,
         base_sha = git(repo, "merge-base", base_ref, target)
         manifest["reviewed_sha"] = target
         manifest["base_sha"] = base_sha
-        statuses = git(repo, "diff", "--name-status", base_sha, target)
+        # Round 38 AM1: withheld artifacts are filtered OUT of every
+        # supplied input — the name-status list, the canonical patch text,
+        # and therefore the diff_sha256 digest — via git exclude pathspecs.
+        specs = withheld_pathspecs(role)
+        statuses = git(repo, "diff", "--name-status", base_sha, target,
+                       *specs)
         patch_text = git(repo, "diff", "--binary", "--unified=0",
-                         base_sha, target)
+                         base_sha, target, *specs)
         manifest["diff_sha256"] = \
             hashlib.sha256(patch_text.encode()).hexdigest()
     except subprocess.CalledProcessError as exc:
@@ -372,22 +403,31 @@ def inline_diff_block(repo: Path, manifest: dict,
     base, target = manifest.get("base_sha"), manifest.get("reviewed_sha")
     if not base or not target or str(target).startswith("<"):
         return []
+    # Round 38 AM1: the inlined/fallback diff honors the same withheld
+    # boundary as the manifest — exclude pathspecs on the unified=3 patch,
+    # the --stat fallback, AND the exact read command handed to the
+    # reviewer, so a withheld artifact cannot be re-fetched by following
+    # the supplied instruction.
+    role = manifest.get("review_role", "")
+    specs = withheld_pathspecs(role) if role else []
+    spec_args = f" {' '.join(repr(s) for s in specs)}" if specs else ""
     try:
-        patch = git(repo, "diff", "--unified=3", base, target)
+        patch = git(repo, "diff", "--unified=3", base, target, *specs)
     except subprocess.CalledProcessError:
         return []
     lines = patch.splitlines()
     if len(lines) > cap_lines:
-        stat = git(repo, "diff", "--stat", base, target)
+        stat = git(repo, "diff", "--stat", base, target, *specs)
         return ["## Branch diff (TOO LARGE to inline — "
                 f"{len(lines):,} lines > {cap_lines} cap)", "",
                 "```", stat, "```", "",
-                f"Read it with: `git diff {base[:12]} {target[:12]}` "
+                f"Read it with: `git diff {base[:12]} {target[:12]}"
+                f"{spec_args}` "
                 "(paged reads, only the files your findings touch).", ""]
     return ["## Branch diff (INLINED — do not re-run git diff for this "
             "range)",
-            "", f"`git diff {base[:12]} {target[:12]}` — {len(lines):,} "
-            "lines:",
+            "", f"`git diff {base[:12]} {target[:12]}{spec_args}` — "
+            f"{len(lines):,} lines:",
             "", "```diff", patch.rstrip(), "```", ""]
 
 
@@ -511,7 +551,8 @@ def build_behavior_reviewer(root: Path, repo: Path, story_id: str,
     out.append(BEHAVIOR_REVIEWER_RULES)
     out += ["## Review target", "",
             f"- exact reviewed SHA: `{reviewed}`",
-            f"- immutable diff: `git diff {base_sha} {reviewed} --` — "
+            f"- immutable diff: `git diff {base_sha} {reviewed} "
+            f"{' '.join(repr(s) for s in withheld_pathspecs('behavior_reviewer'))} --` — "
             "INLINED below; do not re-run git for this range. Use git only "
             "for adjacent context; if you must build, use a scratch "
             "worktree — never the shared tree",

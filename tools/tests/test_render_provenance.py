@@ -629,6 +629,64 @@ class RenderProvenanceTests(unittest.TestCase):
                          "--ledger", str(ledger)]), 1)
 
 
+class OrphanUsageStoryComponentTests(unittest.TestCase):
+    """Round 38 AM4: orphan-usage recovery (dispatch row missing) used a
+    bare `startswith(f"{sid}-")` prefix match — `STORY-201-followup-
+    coder-1-1789000000` (story component `STORY-201-followup`) was
+    attributed to `STORY-201`, corrupting its token totals. Recovery now
+    splits off the final role/attempt/timestamp components and compares
+    the REMAINING story component EXACTLY."""
+
+    CANON = "STORY-201-coder-1-1789000000"
+    FOLLOWUP = "STORY-201-followup-coder-1-1789000000"
+
+    def setUp(self):
+        self.events = [
+            {"event": "usage", "dispatch_id": self.CANON,
+             "input_tokens": 10},
+            {"event": "usage", "dispatch_id": self.FOLLOWUP,
+             "input_tokens": 99},
+            {"event": "usage", "dispatch_id": "too-short",
+             "input_tokens": 5},
+        ]
+
+    def test_followup_not_attributed_to_prefix_story(self):
+        got = RP.usage_for_story(self.events, "STORY-201")
+        self.assertEqual([u["dispatch_id"] for u in got], [self.CANON])
+
+    def test_followup_attributed_to_its_own_story(self):
+        # chosen behavior: the orphan IS recoverable for its own story
+        # (exact component match), just never for a shorter prefix
+        got = RP.usage_for_story(self.events, "STORY-201-followup")
+        self.assertEqual([u["dispatch_id"] for u in got], [self.FOLLOWUP])
+
+    def test_short_id_never_recovers(self):
+        # fewer than 4 components → no story component, no attribution
+        self.assertEqual(RP._orphan_story_component("too-short"), None)
+        self.assertEqual(RP.usage_for_story(self.events, "too"), [])
+
+    def test_canonical_recovery_unchanged(self):
+        self.assertEqual(
+            RP._orphan_story_component(self.CANON), "STORY-201")
+        got = RP.usage_for_story(
+            [{"event": "usage", "dispatch_id": self.CANON,
+              "input_tokens": 10}], "STORY-201")
+        self.assertEqual(len(got), 1)
+
+    def test_dispatch_row_join_still_wins(self):
+        # a dispatch row present → its story_id governs, exact match
+        # irrelevant (join path, not recovery)
+        events = self.events + [
+            {"event": "dispatch", "event_id": self.FOLLOWUP,
+             "story_id": "STORY-202", "role": "coder"}]
+        self.assertEqual(
+            [u["dispatch_id"]
+             for u in RP.usage_for_story(events, "STORY-202")],
+            [self.FOLLOWUP])
+        self.assertEqual(RP.usage_for_story(events, "STORY-201-followup"),
+                         [])
+
+
 class SymlinkConfinementTests(unittest.TestCase):
     """Round 28 AC1 sibling: render_provenance had the identical
     canonical-ID-only pattern — `stories/<sid>` as a SYMLINK outward let

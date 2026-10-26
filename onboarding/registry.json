@@ -1,0 +1,367 @@
+{
+  "registry_version": 1,
+  "labels": [
+    {"name": "factory:planning", "color": "1d76db", "description": "factory pipeline stage"},
+    {"name": "factory:plan-review", "color": "5319e7", "description": "factory pipeline stage"},
+    {"name": "factory:implementation", "color": "0e8a16", "description": "factory pipeline stage"},
+    {"name": "factory:code-review", "color": "fbca04", "description": "factory pipeline stage"},
+    {"name": "factory:testing", "color": "d93f0b", "description": "factory pipeline stage"},
+    {"name": "factory:done", "color": "cccccc", "description": "factory pipeline stage"},
+    {"name": "factory:blocked", "color": "b60205", "description": "factory pipeline stage"},
+    {"name": "needs-human", "color": "ff69b4", "description": "factory pipeline stage"},
+    {"name": "factory", "color": "0E8A16", "description": "board auto-add gate"},
+    {"name": "idea", "color": "D4C5F9", "description": "idea intake — refined into a context bundle before stories"}
+  ],
+  "labels_conditional": [
+    {"name": "factory:run", "when": "surface phase"},
+    {"name": "factory:ready", "when": "surface phase"},
+    {"name": "lane:<name>", "when": "lane projects declared (one per lane)"}
+  ],
+  "issue_form": "idea.yml",
+  "checks": [
+    {
+      "id": "C-1",
+      "category": "CORE",
+      "title": "git repository with a GitHub remote",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local+forge", "name": "origin remote + repo_view(primary binding)"},
+      "remedy": "connect/add the GitHub remote: git remote add origin <host>/<owner>/<name>",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-2",
+      "category": "CORE",
+      "title": "gh CLI authenticated with required scopes",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "forge", "name": "auth_scopes"},
+      "remedy": "gh auth refresh -s <missing-scope> (repo, project, read:org)",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-3",
+      "category": "CORE",
+      "title": "default branch protected by an active ruleset, bypass = the factory bot only",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "forge", "name": "ruleset(primary binding, default_branch)"},
+      "remedy": "create an active branch ruleset (PR + approval + required checks) with the factory bot App as the only bypass actor",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-4",
+      "category": "CORE",
+      "title": "lifecycle labels created",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "forge", "name": "labels(primary binding, registry labels)"},
+      "remedy": "create the missing labels (onboard apply-labels upserts the registry set)",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-5",
+      "category": "CORE",
+      "title": "idea front door: issue form + idea label",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local+forge", "name": ".github/ISSUE_TEMPLATE/idea.yml + labels probe"},
+      "remedy": "add .github/ISSUE_TEMPLATE/idea.yml and ensure the idea label exists",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-6",
+      "category": "CORE",
+      "title": "Projects v2 board linked with the Stage field",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "forge", "name": "project_fields(board.project_id)"},
+      "remedy": "create/link the Projects v2 board and add a Stage single-select field with the pipeline states as options",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-7",
+      "category": "CORE",
+      "title": "kit installed under factory/ (v0.1-S3 surface)",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local+kit", "name": "presence set + installed config_validator run"},
+      "remedy": "install the kit surface under factory/ (tools, gates, templates, locks, ledger seed) and re-run verify",
+      "attest_allowed": false,
+      "deferred_to_s4": ["factory/runbook.md", "factory/process/", "factory/agents/", "factory/adapters/"]
+    },
+    {
+      "id": "C-8",
+      "category": "CORE",
+      "title": "ledger seeded + renders pass",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "kit", "name": "ledger_lib.validate_ledger + kit renderers generate + --check"},
+      "remedy": "seed factory/ledger/events.jsonl (empty is valid) and let verify regenerate the renders",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-9",
+      "category": "CORE",
+      "title": "toolchain present: python3 >= 3.11, git, gh",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local", "name": "interpreter version + git --version + gh --version"},
+      "remedy": "install the missing toolchain component (python3 >= 3.11, git, gh)",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-10",
+      "category": "CORE",
+      "title": "config present and parsed: workspace.toml + environments",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "kit", "name": "config_validator (workspace + environments + pin resolution against the kit root)"},
+      "remedy": "fix the validator findings in workspace.toml / environments/*.toml and re-run verify",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-11",
+      "category": "CORE",
+      "title": "KICKOFF.md present + PREFLIGHT.md written by this run",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local", "name": "factory/KICKOFF.md + this run's PREFLIGHT.md regeneration"},
+      "remedy": "create factory/KICKOFF.md from the kit cold-start template; PREFLIGHT.md is regenerated by every verify",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-12",
+      "category": "CORE",
+      "title": "secrets posture documented",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local", "name": "factory/SECRETS.md + .gitignore secret-ish patterns"},
+      "remedy": "run apply / document where credentials live and ignore secret-ish paths in .gitignore",
+      "attest_allowed": false
+    },
+    {
+      "id": "C-13",
+      "category": "CORE",
+      "title": "test environment runnable (attest)",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest C-13 --by <you> --note \"<command|manual>\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "C-14",
+      "category": "CORE",
+      "title": "working agreement recorded",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local", "name": "factory/KICKOFF.md + factory/locks/OVERRIDE.example"},
+      "remedy": "record the human touchpoints in factory/KICKOFF.md and ship factory/locks/OVERRIDE.example",
+      "attest_allowed": false,
+      "deferred_to_s4": ["full working-agreement text (lands with factory/runbook.md)"]
+    },
+    {
+      "id": "REGISTRY",
+      "category": "CORE",
+      "title": "registry + kit version recorded, no drift",
+      "required": true,
+      "applies": "always",
+      "verify": {"kind": "local", "name": "factory/onboarding-registry.json vs kit registry + kit sha"},
+      "remedy": "re-record factory/onboarding-registry.json from the installed kit (registry_version + kit_version + declarations)",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-1",
+      "category": "WORKSPACE",
+      "title": "dedicated workspace repo",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "local", "name": "control_home=dedicated + git rev-parse --show-toplevel == home"},
+      "remedy": "create the dedicated workspace repo (git init at the control home root) and push it to the forge",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-2",
+      "category": "WORKSPACE",
+      "title": "workspace.toml valid + factory pin resolves",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "kit", "name": "config_validator (workspace + pin resolution against the kit root)"},
+      "remedy": "fix the workspace.toml validator findings; a concrete pin must resolve in the kit repo",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-3",
+      "category": "WORKSPACE",
+      "title": "environments valid; credential refs present",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "kit+local", "name": "config_validator per environment + env:/file: ref presence (values never read)"},
+      "remedy": "fix the environment validator findings and make every credential ref resolvable (env var set / file present)",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-4",
+      "category": "WORKSPACE",
+      "title": "bound target repos reachable",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "forge", "name": "repo_view per repos[] binding"},
+      "remedy": "check the binding url + token scopes; the bound repo must be reachable with the current auth",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-5",
+      "category": "WORKSPACE",
+      "title": "ledger seeded at the control home + renders pass",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "kit", "name": "ledger_lib.validate_ledger + kit renderers generate + --check"},
+      "remedy": "seed factory/ledger/events.jsonl at the control home and let verify regenerate the renders",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-6",
+      "category": "WORKSPACE",
+      "title": "cross-repo contract-block template present",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "local", "name": "factory/templates/ presence (the contract-block file itself lands with S4)"},
+      "remedy": "install the kit templates under factory/templates/ (the contract-block template ships with S4)",
+      "attest_allowed": false,
+      "deferred_to_s4": ["contract-block template file (S4 templates)"]
+    },
+    {
+      "id": "W-7",
+      "category": "WORKSPACE",
+      "title": "bot App bypass on the control-home ruleset",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "forge", "name": "ruleset(home repo from origin remote, default_branch)"},
+      "remedy": "install the factory bot App on the workspace repo and make it the only ruleset bypass actor",
+      "attest_allowed": false
+    },
+    {
+      "id": "W-8",
+      "category": "WORKSPACE",
+      "title": "board Stage options = state names",
+      "required": true,
+      "applies": "mode:dedicated",
+      "verify": {"kind": "forge+kit", "name": "project_fields Stage options vs state_machine.STATES"},
+      "remedy": "add the missing pipeline states as Stage options on the board",
+      "attest_allowed": false
+    },
+    {
+      "id": "U-1",
+      "category": "UI",
+      "title": "Storybook builds locally (attest)",
+      "required": true,
+      "applies": "ui:declared",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest U-1 --by <you> --note \"<storybook build command>\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "U-2",
+      "category": "UI",
+      "title": "visual review path defined (attest)",
+      "required": true,
+      "applies": "ui:declared",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest U-2 --by <you> --note \"<how a human sees a screen>\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "A-1",
+      "category": "ADAPTER",
+      "title": "human adapter prerequisites (attest)",
+      "required": true,
+      "applies": "adapter:human",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest A-1 --by <you> --note \"editor + shell + git identity ready\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "A-2",
+      "category": "ADAPTER",
+      "title": "hermes adapter available (attest)",
+      "required": true,
+      "applies": "adapter:hermes",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest A-2 --by <you> --note \"hermes runtime + dispatch usable\"",
+      "attest_allowed": true,
+      "deferred_to_s4": ["factory/adapters/hermes/adapter.toml (adapter packages land with S4)"]
+    },
+    {
+      "id": "A-3",
+      "category": "ADAPTER",
+      "title": "claude-code adapter prerequisites (attest)",
+      "required": true,
+      "applies": "adapter:claude-code",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest A-3 --by <you> --note \"claude CLI installed + authenticated\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "A-4",
+      "category": "ADAPTER",
+      "title": "codex adapter prerequisites (attest)",
+      "required": true,
+      "applies": "adapter:codex",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest A-4 --by <you> --note \"codex CLI installed + authenticated\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "A-5",
+      "category": "ADAPTER",
+      "title": "api-direct adapter prerequisites (attest)",
+      "required": true,
+      "applies": "adapter:api-direct",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest A-5 --by <you> --note \"endpoint + token configured\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "A-6",
+      "category": "ADAPTER",
+      "title": "copilot adapter prerequisites (historical, attest)",
+      "required": true,
+      "applies": "adapter:copilot",
+      "verify": {"kind": "attest", "name": "answered human_gate attest row"},
+      "remedy": "run: onboard attest A-6 --by <you> --note \"coding agent assignable\"",
+      "attest_allowed": true
+    },
+    {
+      "id": "A-7",
+      "category": "ADVISORY",
+      "title": "CI workflow runs suite+gates on PRs",
+      "required": false,
+      "applies": "always",
+      "verify": {"kind": "local", "name": ".github/workflows scan for unittest"},
+      "remedy": "add a CI workflow that runs the test suite and gate scripts on pull requests",
+      "attest_allowed": false
+    },
+    {
+      "id": "A-8",
+      "category": "ADVISORY",
+      "title": "branch naming convention documented",
+      "required": false,
+      "applies": "always",
+      "verify": {"kind": "local", "name": "story/<id>-<slug> in factory/KICKOFF.md"},
+      "remedy": "document the story/<id>-<slug> branch convention in factory/KICKOFF.md",
+      "attest_allowed": false
+    },
+    {
+      "id": "A-9",
+      "category": "ADVISORY",
+      "title": "machines layout matches the runbook",
+      "required": false,
+      "applies": "always",
+      "verify": {"kind": "advisory", "name": "manual (no automated probe)"},
+      "remedy": "confirm each machine keeps the canonical workspace layout (worktrees disposable)",
+      "attest_allowed": false
+    }
+  ]
+}

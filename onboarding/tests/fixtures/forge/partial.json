@@ -1,0 +1,36 @@
+{
+  "auth_scopes": {
+    "stdout": "github.com\n  \u2713 Logged in to github.com account fixture-bot (GH_TOKEN)\n  - Active account: true\n  - Git operations protocol: https\n  - Token: gho_xxxx\n  - Token scopes: 'repo', 'project'\n",
+    "stderr": ""
+  },
+  "repo_view": {
+    "nameWithOwner": "fixture-org/app",
+    "defaultBranchRef": { "name": "main" },
+    "visibility": "PRIVATE"
+  },
+  "ruleset": {
+    "rulesets": [
+      {
+        "id": 24744013,
+        "name": "protect-main",
+        "target": "branch",
+        "enforcement": "disabled",
+        "conditions": { "ref_name": { "include": ["refs/heads/main"] } },
+        "bypass_actors": []
+      }
+    ]
+  },
+  "labels": {
+    "labels": [
+      { "name": "factory:run", "color": "0E8A16", "description": "kick off the pipeline" }
+    ]
+  },
+  "issue_form": {
+    "present": false,
+    "path": null
+  },
+  "project": {
+    "node_id": null,
+    "fields": { "nodes": [] }
+  }
+}

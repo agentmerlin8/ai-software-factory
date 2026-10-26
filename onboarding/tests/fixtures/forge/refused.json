@@ -1,0 +1,26 @@
+{
+  "auth_scopes": {
+    "stdout": "github.com\n  \u2713 Logged in to github.com account fixture-bot (GH_TOKEN)\n  - Active account: true\n  - Git operations protocol: https\n  - Token: gho_xxxx\n  - Token scopes: 'repo', 'project', 'read:org'\n",
+    "stderr": ""
+  },
+  "repo_view": {
+    "error": "probe failed: repo view — HTTP 403: resource not accessible by integration"
+  },
+  "ruleset": {
+    "error": "probe failed: ruleset — HTTP 403: plan-gated, rulesets API requires an upgraded plan"
+  },
+  "labels": {
+    "labels": [
+      { "name": "factory:run", "color": "0E8A16", "description": "kick off the pipeline" },
+      { "name": "factory:ready", "color": "D4C5F9", "description": "queued for dispatch" }
+    ]
+  },
+  "issue_form": {
+    "present": true,
+    "path": ".github/ISSUE_TEMPLATE/story.yml"
+  },
+  "project": {
+    "node_id": null,
+    "fields": { "nodes": [] }
+  }
+}

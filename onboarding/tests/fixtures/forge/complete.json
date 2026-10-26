@@ -1,0 +1,58 @@
+{
+  "auth_scopes": {
+    "stdout": "github.com\n  \u2713 Logged in to github.com account fixture-bot (GH_TOKEN)\n  - Active account: true\n  - Git operations protocol: https\n  - Token: gho_xxxx\n  - Token scopes: 'gist', 'project', 'read:org', 'repo'\n",
+    "stderr": ""
+  },
+  "repo_view": {
+    "nameWithOwner": "fixture-org/app",
+    "defaultBranchRef": { "name": "main" },
+    "visibility": "PRIVATE"
+  },
+  "ruleset": {
+    "rulesets": [
+      {
+        "id": 24744012,
+        "name": "protect-main",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"] } },
+        "bypass_actors": [
+          { "actor_type": "Integration", "actor_id": 5239072, "mode": "always" }
+        ]
+      }
+    ]
+  },
+  "labels": {
+    "labels": [
+      { "name": "factory:run", "color": "0E8A16", "description": "kick off the pipeline" },
+      { "name": "factory:ready", "color": "D4C5F9", "description": "queued for dispatch" },
+      { "name": "needs-human", "color": "B60205", "description": "escalated to a human" }
+    ]
+  },
+  "issue_form": {
+    "present": true,
+    "path": ".github/ISSUE_TEMPLATE/story.yml"
+  },
+  "project": {
+    "node_id": "PVT_kwDON8RfA87FIXTURE",
+    "fields": {
+      "nodes": [
+        { "__typename": "ProjectV2Field", "id": "F_TITLE", "name": "Title" },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_STAGE",
+          "name": "Stage",
+          "options": [
+            { "id": "OPT_CODING", "name": "CODING" },
+            { "id": "OPT_MERGED", "name": "MERGED" },
+            { "id": "OPT_BLOCKED", "name": "BLOCKED" }
+          ]
+        }
+      ]
+    }
+  },
+  "label_ensure": {
+    "ok": true,
+    "stderr": null
+  }
+}

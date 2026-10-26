@@ -1,0 +1,9 @@
+# OVERRIDE example — copy to OVERRIDE and fill in to sanction an
+# override-bound claim (the blob sha at use time is recorded in the ledger).
+# A placeholder-filled file is NOT an override — that is the point of this
+# example. The override is the blob at HEAD of the current branch; an
+# uncommitted working-tree copy is fail-closed.
+scope: <story-id>   # or ALL
+by: <human name>
+reason: <why — required, no placeholders>
+date: <UTC>

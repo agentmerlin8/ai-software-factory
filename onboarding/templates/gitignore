@@ -1,0 +1,14 @@
+# secrets posture (never commit credential values)
+.env
+.env.*
+secrets/
+*.pem
+*secret*
+*token*
+
+# python hygiene
+__pycache__/
+*.pyc
+
+# factory local state
+factory/locks/OVERRIDE

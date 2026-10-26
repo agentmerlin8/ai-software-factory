@@ -1,0 +1,54 @@
+name: Idea
+description: Capture a raw idea for the factory backlog — refined into a context bundle before stories exist
+title: "IDEA: "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Raw capture is fine — this issue is the front door. The idea is
+        refined into a context bundle (with its decisions recorded) before
+        any stories exist; only then does decomposition start.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem / opportunity
+      description: What is wrong today, or what becomes possible? Facts over solutions.
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Why it matters
+      description: What changes if we build it? Who benefits?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_sketch
+    attributes:
+      label: What "done" looks like (rough is fine)
+    validations:
+      required: false
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and non-goals
+      description: Things this must respect, or explicitly must NOT become.
+    validations:
+      required: false
+  - type: textarea
+    id: references
+    attributes:
+      label: Links, examples, prior art
+    validations:
+      required: false
+  - type: dropdown
+    id: refinement_mode
+    attributes:
+      label: Preferred refinement mode
+      options:
+        - Live chat grill (default)
+        - Issue-comment Q&A
+        - No preference
+    validations:
+      required: false

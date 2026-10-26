@@ -32,15 +32,32 @@ ITEMS_RESPONSE = {"node": {
     "title": "Fixture Board", "url": "https://board.test",
     "items": {"nodes": [
         {"id": "PVTI_1",
-         "content": {"number": 42, "title": "fixture story one"},
+         "content": {"number": 42, "title": "fixture story one",
+                     "repository": {"nameWithOwner": "fixture-org/app"}},
          "fieldValues": {"nodes": [
              {"field": {"name": "Stage"}, "name": "CODING"},
              {"field": {"name": "Title"}, "name": "fixture story one"},
          ]}},
         {"id": "PVTI_2",
-         "content": {"number": 43, "title": "fixture story two"},
+         "content": {"number": 43, "title": "fixture story two",
+                     "repository": {"nameWithOwner": "fixture-org/app"}},
          "fieldValues": {"nodes": []}},
         {"id": "PVTI_3", "content": None,
+         "fieldValues": {"nodes": []}},
+    ]}}}
+
+# Round 36 AK1 fixture: the SAME issue number on the board from TWO
+# different repositories — a number-only match cannot tell them apart.
+DUP_ITEMS_RESPONSE = {"node": {
+    "title": "Fixture Board", "url": "https://board.test",
+    "items": {"nodes": [
+        {"id": "PVTI_A",
+         "content": {"number": 42, "title": "story in org/a",
+                     "repository": {"nameWithOwner": "org/a"}},
+         "fieldValues": {"nodes": []}},
+        {"id": "PVTI_B",
+         "content": {"number": 42, "title": "story in org/b",
+                     "repository": {"nameWithOwner": "org/b"}},
          "fieldValues": {"nodes": []}},
     ]}}}
 
@@ -428,6 +445,108 @@ class LocatorResolutionTests(unittest.TestCase):
                          "    projectV2(number: $n) { id }\n"
                          "  }\n"
                          "}")
+
+
+class RepoScopedItemResolutionTests(unittest.TestCase):
+    """Round 36 AK1 (P1): `item_for_issue` / `cmd_set` resolve issues by
+    REPOSITORY + number. With org/a#42 and org/b#42 both on the board,
+    `--repo org/b set --issue 42` must mutate ONLY org/b's item; an
+    ambiguous bare number is a named refusal, never a wrong-target
+    write; single-repo lookups are unchanged."""
+
+    def setUp(self):
+        self.t = FakeTransport(items=DUP_ITEMS_RESPONSE)
+        self.board = board_with(self.t)
+
+    def test_repo_plus_number_matches_the_right_item(self):
+        self.assertEqual(self.board.item_for_issue(42, ("org", "b")),
+                         "PVTI_B")
+        self.assertEqual(self.board.item_for_issue(42, ("org", "a")),
+                         "PVTI_A")
+
+    def test_repo_match_is_case_insensitive_on_nameWithOwner(self):
+        self.assertEqual(self.board.item_for_issue(42, ("ORG", "B")),
+                         "PVTI_B")
+
+    def test_set_with_repo_mutates_only_that_repos_item(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = SB.cmd_set(self.board, 42, "CODING", ("org", "b"))
+        self.assertEqual(rc, 0)
+        # exactly ONE mutation, targeting org/b's item id — org/a's
+        # PVTI_A is untouched
+        self.assertEqual(self.t.mutations(), [
+            SB.build_set_stage_payload(NODE_ID, "PVTI_B",
+                                       "F_STAGE", "OPT_CODING")])
+        for m in self.t.mutations():
+            self.assertNotIn("PVTI_A", m)
+
+    def test_set_with_other_repo_targets_the_other_item(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = SB.cmd_set(self.board, 42, "CODING", ("org", "a"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.t.mutations(), [
+            SB.build_set_stage_payload(NODE_ID, "PVTI_A",
+                                       "F_STAGE", "OPT_CODING")])
+
+    def test_ambiguous_bare_number_is_a_named_refusal(self):
+        with self.assertRaises(SB.BoardError) as ctx:
+            self.board.item_for_issue(42)  # no repo → ambiguous
+        msg = str(ctx.exception)
+        self.assertIn("REFUSED: issue #42 is ambiguous on the board", msg)
+        self.assertIn("org/a", msg)
+        self.assertIn("org/b", msg)
+        self.assertIn("--repo", msg)
+        self.assertEqual(ctx.exception.rc, 1)
+        self.assertEqual(self.t.mutations(), [])  # nothing written
+
+    def test_cmd_set_propagates_ambiguity_refusal_without_write(self):
+        with self.assertRaises(SB.BoardError) as ctx:
+            SB.cmd_set(self.board, 42, "CODING")  # repo=None
+        self.assertIn("ambiguous", str(ctx.exception))
+        self.assertEqual(self.t.mutations(), [])
+
+    def test_wrong_repo_number_pair_is_not_on_board_refusal(self):
+        with self.assertRaises(SB.BoardError) as ctx:
+            SB.cmd_set(self.board, 42, "CODING", ("org", "c"))
+        self.assertEqual(
+            str(ctx.exception),
+            "REFUSED: issue org/c#42 is not on the board — run "
+            "`add --issue 42` first")
+        self.assertEqual(self.t.mutations(), [])
+
+    def test_single_repo_board_unchanged_with_explicit_repo(self):
+        t = FakeTransport()  # default single-repo fixture
+        board = board_with(t)
+        self.assertEqual(board.item_for_issue(42, ("fixture-org", "app")),
+                         "PVTI_1")
+        # bare number on a single-repo board still resolves (unchanged)
+        self.assertEqual(board.item_for_issue(42), "PVTI_1")
+
+    def test_cli_repo_flag_selects_the_target_item(self):
+        """End-to-end through main(): `--repo org/b set --issue 42`
+        writes ONLY PVTI_B (the finding's exact repro at the CLI)."""
+        orig = SB.Board
+        SB.Board = lambda pid, gql=None: orig(pid, gql=self.t)
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                (root / "workspace.toml").write_text(
+                    'board = { project_id = "fixture-org/projects/7" }\n',
+                    encoding="utf-8")
+                out, err = io.StringIO(), io.StringIO()
+                with redirect_stdout(out), redirect_stderr(err):
+                    rc = SB.main(["--root", str(root), "--repo", "org/b",
+                                  "set", "--issue", "42",
+                                  "--stage", "CODING"])
+                self.assertEqual(rc, 0)
+        finally:
+            SB.Board = orig
+        self.assertEqual(self.t.mutations(), [
+            SB.build_set_stage_payload(NODE_ID, "PVTI_B",
+                                       "F_STAGE", "OPT_CODING")])
+        self.assertIn("updated #42: Stage=CODING", out.getvalue())
 
 
 class MainCliTests(unittest.TestCase):

@@ -884,9 +884,9 @@ class GateLifecycleTotalsTests(unittest.TestCase):
 
     HEADER = "H"
 
-    def _gate(self, eid, gate, answered, ts):
+    def _gate(self, eid, gate, answered, ts, question="q?"):
         return {"event": "human_gate", "event_id": eid, "story_id": "S",
-                "gate": gate, "question": "q?", "asked_at": ts,
+                "gate": gate, "question": question, "asked_at": ts,
                 "answered_at": ts if answered else None,
                 "decision": "approved" if answered else None,
                 "answered_by": "human-1" if answered else None,
@@ -929,6 +929,45 @@ class GateLifecycleTotalsTests(unittest.TestCase):
                            "2026-09-01T00:30:00Z")
         line = self._gate_line(self._render([ask, other]))
         self.assertIn("total 2, avoidable 1, pending 1", line)
+
+    def test_distinct_questions_same_gate_answer_to_A_leaves_B_pending(
+            self):
+        """Round 36 AK2: supersession matches DISTINCT scope requests —
+        identity is (story_id, gate, question). Two scope questions A
+        and B on the same story+gate; an answer to A supersedes ONLY
+        A's ask. B stays pending (pending 1, not 0)."""
+        ask_a = self._gate("human_gate-S-1", "avoidable", False,
+                           "2026-09-01T00:00:00Z", question="scope A?")
+        ask_b = self._gate("human_gate-S-2", "avoidable", False,
+                           "2026-09-01T00:10:00Z", question="scope B?")
+        ans_a = self._gate("human_gate-S-3", "avoidable", True,
+                           "2026-09-01T00:30:00Z", question="scope A?")
+        line = self._gate_line(self._render([ask_a, ask_b, ans_a]))
+        # A's ask+answer fold to one lifecycle; B is still outstanding
+        self.assertIn("total 2, avoidable 2, pending 1", line)
+
+    def test_identical_question_repeat_still_supersedes(self):
+        """The exact same request identity (story, gate, question) asked
+        twice and answered once still folds — identical repeats are one
+        lifecycle (unchanged behavior)."""
+        ask1 = self._gate("human_gate-S-1", "avoidable", False,
+                          "2026-09-01T00:00:00Z", question="same q?")
+        ask2 = self._gate("human_gate-S-2", "avoidable", False,
+                          "2026-09-01T00:10:00Z", question="same q?")
+        ans = self._gate("human_gate-S-3", "avoidable", True,
+                         "2026-09-01T00:30:00Z", question="same q?")
+        line = self._gate_line(self._render([ask1, ask2, ans]))
+        self.assertIn("total 1, avoidable 1, pending 0", line)
+
+    def test_answered_A_alone_unchanged(self):
+        """A single answered ask (no B in the ledger) renders exactly as
+        before — the question term never changes solo lifecycles."""
+        ask = self._gate("human_gate-S-1", "avoidable", False,
+                         "2026-09-01T00:00:00Z", question="scope A?")
+        ans = self._gate("human_gate-S-2", "avoidable", True,
+                         "2026-09-01T00:30:00Z", question="scope A?")
+        line = self._gate_line(self._render([ask, ans]))
+        self.assertIn("total 1, avoidable 1, pending 0", line)
 
 
 class OwnerCellEscapeTests(unittest.TestCase):

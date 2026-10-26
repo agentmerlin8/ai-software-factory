@@ -342,25 +342,53 @@ class Board:
                 f"options present: {sorted(f['options'])}")
         return oid
 
-    def item_for_issue(self, number: int) -> Optional[str]:
-        """The project item id for a repo issue number (None if absent)."""
+    def item_for_issue(self, number: int,
+                       repo: Optional[tuple[str, str]] = None
+                       ) -> Optional[str]:
+        """The project item id for the issue identified by REPOSITORY +
+        number (None if absent).
+
+        Round 36 AK1: the number alone is not an identity — two repos
+        can both carry #42 on one board, and a number-only match writes
+        the WRONG repo's item. An item matches when its content's
+        repository (`nameWithOwner`, compared case-insensitively) AND
+        its number match `repo` + `number`. With `repo` None, a number
+        matching exactly one item resolves (single-repo boards are
+        unchanged); an ambiguous bare number is a NAMED refusal — never
+        a wrong-target write."""
         q = """
         query($p: ID!) {
           node(id: $p) {
             ... on ProjectV2 {
               items(first: 100) {
-                nodes { id content { ... on Issue { number } } }
+                nodes { id content { ... on Issue {
+                  number repository { nameWithOwner } } } }
               }
             }
           }
         }
         """
         data = self._gql(q, p=self.node_id)
+        want = f"{repo[0]}/{repo[1]}".casefold() if repo else None
+        matches: list[tuple[str, str]] = []
         for node in data["node"]["items"]["nodes"]:
-            if node.get("content") and \
-                    node["content"].get("number") == number:
-                return node["id"]
-        return None
+            c = node.get("content")
+            if not c or c.get("number") != number:
+                continue
+            owner_name = ((c.get("repository") or {})
+                          .get("nameWithOwner") or "")
+            if want is not None:
+                if owner_name.casefold() == want:
+                    return node["id"]
+                continue
+            matches.append((node["id"], owner_name))
+        if want is not None or len(matches) <= 1:
+            return matches[0][0] if matches else None
+        repos = ", ".join(sorted(r or "?" for _, r in matches))
+        raise BoardError(
+            f"REFUSED: issue #{number} is ambiguous on the board — it "
+            f"matches items in {repos}; pass --repo <owner>/<name> to "
+            "name the target repository")
 
     def issue_node_id(self, owner: str, name: str, number: int) -> str:
         q = build_issue_id_query(owner, name, number)
@@ -445,17 +473,21 @@ def cmd_add(board: Board, number: int, repo: tuple[str, str],
 
 
 def cmd_set(board: Board, number: int, stage: str,
+            repo: Optional[tuple[str, str]] = None,
             dry_run: bool = False) -> int:
     """The explicit Stage write. The option must ALREADY exist on the
     board — a missing option is a named fail-closed refusal; nothing is
-    created, nothing is inferred."""
+    created, nothing is inferred. Round 36 AK1: the item is resolved by
+    REPOSITORY + number (`repo` is passed through to `item_for_issue`),
+    so `--repo org/b set --issue 42` can never mutate org/a's item."""
     state = normalize_stage(stage)
     field = board.stage_field()
     option_id = board.stage_option_id(state)
-    item_id = board.item_for_issue(number)
+    item_id = board.item_for_issue(number, repo)
     if not item_id:
+        where = f"{repo[0]}/{repo[1]}#" if repo else "#"
         raise BoardError(
-            f"REFUSED: issue #{number} is not on the board — run "
+            f"REFUSED: issue {where}{number} is not on the board — run "
             f"`add --issue {number}` first")
     payload = build_set_stage_payload(board.node_id, item_id,
                                       field["id"], option_id)
@@ -520,7 +552,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "add":
             repo = load_repo(root, args.repo)
             return cmd_add(board, args.issue, repo, args.dry_run)
-        return cmd_set(board, args.issue, args.stage, args.dry_run)
+        # round 36 AK1: `set` resolves the target repo exactly like
+        # `add` (--repo wins; else the first repos[].url binding; absent
+        # is a named refusal) and passes it through to the item lookup.
+        repo = load_repo(root, args.repo)
+        return cmd_set(board, args.issue, args.stage, repo, args.dry_run)
     except BoardError as exc:
         print(str(exc))
         return exc.rc

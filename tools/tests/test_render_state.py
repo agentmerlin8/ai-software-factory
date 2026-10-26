@@ -991,5 +991,70 @@ class Round34LFNormalizationTests(unittest.TestCase):
             RS.main(["STORY-203", "--check", "--root", str(self.root)]), 0)
 
 
+class GateSupersessionIdentityTests(unittest.TestCase):
+    """Round 36 AK2: the state renderer's supersession label matches
+    DISTINCT scope requests — identity is the documented combination
+    (story_id, gate, question), IDENTICAL to render_dashboard.py's
+    rule. An answer to scope question A supersedes only A's ask row;
+    B's row stays PENDING (never mislabeled as superseded)."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.stories = Path(self._td.name) / "stories"
+        self.stories.mkdir()
+        self.header = RS.generated_header("factory/ledger/events.jsonl")
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _gate(self, eid, question, answered, ts):
+        return {"event": "human_gate", "event_id": eid,
+                "story_id": "STORY-217", "gate": "avoidable",
+                "question": question, "asked_at": ts,
+                "answered_at": ts if answered else None,
+                "decision": "approved" if answered else None,
+                "answered_by": "human-1" if answered else None,
+                "recorded_at": ts, "provenance": "live"}
+
+    def _rows(self, events):
+        text = RS.render(events, "STORY-217", self.header, self.stories)
+        return [l for l in text.splitlines()
+                if l.startswith("| avoidable |")]
+
+    def test_answer_to_A_leaves_B_pending(self):
+        ask_a = self._gate("human_gate-STORY-217-1", "scope A?", False,
+                           "2026-09-01T00:00:00Z")
+        ask_b = self._gate("human_gate-STORY-217-2", "scope B?", False,
+                           "2026-09-01T00:10:00Z")
+        ans_a = self._gate("human_gate-STORY-217-3", "scope A?", True,
+                           "2026-09-01T00:30:00Z")
+        rows = self._rows([ask_a, ask_b, ans_a])
+        self.assertEqual(len(rows), 3)
+        row_a, row_b = rows[0], rows[1]
+        self.assertIn("superseded by human_gate-STORY-217-3", row_a)
+        self.assertIn("PENDING", row_b)
+        self.assertNotIn("superseded", row_b)
+
+    def test_identical_repeat_still_superseded(self):
+        ask1 = self._gate("human_gate-STORY-217-1", "same q?", False,
+                          "2026-09-01T00:00:00Z")
+        ask2 = self._gate("human_gate-STORY-217-2", "same q?", False,
+                          "2026-09-01T00:10:00Z")
+        ans = self._gate("human_gate-STORY-217-3", "same q?", True,
+                         "2026-09-01T00:30:00Z")
+        rows = self._rows([ask1, ask2, ans])
+        self.assertIn("superseded by human_gate-STORY-217-3", rows[0])
+        self.assertIn("superseded by human_gate-STORY-217-3", rows[1])
+
+    def test_answered_alone_unchanged(self):
+        ask = self._gate("human_gate-STORY-217-1", "scope A?", False,
+                         "2026-09-01T00:00:00Z")
+        ans = self._gate("human_gate-STORY-217-2", "scope A?", True,
+                         "2026-09-01T00:30:00Z")
+        rows = self._rows([ask, ans])
+        self.assertIn("superseded by human_gate-STORY-217-2", rows[0])
+        self.assertIn("| approved | human-1 |", rows[1])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -285,14 +285,20 @@ def render(events: list[dict], root: Path, header: str,
 
     def superseded(g, idx):
         """An ask row whose reply was appended later (append-only ledger):
-        unanswered here, but a later answered row for the same
-        (story, gate) records the reply — one human intervention, not
-        two. R23-X2: totals/avoidable must count LIFECYCLES, not rows."""
+        unanswered here, but a later answered row for the SAME REQUEST
+        IDENTITY records the reply — one human intervention, not two.
+        R23-X2: totals/avoidable must count LIFECYCLES, not rows.
+        Round 36 AK2: request identity is the documented combination
+        (story_id, gate, question) — two DISTINCT scope questions on the
+        same story+gate are two separate asks; an answer to A supersedes
+        ONLY A, never B (B stays pending). IDENTICAL rule in
+        render_state.py."""
         if g.get("answered_at"):
             return False
         return any(s.get("answered_at")
                    and s.get("story_id") == g.get("story_id")
                    and s.get("gate") == g.get("gate")
+                   and s.get("question") == g.get("question")
                    for s in hg[idx + 1:])
 
     def truly_pending(g, idx):

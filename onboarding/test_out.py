@@ -205,9 +205,13 @@ def ensure_gitignore_secrets(repo: Path) -> None:
 
 
 def run_pipeline(repo: Path, dataset: Optional[str], project_id: str,
-                 runner: Runner, log: Callable[[str, str], None]) -> None:
+                 runner: Runner, log: Callable[[str, str], None],
+                 postures: tuple[str, ...] = ("brownfield",)) -> None:
     """The from-scratch pipeline through the REAL CLIs. `dataset`
     None = live forge (--full); otherwise --forge-fixture <dataset>.
+    `postures` = acceptable `inspect` posture values: smoke seeds a
+    source tree (brownfield only); --full clones a fresh GitHub repo
+    (greenfield, or brownfield once seeded).
     Raises StepFailure on the first deviation."""
     fx = ["--forge-fixture", dataset] if dataset else []
     onboard = lambda *args: python_argv(ONBOARD, *args)  # noqa: E731
@@ -221,10 +225,11 @@ def run_pipeline(repo: Path, dataset: Optional[str], project_id: str,
     posture = next((ln.split(": ", 1)[1].strip()
                     for ln in out.stdout.splitlines()
                     if ln.startswith("posture: ")), None)
-    if posture != "brownfield":
+    if posture not in postures:
+        expected = " / ".join(repr(p) for p in postures)
         raise StepFailure("inspect", f"posture {posture!r} — expected "
-                                     "'brownfield' (the seed has source files)")
-    log("inspect", "rc 0 — posture brownfield")
+                                     f"{expected}")
+    log("inspect", f"rc 0 — posture {posture}")
 
     expect(runner, onboard("propose", str(repo), "--control-home", "in-repo"),
            "propose")
@@ -407,7 +412,8 @@ def run_full(args: argparse.Namespace) -> int:
             print(f"RUN: {argv!r}")
             expect(run_argv, argv, "initial-commit")
         run_pipeline(repo, None, args.project_id, run_argv,
-                     lambda step, detail: print(f"PASS: {step} — {detail}"))
+                     lambda step, detail: print(f"PASS: {step} — {detail}"),
+                     postures=("greenfield", "brownfield"))
         print(f"PASS: handoff — see {repo / 'factory' / 'KICKOFF.md'} "
               "(next action)")
     except StepFailure as failure:

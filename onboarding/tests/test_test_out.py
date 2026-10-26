@@ -99,6 +99,59 @@ class RecordingRunner:
         return subprocess.CompletedProcess(argv, 0, "", "")
 
 
+class PostureRunner:
+    """Stubbed runner: `inspect` prints a fixed posture, every other
+    onboard call returns rc 1 so run_pipeline stops right after the
+    posture check (no repo writes)."""
+
+    def __init__(self, posture: str):
+        self.posture = posture
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess:
+        if "inspect" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, f"posture: {self.posture}\n", "")
+        if "preflight" in argv:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 1, "", "stub: stop after "
+                                                       "inspect")
+
+
+class TestPostureExpectationModeAware(unittest.TestCase):
+    """FIX: --full clones a fresh GitHub repo (greenfield), so the
+    posture expectation is a parameter: smoke requires brownfield;
+    full tolerates greenfield (and brownfield once seeded)."""
+
+    def _run(self, posture: str, postures: tuple[str, ...] | None):
+        with tempfile.TemporaryDirectory() as td:
+            kwargs = {} if postures is None else {"postures": postures}
+            with self.assertRaises(TO.StepFailure) as ctx:
+                TO.run_pipeline(Path(td), None, "org/projects/1",
+                                PostureRunner(posture),
+                                lambda step, detail: None, **kwargs)
+            return ctx.exception
+
+    def test_full_tolerates_greenfield(self):
+        failure = self._run("greenfield", ("greenfield", "brownfield"))
+        # passed the posture gate; stopped at the NEXT stubbed step
+        self.assertEqual(failure.step, "propose")
+
+    def test_full_tolerates_brownfield(self):
+        failure = self._run("brownfield", ("greenfield", "brownfield"))
+        self.assertEqual(failure.step, "propose")
+
+    def test_full_still_rejects_unknown_posture(self):
+        failure = self._run("weird", ("greenfield", "brownfield"))
+        self.assertEqual(failure.step, "inspect")
+        self.assertIn("'weird'", failure.detail)
+
+    def test_smoke_default_still_requires_brownfield(self):
+        failure = self._run("greenfield", None)  # default ("brownfield",)
+        self.assertEqual(failure.step, "inspect")
+        self.assertIn("'greenfield'", failure.detail)
+        self.assertIn("'brownfield'", failure.detail)
+
+
 # ------------------------------------------------------------------- smoke --
 
 class TestSmokeTinySeed(unittest.TestCase):

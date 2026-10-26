@@ -1598,5 +1598,86 @@ class AnchorDeclaredNameTests(unittest.TestCase):
                           "['Missing']", errors)
 
 
+PARAM_DEFAULT_SRC = (
+    "// app\n"
+    "public static Widget Existing(int n = 0)\n"
+    "public static Widget Missing(int n = 0)\n"
+    "def existing(self, n=0):\n"
+    "    pass\n")
+
+
+class AnchorParamDefaultNotAssignmentTests(unittest.TestCase):
+    """Round 30 AE1: a `=` INSIDE a parameter list is a parameter
+    DEFAULT, not an assignment. `public static Widget Missing(int n = 0)`
+    used to select the RETURN TYPE `Widget` as the declared name and PASS
+    against a source line declaring `Existing` with the same return type —
+    authorizing planner dispatch on a ghost anchor. Assignment detection
+    now considers only depth-0 `=`; with no depth-0 `=` the description
+    falls through to the signature/member-name branch."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=PARAM_DEFAULT_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_param_default_mismatch_flagged_on_member_name(self):
+        """The signature branch checks `Missing`; line 2 declares
+        `Existing` (same return type `Widget`) — must flag on Missing,
+        never pass on the shared return type."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-989",
+                              "- `src/app.py:2` — public static Widget "
+                              "Missing(int n = 0)\n")
+            errors = CD.run_gate(root, "STORY-989", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_param_default_matching_member_name_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-990",
+                              "- `src/app.py:3` — public static Widget "
+                              "Missing(int n = 0)\n")
+            self.assertEqual(CD.run_gate(root, "STORY-990", "HEAD"), [])
+
+    def test_python_param_default_mismatch_flagged(self):
+        """Python default-parameter form: `def missing(self, n=0)` vs a
+        line declaring `def existing(self, n=0)` — flagged on `missing`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-991",
+                              "- `src/app.py:4` — def missing(self, n=0)\n")
+            errors = CD.run_gate(root, "STORY-991", "HEAD")
+            self.assertIn("anchor symbol not on line 4 of src/app.py: "
+                          "['missing']", errors)
+
+    def test_top_level_initializer_still_recognized(self):
+        """R29 AD3 unchanged: a depth-0 `=` initializer still selects the
+        DECLARED NAME — `export const Missing = makeWidget()` must not
+        pass against `export const Existing = makeWidget()`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-992",
+                            src_lines="// app\n"
+                                      "export const Existing = "
+                                      "makeWidget()\n",
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:2` — export const "
+                                    "Missing = makeWidget()\n")
+            errors = CD.run_gate(root, "STORY-992", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_comparison_operator_still_not_assignment(self):
+        """`==` is still not an assignment (R29 lookaround behavior kept):
+        `total == checkSum()` keeps the call-signature branch and checks
+        `checkSum`; a spurious declared name would flag instead."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(
+                Path(td), "STORY-993",
+                src_lines="// app\nx\ny\nz\n"
+                          "if (a == b) { checkSum(); }\n",
+                story_text="# s\n\n- AC-1: one.\n",
+                anchors="- `src/app.py:5` — total == checkSum()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-993", "HEAD"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

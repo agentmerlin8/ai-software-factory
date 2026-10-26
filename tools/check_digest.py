@@ -289,10 +289,33 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                 # makeWidget()` on the shared initializer alone. The
                 # lookarounds keep comparison/compound operators
                 # (`==`, `<=`, `+=`, …) out of the assignment match.
-                asg = re.search(r"(?<![<>=!+\-*/&|^%])=(?!=)", desc)
+                # Round 30 AE1: the `=` must be a TOP-LEVEL initializer —
+                # one INSIDE a parameter list is a parameter DEFAULT, not
+                # an assignment. `public static Widget Missing(int n = 0)`
+                # used to select the return type `Widget` (first non-
+                # keyword token before the parameter-default `=`) and pass
+                # against a line declaring `Existing` with the same return
+                # type. Track paren depth across the description and
+                # consider only `=` at depth 0 (same R29 operator
+                # lookarounds); with no depth-0 `=`, fall through to the
+                # signature/member-name branch so `… Missing(int n = 0)`
+                # checks `Missing`.
+                asg = None
+                depth = 0
+                for i, ch in enumerate(desc):
+                    if ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        depth = max(depth - 1, 0)
+                    elif (ch == "=" and depth == 0
+                          and desc[i + 1:i + 2] != "="
+                          and not re.match(r"[<>=!+\-*/&|^%]",
+                                           desc[i - 1:i])):
+                        asg = i
+                        break
                 declared = None
-                if asg:
-                    left = re.findall(r"\w+", desc[:asg.start()])
+                if asg is not None:
+                    left = re.findall(r"\w+", desc[:asg])
                     lsyms = [t for t in left if t not in DECL_KEYWORDS]
                     if lsyms:
                         declared = lsyms[0]

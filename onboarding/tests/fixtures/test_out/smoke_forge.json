@@ -1,0 +1,259 @@
+{
+  "auth_scopes": {
+    "stderr": "",
+    "stdout": "github.com\n  \u2713 Logged in to github.com account fixture-bot (GH_TOKEN)\n  - Token scopes: 'gist', 'project', 'read:org', 'repo'\n"
+  },
+  "issue_form": {
+    "path": ".github/ISSUE_TEMPLATE/idea.yml",
+    "present": true
+  },
+  "label_ensure": {
+    "ok": true
+  },
+  "labels": {
+    "labels": [
+      {
+        "color": "1d76db",
+        "description": "factory pipeline stage",
+        "name": "factory:planning"
+      },
+      {
+        "color": "5319e7",
+        "description": "factory pipeline stage",
+        "name": "factory:plan-review"
+      },
+      {
+        "color": "0e8a16",
+        "description": "factory pipeline stage",
+        "name": "factory:implementation"
+      },
+      {
+        "color": "fbca04",
+        "description": "factory pipeline stage",
+        "name": "factory:code-review"
+      },
+      {
+        "color": "d93f0b",
+        "description": "factory pipeline stage",
+        "name": "factory:testing"
+      },
+      {
+        "color": "cccccc",
+        "description": "factory pipeline stage",
+        "name": "factory:done"
+      },
+      {
+        "color": "b60205",
+        "description": "factory pipeline stage",
+        "name": "factory:blocked"
+      },
+      {
+        "color": "ff69b4",
+        "description": "factory pipeline stage",
+        "name": "needs-human"
+      },
+      {
+        "color": "0E8A16",
+        "description": "board auto-add gate",
+        "name": "factory"
+      },
+      {
+        "color": "D4C5F9",
+        "description": "idea intake \u2014 refined into a context bundle before stories",
+        "name": "idea"
+      }
+    ]
+  },
+  "project": {
+    "fields": {
+      "nodes": [
+        {
+          "__typename": "ProjectV2Field",
+          "id": "F_TITLE",
+          "name": "Title"
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_STAGE",
+          "name": "Stage",
+          "options": [
+            {
+              "id": "OPT_BACKLOG",
+              "name": "BACKLOG"
+            },
+            {
+              "id": "OPT_GRILLED",
+              "name": "GRILLED"
+            },
+            {
+              "id": "OPT_TEST_PLAN",
+              "name": "TEST_PLAN"
+            },
+            {
+              "id": "OPT_SPEC_FROZEN",
+              "name": "SPEC_FROZEN"
+            },
+            {
+              "id": "OPT_PLANNED",
+              "name": "PLANNED"
+            },
+            {
+              "id": "OPT_GATE_PASSED",
+              "name": "GATE_PASSED"
+            },
+            {
+              "id": "OPT_PLAN_APPROVED",
+              "name": "PLAN_APPROVED"
+            },
+            {
+              "id": "OPT_STORYBOOK_APPROVAL",
+              "name": "STORYBOOK_APPROVAL"
+            },
+            {
+              "id": "OPT_CODING",
+              "name": "CODING"
+            },
+            {
+              "id": "OPT_BUILD_GREEN",
+              "name": "BUILD_GREEN"
+            },
+            {
+              "id": "OPT_DRAFT_OPENED",
+              "name": "DRAFT_OPENED"
+            },
+            {
+              "id": "OPT_REVIEWING",
+              "name": "REVIEWING"
+            },
+            {
+              "id": "OPT_FIXING",
+              "name": "FIXING"
+            },
+            {
+              "id": "OPT_FULL_TESTS_GREEN",
+              "name": "FULL_TESTS_GREEN"
+            },
+            {
+              "id": "OPT_READY_FOR_REVIEW",
+              "name": "READY_FOR_REVIEW"
+            },
+            {
+              "id": "OPT_MERGE_ELIGIBLE",
+              "name": "MERGE_ELIGIBLE"
+            },
+            {
+              "id": "OPT_MERGED",
+              "name": "MERGED"
+            },
+            {
+              "id": "OPT_LIVE_PROVEN",
+              "name": "LIVE_PROVEN"
+            },
+            {
+              "id": "OPT_CLOSED",
+              "name": "CLOSED"
+            },
+            {
+              "id": "OPT_BLOCKED",
+              "name": "BLOCKED"
+            }
+          ]
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_STATUS",
+          "name": "Status",
+          "options": [
+            {
+              "id": "OPT_TODO",
+              "name": "Todo"
+            },
+            {
+              "id": "OPT_DOING",
+              "name": "In Progress"
+            },
+            {
+              "id": "OPT_DONE",
+              "name": "Done"
+            }
+          ]
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_GROUP",
+          "name": "Stage group",
+          "options": [
+            {
+              "id": "OPT_PRE",
+              "name": "pre-build"
+            },
+            {
+              "id": "OPT_BUILD",
+              "name": "build"
+            },
+            {
+              "id": "OPT_POST",
+              "name": "post-merge"
+            }
+          ]
+        }
+      ]
+    },
+    "node_id": "PVT_kwDON8RfA87FIXTURE"
+  },
+  "repo_view": {
+    "defaultBranchRef": {
+      "name": "main"
+    },
+    "nameWithOwner": "fixture-org/app",
+    "visibility": "PRIVATE"
+  },
+  "ruleset": {
+    "rulesets": [
+      {
+        "bypass_actors": [
+          {
+            "actor_id": 5239072,
+            "actor_type": "Integration",
+            "mode": "always"
+          }
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "enforcement": "active",
+        "id": 24744012,
+        "name": "protect-main",
+        "target": "branch"
+      }
+    ]
+  },
+  "ruleset@fixture-org/benchmark-app": {
+    "rulesets": [
+      {
+        "bypass_actors": [
+          {
+            "actor_id": 5239072,
+            "actor_type": "Integration",
+            "mode": "always"
+          }
+        ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "enforcement": "active",
+        "id": 24744020,
+        "name": "protect-main",
+        "target": "branch"
+      }
+    ]
+  }
+}

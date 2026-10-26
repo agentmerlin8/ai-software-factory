@@ -1679,5 +1679,89 @@ class AnchorParamDefaultNotAssignmentTests(unittest.TestCase):
             self.assertEqual(CD.run_gate(root, "STORY-993", "HEAD"), [])
 
 
+TYPED_INIT_SRC = (
+    "// app\n"
+    "public static Widget Existing = makeWidget();\n"
+    "public static Widget Missing = makeWidget();\n"
+    "    items[0] = compute();\n")
+
+
+class AnchorTypedInitializerDeclaredNameTests(unittest.TestCase):
+    """Round 31 AF1: a typed initializer must be checked against the
+    DECLARED IDENTIFIER (the LAST identifier token before the depth-0
+    `=`), not the type. `public static Widget Missing = makeWidget()`
+    used to select the TYPE `Widget` (first non-keyword token) and PASS
+    against a line declaring `Existing` with the same type — authorizing
+    planner dispatch on a ghost anchor. When anything other than
+    whitespace sits between the last identifier and the `=` (e.g.
+    `items[0] = x`), the initializer form is ambiguous and the anchor is
+    refused by name."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=TYPED_INIT_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_typed_initializer_mismatch_flagged_on_declared_name(self):
+        """`Missing` is checked, not the shared type `Widget` — the
+        anchor points at line 2 which declares `Existing`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-994",
+                              "- `src/app.py:2` — public static Widget "
+                              "Missing = makeWidget()\n")
+            errors = CD.run_gate(root, "STORY-994", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_typed_initializer_match_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-995",
+                              "- `src/app.py:2` — public static Widget "
+                              "Existing = makeWidget()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-995", "HEAD"), [])
+
+    def test_typed_initializer_correct_line_passes(self):
+        """Anchor `Missing` on the line that actually declares `Missing`
+        passes — the last identifier before `=` is the declared name."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-996",
+                              "- `src/app.py:3` — public static Widget "
+                              "Missing = makeWidget()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-996", "HEAD"), [])
+
+    def test_subscripted_target_refused_as_ambiguous(self):
+        """`items[0] = compute()` — a `]` sits between the last
+        identifier and the `=`, so the declared name is ambiguous and
+        the anchor is refused by name, not guessed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-997",
+                              "- `src/app.py:4` — items[0] = compute()\n")
+            errors = CD.run_gate(root, "STORY-997", "HEAD")
+            self.assertTrue(
+                any(e.startswith("ambiguous anchor symbol for initializer "
+                                 "form") and "name the declared symbol "
+                                 "explicitly" in e for e in errors),
+                errors)
+
+    def test_prior_initializer_cases_unchanged(self):
+        """R29 AD3 (`export const Missing = makeWidget()`) and the plain
+        `const subtotal` form still flag on the declared name."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-998", src_lines=DECL_ASSIGN_SRC,
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:2` — export const "
+                                    "Missing = makeWidget()\n")
+            errors = CD.run_gate(root, "STORY-998", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-999", src_lines=DECL_ASSIGN_SRC,
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:3` — const subtotal = 0\n")
+            errors = CD.run_gate(root, "STORY-999", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['subtotal']", errors)
+
+
 if __name__ == "__main__":
     unittest.main()

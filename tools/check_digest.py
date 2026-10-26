@@ -314,14 +314,37 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                         asg = i
                         break
                 declared = None
+                ambiguous_init = False
                 if asg is not None:
-                    left = re.findall(r"\w+", desc[:asg])
-                    lsyms = [t for t in left if t not in DECL_KEYWORDS]
-                    if lsyms:
-                        declared = lsyms[0]
+                    # Round 31 AF1: the declared name is the LAST
+                    # identifier token before the depth-0 `=`, not the
+                    # first non-keyword token — `public static Widget
+                    # Missing = makeWidget()` used to select the TYPE
+                    # `Widget` (lsyms[0]) and pass against a line
+                    # declaring `Existing = makeWidget()` of the same
+                    # type. Require ONLY whitespace between that last
+                    # identifier's end and the `=`; anything else in
+                    # between (brackets, parens, operators — e.g.
+                    # `items[0] = x`) makes the initializer form
+                    # AMBIGUOUS: refuse the anchor by name instead of
+                    # guessing a symbol.
+                    last_id = None
+                    for mid in re.finditer(r"[A-Za-z_]\w*", desc[:asg]):
+                        last_id = mid
+                    if last_id is None:
+                        ambiguous_init = True
+                    elif re.fullmatch(r"\s*", desc[last_id.end():asg]):
+                        declared = last_id.group(0)
+                    else:
+                        ambiguous_init = True
                 sig = re.search(r"(\w+)\s*\([^()]*\):?\s*$", desc)
                 if declared is not None:
                     check = [declared]
+                elif ambiguous_init:
+                    errors.append("ambiguous anchor symbol for initializer "
+                                  f"form: {desc!r} — name the declared "
+                                  "symbol explicitly")
+                    continue
                 elif sig:
                     check = [sig.group(1)]
                 else:

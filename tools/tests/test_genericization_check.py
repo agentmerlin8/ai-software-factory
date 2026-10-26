@@ -33,7 +33,7 @@ class CheckGenericizationTests(unittest.TestCase):
                 encoding="utf-8")
             proc = run_tool(root)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            self.assertIn("genericization: 0 hit(s) across 0 tracked "
+            self.assertIn("genericization: 0 hit(s) in 0 "
                           "file(s)", proc.stdout)
 
     def test_seeded_hit_fails_with_exact_line(self):
@@ -47,7 +47,7 @@ class CheckGenericizationTests(unittest.TestCase):
             self.assertIn(
                 "HIT notes.md:2: podcast — this mentions a Podcast "
                 "pipeline", proc.stdout)
-            self.assertIn("genericization: 1 hit(s) across 1 tracked "
+            self.assertIn("genericization: 1 hit(s) in 1 "
                           "file(s)", proc.stdout)
 
     def test_bare_agentmerlin_fails(self):
@@ -108,7 +108,7 @@ class CheckGenericizationTests(unittest.TestCase):
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0,
                          f"tree carries banned tokens:\n{proc.stdout}")
-        self.assertIn("genericization: 0 hit(s) across 0 tracked file(s)",
+        self.assertIn("genericization: 0 hit(s) in 0 file(s)",
                       proc.stdout)
 
 

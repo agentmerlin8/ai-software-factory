@@ -46,7 +46,7 @@ Documented carve-outs:
    these tokens in any other file, still fails.
 
 Output: one line per hit — `HIT <path>:<line>: <token> — <trimmed
-line>` — then the summary `genericization: N hit(s) across M tracked
+line>` — then the summary `genericization: N hit(s) in M
 file(s)`. Exit codes: 0 clean, 1 hits found, 2 usage (bad --root).
 """
 from __future__ import annotations
@@ -180,8 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     hits, files_with_hits = scan(root.resolve())
     for line in hits:
         print(line)
-    print(f"genericization: {len(hits)} hit(s) across "
-          f"{files_with_hits} tracked file(s)")
+    print(f"genericization: {len(hits)} hit(s) in "
+          f"{files_with_hits} file(s)")
     return 1 if hits else 0
 
 

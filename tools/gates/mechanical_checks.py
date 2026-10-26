@@ -198,7 +198,13 @@ def check_bare_runners(contract: dict, root: Path, runners: list[str],
         info("command-validity: no runner names declared (--runner) — "
              "bare-invocation check inactive")
         return
-    for raw in contract.get("verify_commands") or []:
+    declared = contract.get("verify_commands")
+    if declared is not None and not isinstance(declared, list):
+        # named refusal, never TypeError (S2-F2)
+        fail("contract verify_commands must be a list, got "
+             f"{type(declared).__name__}")
+        return
+    for raw in declared or []:
         if not isinstance(raw, str) or not raw.strip():
             continue
         cmd = raw.strip()
@@ -361,7 +367,13 @@ def check_verify_commands(contract: dict, root: Path,
     project-specific and is not ported (see module docstring)."""
     parsed: list[tuple[str, Path, dict[str, str], list[str]]] = []
     seen: set[str] = set()
-    for raw in contract.get("verify_commands") or []:
+    declared = contract.get("verify_commands")
+    if declared is not None and not isinstance(declared, list):
+        # named refusal, never TypeError (S2-F2)
+        fail("contract verify_commands must be a list, got "
+             f"{type(declared).__name__}")
+        return
+    for raw in declared or []:
         if not isinstance(raw, str) or raw in seen:
             continue
         seen.add(raw)

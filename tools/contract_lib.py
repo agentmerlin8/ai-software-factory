@@ -542,7 +542,12 @@ def validate_contract(c: dict[str, Any]) -> list[str]:
 def contract_paths(c: dict[str, Any]) -> tuple[set[str], set[str]]:
     """(create_paths, extend_paths) from a validated contract."""
     creates, extends = set(), set()
-    for f in c.get("files") or []:
+    files = c.get("files")
+    if files is not None and not isinstance(files, list):
+        # A non-list `files` is already a NAMED validate_contract
+        # finding; never raise TypeError here (S2-F2) — iterate nothing.
+        return creates, extends
+    for f in files or []:
         if isinstance(f, dict) and f.get("path"):
             (creates if f.get("op") == "CREATE" else extends).add(f["path"])
     return creates, extends

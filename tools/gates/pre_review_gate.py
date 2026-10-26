@@ -150,13 +150,29 @@ class Gate:
             self.fail("contract", sid, "no impl-plan.md in story dir")
             return None
         try:
-            contract = C.extract_contract(plan.read_text(encoding="utf-8"))
+            plan_text = plan.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError) as e:
+            # named refusal, never a raw traceback (S2-F2): a non-UTF-8
+            # or unreadable impl-plan.md is a `contract` finding.
+            self.fail("contract", sid, f"impl-plan.md unreadable: {e}")
+            return None
+        try:
+            contract = C.extract_contract(plan_text)
         except C.ContractParseError as e:
             self.fail("contract", sid, f"contract block: {e}")
             return None
         errs = C.validate_contract(contract)
         for e in errs:
             self.fail("contract", sid, e)
+        # Iteration safety (S2-F2): a list-typed field that failed the
+        # type check above already carries a NAMED finding; normalize it
+        # to [] so downstream checks (contract_paths, verify_commands,
+        # tests coverage) report everything else at once instead of
+        # raising TypeError on `for x in 42`.
+        for key in ("files", "tests", "verify_commands", "invariants",
+                    "decisions"):
+            if key in contract and not isinstance(contract[key], list):
+                contract[key] = []
         # return the contract even on schema errors so downstream checks
         # (commands, ac-coverage, snippets) still run and report
         # everything at once
@@ -347,7 +363,13 @@ class Gate:
             return
         # manifest-diff — declared files ↔ the real diff
         if diff_file:
-            diff = diff_file.read_text(encoding="utf-8")
+            try:
+                diff = diff_file.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError) as e:
+                # named refusal, never a raw traceback (S2-F2)
+                self.fail("manifest-diff", sid,
+                          f"injected diff file {diff_file} unreadable: {e}")
+                return
         else:
             try:
                 diff = git(self.root, "diff", "--name-status",
@@ -477,6 +499,24 @@ class Gate:
                 for ln in result.stdout.splitlines() if ln.strip()]
 
 
+def _read_injected_json(path: str):
+    """Read + parse an injected evidence file (--command-result,
+    --ui-results). Any read/decode/JSON failure is a NAMED rc-2 usage
+    refusal (S2-F2), never a raw traceback. Returns the parsed value,
+    or None after printing `usage: unreadable <path> — <detail>`."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError) as e:
+        print(f"usage: unreadable {path} — {e}", file=sys.stderr)
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        print(f"usage: unreadable {path} — invalid JSON: {e}",
+              file=sys.stderr)
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="pre_review_gate",
@@ -585,15 +625,27 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
         command_results: list[dict] = []
         for p in args.command_result:
-            parsed = json.loads(Path(p).read_text(encoding="utf-8"))
+            parsed = _read_injected_json(p)
+            if parsed is None:
+                return 2
             # both shapes legal: a LIST of results (extend) or a single
             # result object (append) — never wrap a list as one element.
             if isinstance(parsed, list):
                 command_results.extend(parsed)
             else:
                 command_results.append(parsed)
-        ui_results = (json.loads(Path(args.ui_results).read_text(
-                      encoding="utf-8")) if args.ui_results else None)
+        ui_results = None
+        if args.ui_results:
+            ui_results = _read_injected_json(args.ui_results)
+            if ui_results is None:
+                return 2
+        if args.diff_file:
+            try:
+                Path(args.diff_file).read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError) as e:
+                print(f"usage: unreadable {args.diff_file} — {e}",
+                      file=sys.stderr)
+                return 2
         gate.build_mode(dirs[0], args.base,
                         Path(args.diff_file) if args.diff_file else None,
                         disc, args.run_discovery, disc_cmds,

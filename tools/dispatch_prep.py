@@ -53,7 +53,8 @@ USAGE:
       [--ripple 'PATTERN with {name}']... [--traps FILE]
 
 Exit codes (config_validator convention): 0 ok · 2 usage / missing
-required input (no plan, no parseable contract block, unreadable sha).
+required input (no plan, no parseable contract block, unreadable sha,
+failed grep, escaping default destination).
 Stdlib only. Python >= 3.11.
 """
 from __future__ import annotations
@@ -72,8 +73,10 @@ except ImportError:  # direct-run layout: load the tools package itself
     from tools import contract_lib as C
 
 # Language-generic declaration pattern for seam symbols (no project
-# vocabulary — the reference's list was C#-specific).
-DECL_KEYWORDS = r"(?:class|interface|record|struct|enum|def|fn|func|type|trait|module)"
+# vocabulary — the reference's list was C#-specific). Plain group, not
+# `(?:…)`: the pattern runs through git grep -E (POSIX ERE), which has
+# no non-capturing groups.
+DECL_KEYWORDS = r"(class|interface|record|struct|enum|def|fn|func|type|trait|module)"
 
 
 def git(root: Path, *args: str) -> str:
@@ -86,17 +89,35 @@ def git(root: Path, *args: str) -> str:
     return r.stdout
 
 
+class GrepError(RuntimeError):
+    """git grep itself failed (invalid regex, bad revision, ...). Exit 1
+    means NO MATCHES and stays an empty result; every other nonzero exit
+    is a hard failure the caller must surface — never a silent empty
+    list (an invalid ripple pattern must not read as 'no call sites')."""
+
+
+def _grep_run(args: list[str], pattern: str) -> list[str]:
+    """Run one git grep; exit 0/1 -> hits (possibly empty); anything
+    else -> GrepError naming the pattern and git's stderr."""
+    r = subprocess.run(args, capture_output=True, text=True)
+    if r.returncode not in (0, 1):
+        raise GrepError(
+            f"git grep failed for pattern {pattern!r} "
+            f"(exit {r.returncode}): {r.stderr.strip()}")
+    return r.stdout.splitlines()
+
+
 def grep_tree(root: Path, pattern: str, sha: str,
               globs: tuple[str, ...] = ()) -> list[str]:
     """git grep at a pinned SHA — the same view the child will get.
-    Empty `globs` greps the whole tree (no layout assumption)."""
+    Empty `globs` greps the whole tree (no layout assumption). Raises
+    GrepError on any grep failure other than 'no matches' (exit 1)."""
     out: list[str] = []
     for g in globs or ("",):
         args = ["git", "-C", str(root), "grep", "-n", "-E", pattern, sha]
         if g:
             args += ["--", g]
-        r = subprocess.run(args, capture_output=True, text=True)
-        out.extend(r.stdout.splitlines())
+        out.extend(_grep_run(args, pattern))
     return out
 
 
@@ -149,13 +170,18 @@ def _test_glob(entry: dict) -> tuple[str, ...]:
 
 
 def test_inventory(root: Path, contract: dict, sha: str) -> list[dict]:
-    """EXISTS/MISSING inventory of the contract's named tests at `sha`."""
+    """EXISTS/MISSING inventory of the contract's named tests at `sha`.
+    Existence evidence is a real test DEFINITION (`def`/`class`-style
+    declaration matching the name) — never a bare mention: with
+    `tests[].project` omitted the whole-tree search would otherwise
+    count the committed plan's OWN test-name declaration as evidence
+    the test exists (reporting EXISTS + 'extend the plan')."""
     inv = []
     for t in contract.get("tests") or []:
         name = t.get("name") or ""
         proj = t.get("project") or ""
-        hits = grep_tree(root, rf"\b{re.escape(name)}\b", sha,
-                         _test_glob(t))
+        pattern = rf"\b{DECL_KEYWORDS}\s+{re.escape(name)}\b"
+        hits = grep_tree(root, pattern, sha, _test_glob(t))
         locs = []
         for h in hits[:3]:
             parts = h.split(":", 3)  # sha:path:line:content
@@ -173,10 +199,9 @@ def test_inventory(root: Path, contract: dict, sha: str) -> list[dict]:
 
 
 def _grep_file(root: Path, pattern: str, sha: str, path: str) -> list[str]:
-    r = subprocess.run(["git", "-C", str(root), "grep", "-n", "-E", pattern,
-                        sha, "--", path],
-                       capture_output=True, text=True)
-    return r.stdout.splitlines()
+    args = ["git", "-C", str(root), "grep", "-n", "-E", pattern,
+            sha, "--", path]
+    return _grep_run(args, pattern)
 
 
 def seam_verify(root: Path, contract: dict, sha: str,
@@ -418,16 +443,39 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as e:
         print(f"error: unreadable sha `{args.sha}`: {e}", file=sys.stderr)
         return 2
-    out, status = build(root, args.story_id, sha, plan_path, args.task,
-                        args.ripple, Path(args.traps) if args.traps else None,
-                        tuple(args.tree_glob))
+    try:
+        out, status = build(root, args.story_id, sha, plan_path, args.task,
+                            args.ripple, Path(args.traps) if args.traps
+                            else None, tuple(args.tree_glob))
+    except GrepError as e:
+        print(f"error: refusing to build the dispatch pack — {e}",
+              file=sys.stderr)
+        return 2
     if status:
         return status
     text = "\n".join(out)
     if not text.endswith("\n"):
         text += "\n"
-    dest = Path(args.out) if args.out else \
-        root / "stories" / args.story_id / "dispatch-prep.md"
+    # Destination confinement (same rule as make_context_bundle): the
+    # default destination is built from the untrusted story_id, so it
+    # must resolve (following symlinks) strictly under <root>/stories
+    # BEFORE any mkdir/write — `../../outside` must never escape, and a
+    # canonical id whose story directory is a SYMLINK outward must not
+    # write through it. An explicit --out is the user's own override
+    # (not id-derived), so it is taken as given.
+    stories_root = (root / "stories").resolve()
+    if args.out:
+        dest = Path(args.out)
+    else:
+        cand = (root / "stories" / args.story_id
+                / "dispatch-prep.md").resolve()
+        if not cand.is_relative_to(stories_root):
+            print(f"error: refusing story id {args.story_id!r} — the default "
+                  f"prep destination ({cand}) escapes the stories "
+                  f"directory ({stories_root}); canonical story ids are "
+                  "STORY-NNN (zero-padded 3 digits)", file=sys.stderr)
+            return 2
+        dest = cand
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {dest} ({len(text.splitlines())} lines)")

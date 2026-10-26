@@ -318,5 +318,176 @@ class CliErrorTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class GrepFailureTests(unittest.TestCase):
+    """AB1 (round 27): grep exit 1 = NO MATCHES; any other grep failure
+    is a named refusal BEFORE any pack write — an invalid ripple regex
+    must never read as 'no call sites' with exit 0."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root, self.sha = make_repo(self._td.name)
+        self.out = Path(self._td.name) / "pack" / "dispatch-prep.md"
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _main(self, *extra: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            rc = P.main([STORY, "--root", str(self.root), "--sha", self.sha,
+                         "--out", str(self.out), *extra])
+        return rc, err.getvalue()
+
+    def test_invalid_ripple_regex_refuses_without_writing(self):
+        rc, err = self._main("--ripple", "[")
+        self.assertEqual(rc, 2)
+        self.assertIn("git grep failed for pattern '['", err)
+        self.assertFalse(self.out.exists())
+
+    def test_grep_tree_raises_on_invalid_regex(self):
+        with self.assertRaises(P.GrepError):
+            P.grep_tree(self.root, "[", self.sha)
+
+    def test_grep_tree_no_match_is_empty_not_error(self):
+        self.assertEqual(
+            P.grep_tree(self.root, "def_no_such_symbol_zzz", self.sha), [])
+
+    def test_no_match_ripple_still_writes_pack(self):
+        rc, _ = self._main("--ripple", "no_such_call_site_zzz")
+        self.assertEqual(rc, 0)
+        text = self.out.read_text(encoding="utf-8")
+        self.assertIn("## 6. Ripple call sites (design constraint)", text)
+        self.assertIn("- none detected at this SHA", text)
+
+
+PLAN_WIDGET = """\
+# Impl plan — STORY-101 (widget)
+
+```contract.yaml
+contract_version: 1
+files:
+  - path: src/app/widget.py
+    op: CREATE
+tests:
+  - ac: AC-1
+    name: test_widget_refusal
+    asserts: "named refusal + nothing written"
+```
+"""
+
+
+class TestEvidenceTests(unittest.TestCase):
+    """AB2 (round 27): existence evidence is a real test DEFINITION —
+    the committed plan's OWN test-name declaration (with `project`
+    omitted → whole-tree search) must never count as evidence."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root, _ = make_repo(self._td.name)
+        plan = self.root / "stories" / STORY / "impl-plan.md"
+        plan.write_text(PLAN_WIDGET, encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "-c", "user.name=test",
+             "-c", "user.email=test@example.test",
+             "commit", "-q", "-m", "widget plan")
+        self.sha = _git(self.root, "rev-parse", "HEAD")
+        self.contract = C.extract_contract(PLAN_WIDGET)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def test_plan_declaration_alone_is_missing(self):
+        # no `project` declared: whole-tree grep would hit the plan's own
+        # `name: test_widget_refusal` line — that is NOT a definition
+        inv = P.test_inventory(self.root, self.contract, self.sha)
+        self.assertEqual(len(inv), 1)
+        self.assertEqual(inv[0]["name"], "test_widget_refusal")
+        self.assertEqual(inv[0]["status"], "MISSING")
+
+    def test_real_definition_is_exists(self):
+        (self.root / "tests" / "test_widget.py").write_text(
+            "def test_widget_refusal():\n    pass\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "-c", "user.name=test",
+             "-c", "user.email=test@example.test",
+             "commit", "-q", "-m", "real test")
+        sha = _git(self.root, "rev-parse", "HEAD")
+        inv = P.test_inventory(self.root, self.contract, sha)
+        self.assertEqual(inv[0]["status"], "EXISTS")
+        self.assertTrue(inv[0]["at"][0].startswith("tests/test_widget.py:"))
+
+    def test_explicit_project_glob_still_definition_only(self):
+        # with `project: tests` the plan is outside the glob anyway —
+        # a bare mention inside tests/ must still not count
+        contract = {"files": [], "tests": [
+            {"ac": "AC-1", "name": "test_widget_refusal", "project": "tests"}]}
+        (self.root / "tests" / "notes.md").write_text(
+            "we will add test_widget_refusal later\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        _git(self.root, "-c", "user.name=test",
+             "-c", "user.email=test@example.test",
+             "commit", "-q", "-m", "mention only")
+        sha = _git(self.root, "rev-parse", "HEAD")
+        inv = P.test_inventory(self.root, contract, sha)
+        self.assertEqual(inv[0]["status"], "MISSING")
+
+
+class DestConfinementTests(unittest.TestCase):
+    """AB3 (round 27): the DEFAULT destination must resolve (following
+    symlinks) strictly under <root>/stories before any mkdir/write —
+    same rule as make_context_bundle (round 26)."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.root, self.sha = make_repo(self._td.name)
+        self.plan = self.root / "stories" / STORY / "impl-plan.md"
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _main(self, story_id: str, *extra: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            rc = P.main([story_id, "--root", str(self.root),
+                         "--sha", self.sha, *extra])
+        return rc, err.getvalue()
+
+    def test_traversal_story_id_refused(self):
+        rc, err = self._main("../../outside", "--plan", str(self.plan))
+        self.assertEqual(rc, 2)
+        self.assertIn("refusing story id", err)
+        self.assertIn("escapes the stories directory", err)
+        outside = Path(self._td.name) / "outside"
+        self.assertFalse((outside / "dispatch-prep.md").exists())
+        self.assertFalse(outside.exists())
+
+    def test_symlinked_story_dir_refused(self):
+        outside = Path(self._td.name) / "elsewhere"
+        outside.mkdir()
+        link = self.root / "stories" / "STORY-102"
+        link.symlink_to(outside)
+        (outside / "impl-plan.md").write_text(PLAN_WIDGET, encoding="utf-8")
+        rc, err = self._main("STORY-102")
+        self.assertEqual(rc, 2)
+        self.assertIn("refusing story id", err)
+        self.assertIn("escapes the stories directory", err)
+        self.assertFalse((outside / "dispatch-prep.md").exists())
+
+    def test_plain_canonical_default_writes(self):
+        rc, _ = self._main(STORY)
+        self.assertEqual(rc, 0)
+        dest = self.root / "stories" / STORY / "dispatch-prep.md"
+        self.assertTrue(dest.exists())
+        self.assertIn("# ALREADY DECIDED", dest.read_text(encoding="utf-8"))
+
+    def test_explicit_out_still_honored(self):
+        out = Path(self._td.name) / "somewhere" / "prep.md"
+        rc, _ = self._main(STORY, "--out", str(out))
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -165,6 +165,7 @@ class TestRuleset(unittest.TestCase):
         self.assertEqual(result["bypass"], [
             {"actor_type": "Integration", "mode": "always",
              "actor_id": 5239072}])
+        self.assertEqual(result["rules"], [])  # default when absent
 
     def test_disabled_enforcement(self):
         forge = FP.Forge(RecorderTransport({"ruleset": RULESET_DISABLED}))
@@ -179,6 +180,7 @@ class TestRuleset(unittest.TestCase):
         self.assertFalse(result["found"])
         self.assertIsNone(result["enforcement"])
         self.assertEqual(result["read"], "ok")
+        self.assertEqual(result["rules"], [])
 
     def test_refused_read_no_raise(self):
         detail = ("probe failed: ruleset — HTTP 403: plan-gated")
@@ -188,6 +190,228 @@ class TestRuleset(unittest.TestCase):
         self.assertEqual(result["read"], "refused")
         self.assertEqual(result["error"], detail)
         self.assertFalse(result["found"])
+        self.assertEqual(result["rules"], [])
+
+
+class TestRulesetExcludeMatching(unittest.TestCase):
+    """F1: a ruleset matches iff include matches AND exclude does NOT
+    (same two selector forms on both lists)."""
+
+    def _ruleset(self, include, exclude, branch="main"):
+        data = {"rulesets": [{
+            "id": 1, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": include,
+                                        "exclude": exclude}},
+            "bypass_actors": []}]}
+        forge = FP.Forge(RecorderTransport({"ruleset": data}))
+        return forge.ruleset("fixture-org/app", branch)
+
+    def test_include_default_branch_exclude_main_not_selected(self):
+        result = self._ruleset(["~DEFAULT_BRANCH"], ["refs/heads/main"])
+        self.assertFalse(result["found"])
+        self.assertEqual(result["read"], "ok")
+
+    def test_include_main_exclude_default_branch_not_selected(self):
+        result = self._ruleset(["refs/heads/main"], ["~DEFAULT_BRANCH"])
+        self.assertFalse(result["found"])
+
+    def test_exclude_unrelated_branch_still_selected(self):
+        result = self._ruleset(["~DEFAULT_BRANCH"], ["refs/heads/release/*"])
+        self.assertTrue(result["found"])
+        self.assertEqual(result["enforcement"], "active")
+
+    def test_excluded_ruleset_skipped_next_one_considered(self):
+        data = {"rulesets": [
+            {"id": 1, "target": "branch", "enforcement": "active",
+             "conditions": {"ref_name": {
+                 "include": ["~DEFAULT_BRANCH"],
+                 "exclude": ["refs/heads/main"]}},
+             "bypass_actors": []},
+            {"id": 2, "target": "branch", "enforcement": "disabled",
+             "conditions": {"ref_name": {
+                 "include": ["refs/heads/main"]}},
+             "bypass_actors": []}]}
+        forge = FP.Forge(RecorderTransport({"ruleset": data}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["enforcement"], "disabled")  # id=2 chosen
+
+    def test_exclude_reads_detail_merged_conditions(self):
+        """F1 x F9: on the LIVE path the conditions arrive via the
+        per-id detail merge — exclude matching must read the MERGED
+        conditions (list summary carries none)."""
+        list_json = json.dumps([{"id": 7, "target": "branch",
+                                 "enforcement": "active"}])
+        detail_json = json.dumps({
+            "id": 7, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"],
+                                        "exclude": ["refs/heads/main"]}},
+            "bypass_actors": []})
+        stub = _stub_run(list_json, detail_json)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            transport_result = FP.gh_probe_transport(
+                "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        forge = FP.Forge(RecorderTransport({"ruleset": transport_result}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertFalse(result["found"])
+
+
+class TestRulesetCarriesRules(unittest.TestCase):
+    """F10: the probe preserves the protection `rules` array."""
+
+    def test_rules_preserved_from_dataset_entry(self):
+        rules = [{"type": "deletion"},
+                 {"type": "non_fast_forward"},
+                 {"type": "pull_request",
+                  "parameters": {"required_approving_review_count": 1}},
+                 {"type": "required_status_checks",
+                  "parameters": {"required_status_checks": []}}]
+        data = {"rulesets": [{
+            "id": 1, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "bypass_actors": [], "rules": rules}]}
+        forge = FP.Forge(RecorderTransport({"ruleset": data}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["rules"], rules)
+
+
+class TestRealTransportRepoNormalization(unittest.TestCase):
+    """F5: `gh api repos/...` endpoints get the owner/name form — the
+    workspace canonical `github.com/owner/name` is normalized (stubbed
+    subprocess; exact argv asserted). No network, no gh."""
+
+    LIST_EMPTY = json.dumps([])
+
+    def _argvs(self, stub):
+        return [call.args[0] for call in stub.call_args_list]
+
+    def test_ruleset_list_endpoint_normalized(self):
+        stub = _stub_run(self.LIST_EMPTY)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            FP.gh_probe_transport(
+                "ruleset", {"repo": "github.com/fixture-org/app",
+                            "branch": "main"})
+        argv = self._argvs(stub)[0]
+        self.assertEqual(
+            argv, ["gh", "api", "repos/fixture-org/app/rulesets"])
+
+    def test_ruleset_per_id_endpoint_normalized(self):
+        list_json = json.dumps([{"id": 42, "target": "branch"}])
+        detail_json = json.dumps({"id": 42, "target": "branch"})
+        stub = _stub_run(list_json, detail_json)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            FP.gh_probe_transport(
+                "ruleset", {"repo": "github.com/fixture-org/app",
+                            "branch": "main"})
+        argvs = self._argvs(stub)
+        self.assertEqual(
+            argvs[1], ["gh", "api", "repos/fixture-org/app/rulesets/42"])
+
+    def test_issue_form_contents_endpoint_normalized(self):
+        stub = _stub_run(json.dumps({"path": ".github/ISSUE_TEMPLATE/x.yml"}))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            FP.gh_probe_transport(
+                "issue_form", {"repo": "github.com/fixture-org/app",
+                               "filename": "x.yml"})
+        argv = self._argvs(stub)[0]
+        self.assertEqual(
+            argv, ["gh", "api",
+                   "repos/fixture-org/app/contents/"
+                   ".github/ISSUE_TEMPLATE/x.yml"])
+
+    def test_plain_slug_unchanged(self):
+        stub = _stub_run(self.LIST_EMPTY)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            FP.gh_probe_transport(
+                "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        argv = self._argvs(stub)[0]
+        self.assertEqual(
+            argv, ["gh", "api", "repos/fixture-org/app/rulesets"])
+
+    def test_rest_repo_helper_shapes(self):
+        self.assertEqual(FP.rest_repo("github.com/fixture-org/app"),
+                         "fixture-org/app")
+        self.assertEqual(FP.rest_repo("fixture-org/app"),
+                         "fixture-org/app")
+        self.assertEqual(
+            FP.rest_repo("https://github.com/fixture-org/app.git"),
+            "fixture-org/app")
+
+    def test_repo_view_and_labels_keep_host_prefixed_form(self):
+        # `gh repo view` / `gh label list -R` accept github.com/owner/name
+        stub = _stub_run(json.dumps({"nameWithOwner": "fixture-org/app",
+                                     "defaultBranchRef": {"name": "main"},
+                                     "visibility": "PRIVATE"}))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            FP.gh_probe_transport(
+                "repo_view", {"repo": "github.com/fixture-org/app"})
+        self.assertEqual(
+            self._argvs(stub)[0][:3],
+            ["gh", "repo", "view"])
+        self.assertEqual(self._argvs(stub)[0][3], "github.com/fixture-org/app")
+        stub = _stub_run(json.dumps([]))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            FP.gh_probe_transport(
+                "labels", {"repo": "github.com/fixture-org/app"})
+        self.assertEqual(self._argvs(stub)[0][4], "github.com/fixture-org/app")
+
+
+class TestRealTransportRulesetDetailMerge(unittest.TestCase):
+    """F9: the per-id detail payload is merged COMPLETELY — conditions
+    and rules come from the detail when the list summary lacks them."""
+
+    def test_detail_conditions_and_rules_win_over_summary(self):
+        list_json = json.dumps([{"id": 3, "target": "branch",
+                                 "enforcement": "active"}])
+        detail_json = json.dumps({
+            "id": 3, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "rules": [{"type": "deletion"}],
+            "bypass_actors": [{"actor_type": "Integration",
+                               "actor_id": 9, "mode": "always"}]})
+        stub = _stub_run(list_json, detail_json)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        entry = result["rulesets"][0]
+        self.assertEqual(entry["conditions"],
+                         {"ref_name": {"include": ["~DEFAULT_BRANCH"]}})
+        self.assertEqual(entry["rules"], [{"type": "deletion"}])
+        self.assertEqual(entry["bypass_actors"],
+                         [{"actor_type": "Integration",
+                           "actor_id": 9, "mode": "always"}])
+
+    def test_probe_selects_ruleset_from_merged_detail(self):
+        """The regression the review names: list WITHOUT conditions +
+        detail WITH them -> found=True on the live path."""
+        list_json = json.dumps([{"id": 3, "target": "branch",
+                                 "enforcement": "active"}])
+        detail_json = json.dumps({
+            "id": 3, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "rules": [], "bypass_actors": []})
+        stub = _stub_run(list_json, detail_json)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            transport_result = FP.gh_probe_transport(
+                "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        forge = FP.Forge(RecorderTransport({"ruleset": transport_result}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["enforcement"], "active")
+
+    def test_summary_fallback_when_detail_lacks_key(self):
+        list_json = json.dumps([{"id": 3, "target": "branch",
+                                 "enforcement": "active",
+                                 "name": "from-summary"}])
+        detail_json = json.dumps({"id": 3, "target": "branch"})
+        stub = _stub_run(list_json, detail_json)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        entry = result["rulesets"][0]
+        self.assertEqual(entry["name"], "from-summary")  # summary kept
+        self.assertEqual(entry["enforcement"], "active")
 
 
 class TestLabels(unittest.TestCase):
@@ -379,6 +603,16 @@ class TestFixtureDatasets(unittest.TestCase):
             with self.assertRaises(FP.FixtureError) as ctx:
                 FP.Forge.from_fixture(bad)
             self.assertIn("malformed", str(ctx.exception))
+
+    def test_non_utf8_dataset_fixture_error_not_unicode_error(self):
+        # F6: a non-UTF-8 dataset is a named FixtureError, never a raw
+        # UnicodeDecodeError traceback
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "latin1.json"
+            bad.write_bytes(b'{"repo_view": {"\xff\xfe\x80": 1}}')
+            with self.assertRaises(FP.FixtureError) as ctx:
+                FP.Forge.from_fixture(bad)
+            self.assertIn("unreadable", str(ctx.exception))
 
     def test_non_object_dataset_fixture_error(self):
         with tempfile.TemporaryDirectory() as tmp:

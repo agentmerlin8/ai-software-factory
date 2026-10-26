@@ -494,6 +494,107 @@ class FailPathPerCheck(unittest.TestCase):
             detail,
             "multiple integration bypasses — expected the factory bot only")
 
+    # -- F10: protection-rules validation (home variant) ----------------------
+
+    def test_c3_fail_empty_rules(self):
+        def mutate(rs):
+            rs["rulesets"][0]["rules"] = []
+        detail = self.ruleset_variant(mutate)
+        self.assertEqual(
+            detail,
+            "ruleset missing protections: deletion, non_fast_forward, "
+            "pull_request, required_status_checks")
+
+    def test_c3_fail_missing_rules_key_entirely(self):
+        def mutate(rs):
+            del rs["rulesets"][0]["rules"]
+        detail = self.ruleset_variant(mutate)
+        self.assertIn("ruleset missing protections:", detail)
+
+    def test_c3_fail_single_missing_protection(self):
+        def mutate(rs):
+            rules = rs["rulesets"][0]["rules"]
+            rs["rulesets"][0]["rules"] = [
+                r for r in rules if r["type"] != "non_fast_forward"]
+        detail = self.ruleset_variant(mutate)
+        self.assertEqual(detail,
+                         "ruleset missing protections: non_fast_forward")
+
+    def test_c3_fail_pull_request_without_approval(self):
+        def mutate(rs):
+            for rule in rs["rulesets"][0]["rules"]:
+                if rule["type"] == "pull_request":
+                    rule["parameters"]["required_approving_review_count"] = 0
+        detail = self.ruleset_variant(mutate)
+        self.assertEqual(detail,
+                         "ruleset missing protections: pull_request")
+
+    def test_w7_fail_missing_protections(self):
+        # W-7 shares evaluate_ruleset — same named FAIL on the home repo
+        def mutate(rs):
+            rs["rulesets"][0]["rules"] = [
+                {"type": "deletion"}]
+        with tempfile.TemporaryDirectory() as td:
+            ds = Path(td) / "ds.json"
+            data = json.loads(DS_GOOD.read_text(encoding="utf-8"))
+            mutate(data["ruleset"])
+            ds.write_text(json.dumps(data), encoding="utf-8")
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "W-7")
+            self.assertEqual(
+                detail,
+                "ruleset missing protections: non_fast_forward, "
+                "pull_request, required_status_checks")
+
+    # -- F10: protection-rules validation (Mode-2 target variant) -------------
+
+    def test_c3_target_empty_rules_fails(self):
+        def mutate(data):
+            data["ruleset@fixture-org/app"]["rulesets"][0]["rules"] = []
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn(
+                "target app: ruleset missing protections: deletion, "
+                "non_fast_forward, pull_request, required_status_checks",
+                detail)
+
+    def test_c3_target_single_missing_protection_fails(self):
+        def mutate(data):
+            rules = data["ruleset@fixture-org/app"]["rulesets"][0]["rules"]
+            data["ruleset@fixture-org/app"]["rulesets"][0]["rules"] = [
+                r for r in rules if r["type"] != "deletion"]
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn("target app: ruleset missing protections: deletion",
+                          detail)
+
+    def test_missing_protections_helper_unit(self):
+        # the pure helper: deterministic sorted output; the four types
+        # only; pull_request needs >= 1 approval
+        self.assertEqual(RD.missing_protections([]), list(
+            RD.REQUIRED_PROTECTIONS))
+        good = json.loads(DS_GOOD.read_text(encoding="utf-8"))
+        rules = good["ruleset"]["rulesets"][0]["rules"]
+        self.assertEqual(RD.missing_protections(rules), [])
+        self.assertIsNone(RD.protections_error(rules))
+        self.assertEqual(
+            RD.protections_error([{"type": "deletion"}]),
+            "ruleset missing protections: non_fast_forward, pull_request, "
+            "required_status_checks")
+        # extra rule types beyond the four do NOT over-constrain
+        extra = rules + [{"type": "commit_message"}]
+        self.assertEqual(RD.missing_protections(extra), [])
+
     # -- C-3 Mode-2 target variant (tmp-mutated copies of DS_GOOD) ----------
 
     def mutated_dataset(self, td, mutate):
@@ -677,6 +778,30 @@ class FailPathPerCheck(unittest.TestCase):
     def test_c12_fail_gitignore(self):
         self.assert_defect(["bad-gitignore"], "C-12",
                            ["no secret-ish ignore pattern"])
+
+    def test_gitignore_template_does_not_ignore_override(self):
+        # F7: the controller requires factory/locks/OVERRIDE COMMITTED
+        # (HEAD:factory/locks/OVERRIDE) — an ignore entry would make the
+        # documented copy/fill/commit workflow fail without force-add.
+        template = (REPO_ROOT / "onboarding" / "templates"
+                    / "gitignore").read_text(encoding="utf-8")
+        lines = [ln.strip() for ln in template.splitlines()]
+        self.assertNotIn("factory/locks/OVERRIDE", lines)
+        self.assertNotIn("factory/locks/OVERRIDE.example", lines)
+        self.assertNotIn("factory/locks/", lines)
+        self.assertNotIn("factory/locks/*", lines)
+        # the C-12 secret-ish patterns must stay in the template
+        for pat in RD.SECRETISH_PATTERNS:
+            self.assertTrue(any(pat in ln.lower() for ln in lines), pat)
+        # C-12 still passes on the good fixture (its .gitignore never
+        # carried the OVERRIDE line)
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            rc, _out, jdata = verify_home(home)
+            self.assertEqual(rc, 0)
+            self.assertEqual(detail_of(jdata, "C-12"),
+                             "factory/SECRETS.md present; .gitignore "
+                             "ignores secret-ish paths")
 
     def test_c13_fail_no_attest(self):
         self.assert_defect(["drop-attest-C-13"], "C-13",

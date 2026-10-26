@@ -23,11 +23,16 @@ encoded as a direct-run CLI with two modes:
   --full (the encoded v0.1.x procedure; NOT executed in S3)
       The real from-scratch run against a fresh GitHub repo (LIVE
       forge — no fixture): gh auth check → gh repo create → clone →
-      the SAME pipeline → verify → the factory/KICKOFF.md handoff.
-      Refuses without --confirm-full-run (named, rc 1, prints the
-      plan instead); with it, every command is printed verbatim
-      before execution. This live path is UNEXERCISED in v0.1-S3
-      (v0.1.x hardening item #1).
+      the SAME pipeline MINUS synthetic attestations → the operator
+      handoff. The live path NEVER appends attestations: it prints
+      `ATTEST REQUIRED:` operator commands (C-13/U-1/U-2/A-2) and the
+      operator runs the attests + `verify <repo>` themselves. On
+      completion (success or failure) the temp checkout is RETAINED
+      and its durable path printed (`kept: <path>`) — the checkout
+      stays; remove it when done. Refuses without --confirm-full-run
+      (named, rc 1, prints the plan instead); with it, every command
+      is printed verbatim before execution. This live path is
+      UNEXERCISED in v0.1-S3 (v0.1.x hardening item #1).
 
 Every run prints `PASS:`-lines per step (or one `FAIL: <step> —
 <rc + first error line>` and stops) and exactly ONE final `NEXT:`
@@ -85,6 +90,23 @@ class TestOutError(RuntimeError):
     """Named driver refusal (rc 1; never a raw traceback)."""
 
 
+def validate_dir_name(name: str) -> None:
+    """Confine a --name/--repo-name value to a single relative directory
+    name: non-empty, no NUL, no '/' or '\\', not '.'/'..', and equal to
+    its own Path(...).name. Anything else is a named refusal BEFORE any
+    path join (an absolute or '..' name would escape the temp dir)."""
+    bad = (not isinstance(name, str)
+           or not name
+           or "\x00" in name
+           or "/" in name or "\\" in name
+           or name in (".", "..")
+           or Path(name).name != name)
+    if bad:
+        raise TestOutError(
+            f"refused: bad --name '{name}' — must be a single relative "
+            "directory name")
+
+
 # ---------------------------------------------------------------- plumbing --
 
 def child_env() -> dict[str, str]:
@@ -126,14 +148,23 @@ def first_error_line(out: subprocess.CompletedProcess) -> str:
 def seed_repo(seed_dir: Path, dest: Path) -> None:
     """Copy the seed tree (files only) into dest and make it a fresh
     git repo: init -b main + an initial commit + the fake origin.
-    Refuses (named) when the seed carries a nested .git."""
+    Refuses (named) when the seed carries a nested .git OR any symlink
+    — a preserved symlink could point OUTSIDE the temp dir and later
+    writes (e.g. ensure_gitignore_secrets) would mutate the original
+    target. The scan happens BEFORE any copy: a refusal leaves dest
+    uncreated. The copy itself is symlink-free too (defense in depth)."""
     if not seed_dir.is_dir():
         raise TestOutError(f"seed directory not found: {seed_dir}")
     nested = sorted(seed_dir.rglob(".git"))
     if nested:
         raise TestOutError(f"refused: seed carries a nested .git: "
                            f"{nested[0]} (the seed must be files only)")
-    shutil.copytree(seed_dir, dest, symlinks=True)
+    for path in sorted(seed_dir.rglob("*")):
+        if path.is_symlink():
+            raise TestOutError(
+                f"refused: seed carries a symlink: {path} "
+                "(the seed must be symlink-free)")
+    shutil.copytree(seed_dir, dest, symlinks=False)
     for argv in (
         ["git", "init", "-b", "main", str(dest)],
         ["git", "-C", str(dest), *GIT_IDENTITY, "add", "-A"],
@@ -206,13 +237,22 @@ def ensure_gitignore_secrets(repo: Path) -> None:
 
 def run_pipeline(repo: Path, dataset: Optional[str], project_id: str,
                  runner: Runner, log: Callable[[str, str], None],
-                 postures: tuple[str, ...] = ("brownfield",)) -> None:
+                 postures: tuple[str, ...] = ("brownfield",),
+                 attest_mode: str = "synthetic") -> None:
     """The from-scratch pipeline through the REAL CLIs. `dataset`
     None = live forge (--full); otherwise --forge-fixture <dataset>.
     `postures` = acceptable `inspect` posture values: smoke seeds a
     source tree (brownfield only); --full clones a fresh GitHub repo
     (greenfield, or brownfield once seeded).
+    `attest_mode`: "synthetic" (fixture-backed SMOKE only) appends
+    approved human_gate rows via readiness.append_attest and drives
+    `verify` to GREEN; "operator" (the LIVE path) NEVER appends
+    attestations — it prints the exact `ATTEST REQUIRED:` operator
+    commands for C-13/U-1/U-2/A-2 and hands off (the operator runs
+    the attests + `verify <repo>` themselves).
     Raises StepFailure on the first deviation."""
+    if attest_mode not in ("synthetic", "operator"):
+        raise TestOutError(f"refused: unknown attest_mode {attest_mode!r}")
     fx = ["--forge-fixture", dataset] if dataset else []
     onboard = lambda *args: python_argv(ONBOARD, *args)  # noqa: E731
 
@@ -262,13 +302,27 @@ def run_pipeline(repo: Path, dataset: Optional[str], project_id: str,
     log("apply-idempotent",
         f"rc 0 — re-apply skipped everything ({exists} EXISTS lines)")
 
+    if attest_mode == "operator":
+        # LIVE path: synthetic attestations would be lies — print the
+        # exact operator commands and hand off (no ledger writes here).
+        kit = str(KIT_ROOT / "onboarding" / "onboard.py")
+        for cid in ATTEST_IDS:
+            print(f"ATTEST REQUIRED: python3 {kit} attest {repo} {cid} "
+                  f"--by <you> --note \"<command|manual>\"")
+        log("attests", "LIVE path: NO synthetic attestations appended — "
+                       f"operator must run the {len(ATTEST_IDS)} "
+                       "ATTEST REQUIRED commands above, then "
+                       f"`python3 {kit} verify {repo}` (expect GREEN)")
+        return
+
     for cid in ATTEST_IDS:
         try:
             RD.append_attest(repo, cid, ATTEST_BY, f"test-out attest {cid}")
         except (RD.AttestError, OSError) as exc:
             raise StepFailure("attests", f"append_attest {cid} refused: {exc}")
-    log("attests", f"{', '.join(ATTEST_IDS)} appended via "
-                   "readiness.append_attest (real ledger rows)")
+    log("attests", f"fixture-backed smoke: {', '.join(ATTEST_IDS)} appended "
+                   "via readiness.append_attest (synthetic rows, "
+                   f"attributed {ATTEST_BY})")
 
     out = expect(runner, onboard("verify", str(repo), *fx), "verify")
     fails = [ln for ln in out.stdout.splitlines() if ln.startswith("FAIL ")]
@@ -289,6 +343,12 @@ def run_pipeline(repo: Path, dataset: Optional[str], project_id: str,
 
 def run_smoke(args: argparse.Namespace) -> int:
     """The S3 acceptance mode: deterministic, temp-only, fixture-backed."""
+    try:
+        validate_dir_name(args.name)
+    except TestOutError as exc:
+        print(str(exc))
+        print(FAIL_NEXT)
+        return 1
     dataset = Path(args.dataset)
     seed_dir = Path(args.seed_dir) if args.seed_dir else DEFAULT_SEED
     tmp = Path(tempfile.mkdtemp(prefix="test-out-smoke."))
@@ -384,6 +444,12 @@ def run_full(args: argparse.Namespace) -> int:
         print("NEXT: re-run with --repo-name <name> --project-id "
               "<org>/projects/<n>.")
         return 1
+    try:
+        validate_dir_name(args.repo_name)
+    except TestOutError as exc:
+        print(str(exc))
+        print(FAIL_NEXT)
+        return 1
     # --- live execution (unexercised in v0.1-S3) --------------------------
     tmp_dir = Path(tempfile.mkdtemp(prefix="test-out-full."))
     repo = tmp_dir / args.repo_name
@@ -413,21 +479,31 @@ def run_full(args: argparse.Namespace) -> int:
             expect(run_argv, argv, "initial-commit")
         run_pipeline(repo, None, args.project_id, run_argv,
                      lambda step, detail: print(f"PASS: {step} — {detail}"),
-                     postures=("greenfield", "brownfield"))
+                     postures=("greenfield", "brownfield"),
+                     attest_mode="operator")
         print(f"PASS: handoff — see {repo / 'factory' / 'KICKOFF.md'} "
               "(next action)")
     except StepFailure as failure:
         print(f"FAIL: {failure.step} — {failure.detail}")
+        _print_full_retention(tmp_dir, repo)
         print(FAIL_NEXT)
         return 1
-    finally:
-        if args.keep:
-            print(f"temp dir kept: {tmp_dir}")
-        else:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-    print("NEXT: open the new repo's factory/KICKOFF.md and start the "
-          "first factory run (the from-scratch procedure is proven live).")
+    _print_full_retention(tmp_dir, repo)
+    print("NEXT: run the ATTEST REQUIRED commands above, then `python3 "
+          f"{KIT_ROOT / 'onboarding' / 'onboard.py'} verify {repo}` "
+          "(expect GREEN); open the repo's factory/KICKOFF.md and start "
+          "the first factory run.")
     return 0
+
+
+def _print_full_retention(tmp_dir: Path, repo: Path) -> None:
+    """F8: the --full checkout is RETAINED (success or failure) and its
+    durable path printed — the KICKOFF.md handoff must exist somewhere
+    after the driver returns. The checkout stays; remove it when done.
+    (--keep is a no-op for --full: retention is unconditional.)"""
+    print(f"kept: {tmp_dir}")
+    print(f"kept: checkout {repo} — factory/KICKOFF.md handoff inside "
+          "(the checkout stays; remove it when done)")
 
 
 # --------------------------------------------------------------------- CLI --

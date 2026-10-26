@@ -423,6 +423,46 @@ def bypass_error(bypass: list[dict]) -> Optional[str]:
     return None
 
 
+# C-3 requires the FULL protection set (kit-v0.1/target-repo-readiness.md):
+# PR review with >= 1 approval, required status checks, no force-push, no
+# deletion. `active` alone is not protection — an empty rules list is not.
+REQUIRED_PROTECTIONS = ("deletion", "non_fast_forward", "pull_request",
+                        "required_status_checks")
+
+
+def missing_protections(rules: list) -> list[str]:
+    """The protection rule types missing from a ruleset's `rules` array
+    (sorted, deterministic). `pull_request` counts only when its
+    parameters require >= 1 approving review. Nothing beyond these four
+    types is required."""
+    by_type = {}
+    for rule in rules if isinstance(rules, list) else []:
+        if isinstance(rule, dict) and isinstance(rule.get("type"), str):
+            by_type.setdefault(rule["type"], rule)
+    missing = []
+    for name in REQUIRED_PROTECTIONS:
+        rule = by_type.get(name)
+        if rule is None:
+            missing.append(name)
+            continue
+        if name == "pull_request":
+            params = rule.get("parameters") or {}
+            count = params.get("required_approving_review_count")
+            if not isinstance(count, int) or isinstance(count, bool) \
+                    or count < 1:
+                missing.append(name)
+    return missing
+
+
+def protections_error(rules: list) -> Optional[str]:
+    """Named FAIL when the protection set is incomplete (F10); None when
+    all four required rule types are present."""
+    missing = missing_protections(rules)
+    if not missing:
+        return None
+    return f"ruleset missing protections: {', '.join(missing)}"
+
+
 def evaluate_ruleset(ctx: Context, repo: Optional[str],
                      label: str) -> tuple[str, str]:
     """Shared C-3/W-7 ruleset evaluation (frozen wording)."""
@@ -441,6 +481,9 @@ def evaluate_ruleset(ctx: Context, repo: Optional[str],
         return FAIL, (f"ruleset staged, not enforcing "
                       f"(enforcement={rs.get('enforcement')!r})")
     err = bypass_error(rs.get("bypass") or [])
+    if err:
+        return FAIL, err
+    err = protections_error(rs.get("rules") or [])
     if err:
         return FAIL, err
     return PASS, (f"active ruleset on {ctx.default_branch}; bypass = the "
@@ -569,6 +612,9 @@ def target_ruleset_problem(ctx: Context, rid: str,
            for b in rs.get("bypass") or []):
         return (f"target {rid}: carries a factory bypass — the bypass "
                 "lives on the workspace repo only")
+    err = protections_error(rs.get("rules") or [])
+    if err:
+        return f"target {rid}: {err}"
     return None
 
 

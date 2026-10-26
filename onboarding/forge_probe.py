@@ -15,7 +15,8 @@ Probes (op name == probe name; all read-only unless noted):
   * auth_scopes()      -> {login, scopes, missing}
   * repo_view(repo)    -> {name_with_owner, default_branch, visibility}
   * ruleset(repo, branch)
-                       -> {target, found, enforcement, bypass, read[, error]}
+                       -> {target, found, enforcement, bypass, rules,
+                           read[, error]}
   * labels(repo, required)
                        -> {present, missing}
   * issue_form(repo, filename)
@@ -131,6 +132,23 @@ def build_label_ensure_argv(repo: str, name: str, color: str,
             "--force"]
 
 
+def rest_repo(repo: str) -> str:
+    """Normalize a repo value to the `owner/name` form the REST API path
+    segment requires. `gh api repos/<repo>/...` breaks on the workspace
+    canonical form `github.com/owner/name` (-> `repos/github.com/owner/
+    name/...`), which is what readiness.target_ruleset_problem() passes
+    for Mode-2 bindings. A leading host segment (and an https URL's
+    scheme/host, a trailing `.git`) is stripped; the last two non-empty
+    path segments are kept. `gh repo view` / `gh label list -R` accept
+    the host-prefixed form and are left untouched. Falls back to the
+    value verbatim when fewer than two segments are present (the REST
+    call then fails on its own terms, named)."""
+    if not isinstance(repo, str) or not repo:
+        return repo
+    slug = fixture_repo_slug(repo)
+    return slug if slug else repo
+
+
 # ---------------------------------------------------------------------------
 # default transport — maps ops to gh argv invocations (no shell anywhere)
 # ---------------------------------------------------------------------------
@@ -176,7 +194,13 @@ def gh_probe_transport(op: str, params: dict) -> dict:
                    "repo view")
         return _json_or_refuse(out.stdout, "repo view")
     if op == "ruleset":
-        repo = params["repo"]
+        # The list endpoint returns summaries WITHOUT `conditions`/`rules`;
+        # the per-id detail fetch carries them. Merge the COMPLETE detail
+        # payload — detail wins for every key it carries, so the branch
+        # matcher (Forge.ruleset) sees the real conditions/rules on the
+        # live path (fixtures mask this by pre-merging). The repo is
+        # normalized to owner/name for the REST path segment (F5).
+        repo = rest_repo(params["repo"])
         listing = _json_or_refuse(
             _run(["gh", "api", f"repos/{repo}/rulesets"],
                  "ruleset").stdout,
@@ -189,9 +213,8 @@ def gh_probe_transport(op: str, params: dict) -> dict:
                      "ruleset").stdout,
                 "ruleset")
             merged = dict(entry)
-            merged["bypass_actors"] = detail.get("bypass_actors", [])
-            merged["enforcement"] = detail.get(
-                "enforcement", entry.get("enforcement"))
+            if isinstance(detail, dict):
+                merged.update(detail)  # complete detail payload wins
             rulesets.append(merged)
         return {"rulesets": rulesets}
     if op == "labels":
@@ -202,7 +225,8 @@ def gh_probe_transport(op: str, params: dict) -> dict:
     if op == "issue_form":
         repo, filename = params["repo"], params["filename"]
         path = f".github/ISSUE_TEMPLATE/{filename}"
-        argv = ["gh", "api", f"repos/{repo}/contents/{path}"]
+        # contents path segment: owner/name form only (F5 normalization)
+        argv = ["gh", "api", f"repos/{rest_repo(repo)}/contents/{path}"]
         try:
             out = subprocess.run(argv, capture_output=True, text=True)
         except OSError as exc:
@@ -301,6 +325,9 @@ def build_fixture_transport(path: str | Path) -> Callable[[str, dict], dict]:
     try:
         raw = p.read_text(encoding="utf-8")
     except OSError as exc:
+        raise FixtureError(f"fixture dataset unreadable: {p} — {exc}")
+    except UnicodeDecodeError as exc:
+        # non-UTF-8 dataset: named refusal, never a raw traceback (F6)
         raise FixtureError(f"fixture dataset unreadable: {p} — {exc}")
     try:
         data = json.loads(raw)
@@ -412,28 +439,36 @@ class Forge:
                 "visibility": data.get("visibility")}
 
     def ruleset(self, repo: str, branch: str) -> dict:
-        """{target, found, enforcement, bypass, read[, error]} for the
-        branch ruleset. Refused reads (plan-gated 403 etc.) come back as
-        read='refused' + error — never an exception; no rulesets at all
-        -> found=False."""
+        """{target, found, enforcement, bypass, rules, read[, error]} for
+        the branch ruleset. Refused reads (plan-gated 403 etc.) come back
+        as read='refused' + error — never an exception; no rulesets at
+        all -> found=False. A ruleset matches iff its
+        conditions.ref_name.include matches the branch AND its
+        conditions.ref_name.exclude does NOT (same two selector forms on
+        both lists; F1). `rules` carries the protection-rule objects the
+        check layer validates (F10)."""
         try:
             data = self._call("ruleset", "ruleset",
                               {"repo": repo, "branch": branch})
         except ProbeError as exc:
             return {"target": "branch", "found": False,
-                    "enforcement": None, "bypass": [],
+                    "enforcement": None, "bypass": [], "rules": [],
                     "read": "refused", "error": str(exc)}
         want = f"refs/heads/{branch}"
         chosen = None
         for rs in data.get("rulesets", []):
-            include = (((rs.get("conditions") or {}).get("ref_name")
-                        or {}).get("include") or [])
-            if want in include or "~DEFAULT_BRANCH" in include:
+            ref_name = (rs.get("conditions") or {}).get("ref_name") or {}
+            include = ref_name.get("include") or []
+            exclude = ref_name.get("exclude") or []
+            included = want in include or "~DEFAULT_BRANCH" in include
+            excluded = want in exclude or "~DEFAULT_BRANCH" in exclude
+            if included and not excluded:
                 chosen = rs
                 break
         if chosen is None:
             return {"target": "branch", "found": False,
-                    "enforcement": None, "bypass": [], "read": "ok"}
+                    "enforcement": None, "bypass": [], "rules": [],
+                    "read": "ok"}
         bypass = [{"actor_type": a.get("actor_type"),
                    "mode": a.get("mode") or a.get("bypass_mode"),
                    "actor_id": a.get("actor_id")}
@@ -442,6 +477,7 @@ class Forge:
                 "found": True,
                 "enforcement": chosen.get("enforcement"),
                 "bypass": bypass,
+                "rules": chosen.get("rules") or [],
                 "read": "ok"}
 
     def labels(self, repo: str, required: list[str]) -> dict:

@@ -1,0 +1,232 @@
+{
+  "auth_scopes": {
+    "stdout": "github.com\n  ✓ Logged in to github.com account fixture-bot (GH_TOKEN)\n  - Token scopes: 'gist', 'project', 'read:org', 'repo'\n",
+    "stderr": ""
+  },
+  "repo_view": {
+    "nameWithOwner": "fixture-org/app",
+    "defaultBranchRef": {
+      "name": "main"
+    },
+    "visibility": "PRIVATE"
+  },
+  "ruleset": {
+    "rulesets": [
+      {
+        "id": 24744012,
+        "name": "protect-main",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "bypass_actors": [
+          {
+            "actor_type": "Integration",
+            "actor_id": 5239072,
+            "mode": "always"
+          }
+        ]
+      }
+    ]
+  },
+  "labels": {
+    "labels": [
+      {
+        "name": "factory:planning",
+        "color": "1d76db",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:plan-review",
+        "color": "5319e7",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:implementation",
+        "color": "0e8a16",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:code-review",
+        "color": "fbca04",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:testing",
+        "color": "d93f0b",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:done",
+        "color": "cccccc",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:blocked",
+        "color": "b60205",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "needs-human",
+        "color": "ff69b4",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory",
+        "color": "0E8A16",
+        "description": "board auto-add gate"
+      },
+      {
+        "name": "idea",
+        "color": "D4C5F9",
+        "description": "idea intake — refined into a context bundle before stories"
+      }
+    ]
+  },
+  "issue_form": {
+    "present": true,
+    "path": ".github/ISSUE_TEMPLATE/idea.yml"
+  },
+  "project": {
+    "node_id": "PVT_kwDON8RfA87FIXTURE",
+    "fields": {
+      "nodes": [
+        {
+          "__typename": "ProjectV2Field",
+          "id": "F_TITLE",
+          "name": "Title"
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_STAGE",
+          "name": "Stage",
+          "options": [
+            {
+              "id": "OPT_BACKLOG",
+              "name": "BACKLOG"
+            },
+            {
+              "id": "OPT_GRILLED",
+              "name": "GRILLED"
+            },
+            {
+              "id": "OPT_TEST_PLAN",
+              "name": "TEST_PLAN"
+            },
+            {
+              "id": "OPT_SPEC_FROZEN",
+              "name": "SPEC_FROZEN"
+            },
+            {
+              "id": "OPT_PLANNED",
+              "name": "PLANNED"
+            },
+            {
+              "id": "OPT_GATE_PASSED",
+              "name": "GATE_PASSED"
+            },
+            {
+              "id": "OPT_PLAN_APPROVED",
+              "name": "PLAN_APPROVED"
+            },
+            {
+              "id": "OPT_STORYBOOK_APPROVAL",
+              "name": "STORYBOOK_APPROVAL"
+            },
+            {
+              "id": "OPT_CODING",
+              "name": "CODING"
+            },
+            {
+              "id": "OPT_BUILD_GREEN",
+              "name": "BUILD_GREEN"
+            },
+            {
+              "id": "OPT_DRAFT_OPENED",
+              "name": "DRAFT_OPENED"
+            },
+            {
+              "id": "OPT_REVIEWING",
+              "name": "REVIEWING"
+            },
+            {
+              "id": "OPT_FIXING",
+              "name": "FIXING"
+            },
+            {
+              "id": "OPT_FULL_TESTS_GREEN",
+              "name": "FULL_TESTS_GREEN"
+            },
+            {
+              "id": "OPT_READY_FOR_REVIEW",
+              "name": "READY_FOR_REVIEW"
+            },
+            {
+              "id": "OPT_MERGE_ELIGIBLE",
+              "name": "MERGE_ELIGIBLE"
+            },
+            {
+              "id": "OPT_MERGED",
+              "name": "MERGED"
+            },
+            {
+              "id": "OPT_LIVE_PROVEN",
+              "name": "LIVE_PROVEN"
+            },
+            {
+              "id": "OPT_CLOSED",
+              "name": "CLOSED"
+            },
+            {
+              "id": "OPT_BLOCKED",
+              "name": "BLOCKED"
+            }
+          ]
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_STATUS",
+          "name": "Status",
+          "options": [
+            {
+              "id": "OPT_TODO",
+              "name": "Todo"
+            },
+            {
+              "id": "OPT_DOING",
+              "name": "In Progress"
+            },
+            {
+              "id": "OPT_DONE",
+              "name": "Done"
+            }
+          ]
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_GROUP",
+          "name": "Stage group",
+          "options": [
+            {
+              "id": "OPT_PRE",
+              "name": "pre-build"
+            },
+            {
+              "id": "OPT_BUILD",
+              "name": "build"
+            },
+            {
+              "id": "OPT_POST",
+              "name": "post-merge"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

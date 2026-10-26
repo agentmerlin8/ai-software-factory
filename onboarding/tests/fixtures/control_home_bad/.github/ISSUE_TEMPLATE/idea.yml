@@ -1,0 +1,10 @@
+name: Idea
+description: Refine a raw idea into a context bundle
+labels: [idea]
+body:
+  - type: textarea
+    id: pitch
+    attributes:
+      label: Pitch
+    validations:
+      required: true

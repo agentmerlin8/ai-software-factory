@@ -1,0 +1,12 @@
+runtime = "hermes"
+
+[dispatch]
+mechanism = "subagent"
+
+[models]
+T1 = "model-t1-fixture"
+T2 = "model-t2-fixture"
+T3 = "model-t3-fixture"
+
+[credentials]
+refs = ["file:secrets/token.txt"]

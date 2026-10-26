@@ -46,7 +46,7 @@
       "required": true,
       "applies": "always",
       "verify": {"kind": "forge", "name": "ruleset(home) + per-binding standard protection (Mode 2 target variant)"},
-      "remedy": "create an active branch ruleset (PR + approval + required checks) with the factory bot App as the only bypass actor",
+      "remedy": "home: create an active branch ruleset (PR + approval + required checks) with the factory bot App as the only bypass; targets: keep standard protection with no factory bypass (the bypass lives on the workspace repo only)",
       "attest_allowed": false
     },
     {

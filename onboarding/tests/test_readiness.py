@@ -382,7 +382,7 @@ class VerifyBadHome(unittest.TestCase):
             self.assertEqual(st["A-2"], ["FAIL"])
             # remedies printed for failures
             self.assertIn("remedy:", out)
-            self.assertIn("onboard attest C-13", out)
+            self.assertIn("attest <target> C-13", out)
 
 
 class FailPathPerCheck(unittest.TestCase):
@@ -684,7 +684,7 @@ class FailPathPerCheck(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             home = make_home(Path(td), defects=["drop-attest-C-13"])
             rc, out, _data = verify_home(home)
-            self.assertIn("onboard attest C-13 --by <you>", out)
+            self.assertIn("attest <target> C-13 --by <you>", out)
 
     def test_c14_fail_no_locks(self):
         self.assert_defect(["no-locks"], "C-14",
@@ -807,7 +807,7 @@ class FailPathPerCheck(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             home = make_home(Path(td), defects=["drop-attest-U-1"])
             rc, out, _data = verify_home(home)
-            self.assertIn("onboard attest U-1 --by <you>", out)
+            self.assertIn("attest <target> U-1 --by <you>", out)
 
     def test_a2_fail_no_attest(self):
         self.assert_defect(["drop-attest-A-2"], "A-2",

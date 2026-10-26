@@ -56,7 +56,7 @@
       "required": true,
       "applies": "always",
       "verify": {"kind": "forge", "name": "labels(home repo, registry labels)"},
-      "remedy": "create the missing labels (onboard apply-labels upserts the registry set)",
+      "remedy": "create the missing labels: run: python3 onboarding/onboard.py apply <target> (its label step upserts the registry set)",
       "attest_allowed": false
     },
     {
@@ -137,7 +137,7 @@
       "required": true,
       "applies": "always",
       "verify": {"kind": "local", "name": "factory/SECRETS.md + .gitignore secret-ish patterns"},
-      "remedy": "run apply / document where credentials live and ignore secret-ish paths in .gitignore",
+      "remedy": "run: python3 onboarding/onboard.py apply <target> / document where credentials live and ignore secret-ish paths in .gitignore",
       "attest_allowed": false
     },
     {
@@ -147,7 +147,7 @@
       "required": true,
       "applies": "always",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest C-13 --by <you> --note \"<command|manual>\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> C-13 --by <you> --note \"<command|manual>\"",
       "attest_allowed": true
     },
     {
@@ -259,7 +259,7 @@
       "required": true,
       "applies": "ui:declared",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest U-1 --by <you> --note \"<storybook build command>\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> U-1 --by <you> --note \"<storybook build command>\"",
       "attest_allowed": true
     },
     {
@@ -269,7 +269,7 @@
       "required": true,
       "applies": "ui:declared",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest U-2 --by <you> --note \"<how a human sees a screen>\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> U-2 --by <you> --note \"<how a human sees a screen>\"",
       "attest_allowed": true
     },
     {
@@ -279,7 +279,7 @@
       "required": true,
       "applies": "adapter:human",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest A-1 --by <you> --note \"editor + shell + git identity ready\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> A-1 --by <you> --note \"editor + shell + git identity ready\"",
       "attest_allowed": true
     },
     {
@@ -289,7 +289,7 @@
       "required": true,
       "applies": "adapter:hermes",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest A-2 --by <you> --note \"hermes runtime + dispatch usable\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> A-2 --by <you> --note \"hermes runtime + dispatch usable\"",
       "attest_allowed": true,
       "deferred_to_s4": ["factory/adapters/hermes/adapter.toml (adapter packages land with S4)"]
     },
@@ -300,7 +300,7 @@
       "required": true,
       "applies": "adapter:claude-code",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest A-3 --by <you> --note \"claude CLI installed + authenticated\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> A-3 --by <you> --note \"claude CLI installed + authenticated\"",
       "attest_allowed": true
     },
     {
@@ -310,7 +310,7 @@
       "required": true,
       "applies": "adapter:codex",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest A-4 --by <you> --note \"codex CLI installed + authenticated\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> A-4 --by <you> --note \"codex CLI installed + authenticated\"",
       "attest_allowed": true
     },
     {
@@ -320,7 +320,7 @@
       "required": true,
       "applies": "adapter:api-direct",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest A-5 --by <you> --note \"endpoint + token configured\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> A-5 --by <you> --note \"endpoint + token configured\"",
       "attest_allowed": true
     },
     {
@@ -330,7 +330,7 @@
       "required": true,
       "applies": "adapter:copilot",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: onboard attest A-6 --by <you> --note \"coding agent assignable\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> A-6 --by <you> --note \"coding agent assignable\"",
       "attest_allowed": true
     },
     {

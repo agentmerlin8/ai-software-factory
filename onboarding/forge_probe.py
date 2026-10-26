@@ -139,10 +139,10 @@ def rest_repo(repo: str) -> str:
     name/...`), which is what readiness.target_ruleset_problem() passes
     for Mode-2 bindings. A leading host segment (and an https URL's
     scheme/host, a trailing `.git`) is stripped; the last two non-empty
-    path segments are kept. `gh repo view` / `gh label list -R` accept
-    the host-prefixed form and are left untouched. Falls back to the
-    value verbatim when fewer than two segments are present (the REST
-    call then fails on its own terms, named)."""
+    path segments are kept. `gh repo view` accepts the host-prefixed
+    form and is left untouched. Falls back to the value verbatim when
+    fewer than two segments are present (the REST call then fails on
+    its own terms, named)."""
     if not isinstance(repo, str) or not repo:
         return repo
     slug = fixture_repo_slug(repo)
@@ -218,10 +218,31 @@ def gh_probe_transport(op: str, params: dict) -> dict:
             rulesets.append(merged)
         return {"rulesets": rulesets}
     if op == "labels":
-        repo = params["repo"]
-        out = _run(["gh", "label", "list", "-R", repo, "--limit", "200",
-                    "--json", "name,color,description"], "labels")
-        return {"labels": _json_or_refuse(out.stdout, "labels")}
+        # G1: `gh label list --limit 200` truncates on large repos —
+        # page the REST labels endpoint to exhaustion instead (short
+        # page ends the loop). The repo is normalized to owner/name
+        # for the REST path segment (same law as the ruleset branch).
+        repo = rest_repo(params["repo"])
+        labels: list[dict] = []
+        page = 1
+        while True:
+            out = _run(["gh", "api",
+                        f"repos/{repo}/labels?per_page=100&page={page}"],
+                       "labels")
+            batch = _json_or_refuse(out.stdout, "labels")
+            if not isinstance(batch, list):
+                raise ProbeError(
+                    "probe failed: labels — cannot parse gh output: "
+                    "expected an array of labels")
+            for entry in batch:
+                if isinstance(entry, dict):
+                    labels.append({"name": entry.get("name"),
+                                   "color": entry.get("color"),
+                                   "description": entry.get("description")})
+            if len(batch) < 100:
+                break
+            page += 1
+        return {"labels": labels}
     if op == "issue_form":
         repo, filename = params["repo"], params["filename"]
         path = f".github/ISSUE_TEMPLATE/{filename}"
@@ -444,9 +465,14 @@ class Forge:
         as read='refused' + error — never an exception; no rulesets at
         all -> found=False. A ruleset matches iff its
         conditions.ref_name.include matches the branch AND its
-        conditions.ref_name.exclude does NOT (same two selector forms on
-        both lists; F1). `rules` carries the protection-rule objects the
-        check layer validates (F10)."""
+        conditions.ref_name.exclude does NOT (same selector forms on
+        both lists — the literal `refs/heads/<branch>`, `~DEFAULT_BRANCH`
+        and `~ALL`, which matches ANY branch; F1/G2). Among matching
+        rulesets the first ACTIVE one is selected; only when none is
+        active does the first matching non-active one surface (so the
+        `staged, not enforcing` diagnosis is never hidden by order;
+        G3). `rules` carries the protection-rule objects the check
+        layer validates (F10)."""
         try:
             data = self._call("ruleset", "ruleset",
                               {"repo": repo, "branch": branch})
@@ -455,16 +481,24 @@ class Forge:
                     "enforcement": None, "bypass": [], "rules": [],
                     "read": "refused", "error": str(exc)}
         want = f"refs/heads/{branch}"
-        chosen = None
+
+        def _selector_matches(selectors: list) -> bool:
+            return (want in selectors
+                    or "~DEFAULT_BRANCH" in selectors
+                    or "~ALL" in selectors)
+
+        matches: list[dict] = []
         for rs in data.get("rulesets", []):
             ref_name = (rs.get("conditions") or {}).get("ref_name") or {}
             include = ref_name.get("include") or []
             exclude = ref_name.get("exclude") or []
-            included = want in include or "~DEFAULT_BRANCH" in include
-            excluded = want in exclude or "~DEFAULT_BRANCH" in exclude
-            if included and not excluded:
-                chosen = rs
-                break
+            if _selector_matches(include) and not _selector_matches(exclude):
+                matches.append(rs)
+        # G3: prefer the first ACTIVE match; fall back to the first
+        # matching non-active one (deterministic, order-preserving).
+        chosen = next((rs for rs in matches
+                       if rs.get("enforcement") == "active"),
+                      matches[0] if matches else None)
         if chosen is None:
             return {"target": "branch", "found": False,
                     "enforcement": None, "bypass": [], "rules": [],

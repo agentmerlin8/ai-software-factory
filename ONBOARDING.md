@@ -119,7 +119,9 @@ answered by the operator and recorded as an ANSWERED `human_gate` row in the
 home ledger — full schema strictness intact, never a silent pass. The
 attest-allowed set (exact list readable from `onboarding/registry.json`):
 
-- **C-13** — test environment runnable
+- **C-13** — test environment runnable (a dedicated control home ALSO
+  needs one binding-scoped row per declared repo binding:
+  `attest <target> C-13:<repo-id> --by <login> --note <text>`)
 - **U-1** — Storybook builds locally (applies when UI declared)
 - **U-2** — visual review path defined (applies when UI declared)
 - **A-1..A-6** — adapter prerequisite checks (human; and one row per

@@ -56,6 +56,11 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PIPELINE = FIXTURES / "pipeline"
 FORGE_DS = FIXTURES / "forge" / "control_home_good.json"
 ORIGIN = "https://github.com/fixture-org/workspace.git"
+# G4: dedicated propose refuses a self-binding — the tests' homes carry
+# the workspace origin, so plain `propose` (default dedicated) passes a
+# DISTINCT binding url.
+DISTINCT_REPO_URL = "github.com/fixture-org/app"
+DISTINCT_ARGS = ("--repo-url", DISTINCT_REPO_URL)
 
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
 
@@ -261,7 +266,7 @@ class TestPropose(unittest.TestCase):
     def test_drafts_written_and_valid(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
-            rc, out, _err = capture(OB.main, ["propose", str(home)])
+            rc, out, _err = capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             self.assertEqual(rc, 0)
             drafts = home / "onboarding-drafts"
             self.assertTrue((drafts / "workspace.toml").is_file())
@@ -274,14 +279,14 @@ class TestPropose(unittest.TestCase):
                 self.assertIn(f"OK {path}", out)  # config_validator clean
             text = (drafts / "workspace.toml").read_text(encoding="utf-8")
             self.assertIn(f'pin = "{OB.kit_head_sha()}"', text)
-            self.assertIn('url = "github.com/fixture-org/workspace"', text)
+            self.assertIn(f'url = "{DISTINCT_REPO_URL}"', text)
             self.assertNotIn("id = \"web\"", text)  # example member dropped
             self.assertEqual(next_count(out), 1)
 
     def test_deferred_list(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
-            rc, out, _err = capture(OB.main, ["propose", str(home)])
+            rc, out, _err = capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             self.assertEqual(rc, 0)
             deferred = {ln[len("DEFERRED: "):] for ln in out.splitlines()
                         if ln.startswith("DEFERRED: ")}
@@ -319,7 +324,7 @@ class TestPropose(unittest.TestCase):
             (home / "workspace.toml").write_text("workspace = \"x\"\n",
                                                  encoding="utf-8",
                                                  newline="\n")
-            rc, out, _err = capture(OB.main, ["propose", str(home)])
+            rc, out, _err = capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             self.assertEqual(rc, 1)
             self.assertIn("already onboarded — propose not applicable; "
                           "edit config directly", out)
@@ -328,16 +333,16 @@ class TestPropose(unittest.TestCase):
     def test_deterministic_regeneration(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             first = hash_walk(home / "onboarding-drafts")
-            capture(OB.main, ["propose", str(home)])  # re-runs over drafts
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])  # re-runs over drafts
             self.assertEqual(hash_walk(home / "onboarding-drafts"), first)
 
     def test_strict_refuses_deferred(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
             rc, out, _err = capture(OB.main, ["propose", str(home),
-                                              "--strict"])
+                                              "--strict", *DISTINCT_ARGS])
             self.assertEqual(rc, 1)
             self.assertIn("refused: --strict with 8 deferred", out)
             self.assertEqual(next_count(out), 1)
@@ -358,6 +363,74 @@ class TestPropose(unittest.TestCase):
                     self.assertEqual(next_count(out), 1)
 
 
+class TestProposeDedicatedSelfBindingGuard(unittest.TestCase):
+    """G4: dedicated mode must never draft a self-binding — propose
+    refuses (named, actionable) instead of creating a workspace whose
+    primary binding is the control home's own origin (C-3's target
+    variant would reject the factory bypass landing on the home)."""
+
+    def test_dedicated_with_inferred_self_binding_refused(self):
+        # no --repo-url: the binding is inferred from the target's own
+        # origin -> self-binding under the default dedicated mode
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            rc, out, _err = capture(OB.main, ["propose", str(home)])
+            self.assertEqual(rc, 1)
+            self.assertIn(
+                "refused: dedicated control_home with a self-binding "
+                "(fixture-org/workspace)", out)
+            self.assertIn("pass --repo-url <distinct target>", out)
+            self.assertIn("--control-home in-repo", out)
+            self.assertEqual(next_count(out), 1)
+            self.assertFalse((home / "onboarding-drafts").exists())
+
+    def test_dedicated_with_explicit_self_binding_refused(self):
+        # an explicit --repo-url that normalizes to the home slug is
+        # refused too (https form + .git suffix normalize identically)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            rc, out, _err = capture(OB.main, [
+                "propose", str(home), "--repo-url",
+                "https://github.com/fixture-org/workspace.git"])
+            self.assertEqual(rc, 1)
+            self.assertIn(
+                "refused: dedicated control_home with a self-binding "
+                "(fixture-org/workspace)", out)
+            self.assertEqual(next_count(out), 1)
+
+    def test_dedicated_with_distinct_url_ok(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            rc, out, _err = capture(OB.main, [
+                "propose", str(home), "--repo-url",
+                "github.com/fixture-org/app"])
+            self.assertEqual(rc, 0, out)
+            text = (home / "onboarding-drafts"
+                    / "workspace.toml").read_text(encoding="utf-8")
+            self.assertIn('control_home = "dedicated"', text)
+            self.assertIn('url = "github.com/fixture-org/app"', text)
+
+    def test_in_repo_with_self_binding_stays_allowed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            rc, out, _err = capture(OB.main, [
+                "propose", str(home), "--control-home", "in-repo"])
+            self.assertEqual(rc, 0, out)
+            text = (home / "onboarding-drafts"
+                    / "workspace.toml").read_text(encoding="utf-8")
+            self.assertIn('control_home = "in-repo"', text)
+            self.assertIn('url = "github.com/fixture-org/workspace"', text)
+
+    def test_dedicated_without_origin_ok(self):
+        # no origin remote -> no home slug to collide with; the binding
+        # stays the template placeholder for the operator to fill in
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir, origin=None)
+            rc, out, _err = capture(OB.main, ["propose", str(home)])
+            self.assertEqual(rc, 0, out)
+            self.assertNotIn("self-binding", out)
+
+
 # ------------------------------------------------------------------- apply --
 
 APPLY_INSTALL_SET = (
@@ -376,7 +449,7 @@ APPLY_INSTALL_SET = (
 class TestApply(unittest.TestCase):
     def _applied(self, tmpdir: str, mood: str = "greenfield",
                  apply_args: tuple[str, ...] = (),
-                 propose_args: tuple[str, ...] = (),
+                 propose_args: tuple[str, ...] = DISTINCT_ARGS,
                  ) -> tuple[Path, Path, str, Path]:
         tmp, home = make_tmp_target(tmpdir, mood)
         ds = dataset_with_label_ensure(tmp)
@@ -433,7 +506,7 @@ class TestApply(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
             ds = dataset_with_label_ensure(tmp)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             user_text = "# MY OWN KICKOFF — do not touch\n"
             (home / "factory").mkdir(parents=True)
             (home / "factory/KICKOFF.md").write_text(user_text,
@@ -451,7 +524,7 @@ class TestApply(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
             ds = dataset_with_label_ensure(tmp)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             before = hash_walk(home)
             rc, out, _ = capture(OB.main, ["apply", str(home), "--dry-run",
                                            "--forge-fixture", str(ds)])
@@ -479,7 +552,7 @@ class TestApply(unittest.TestCase):
     def test_apply_refuses_invalid_drafts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             ws = home / "onboarding-drafts/workspace.toml"
             ws.write_text(ws.read_text(encoding="utf-8") + "bogus = 1\n",
                           encoding="utf-8", newline="\n")
@@ -528,7 +601,7 @@ class TestApply(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
             ds = dataset_with_label_ensure(tmp)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             recorder = RecordingForge(ds)
             original = OB.make_forge
             OB.make_forge = lambda fixture: recorder.forge
@@ -551,7 +624,7 @@ class TestApply(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
             ds = dataset_with_label_ensure(tmp, ok=False)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             rc, out, _ = capture(OB.main, ["apply", str(home),
                                            "--forge-fixture", str(ds)])
             self.assertEqual(rc, 1)
@@ -560,7 +633,7 @@ class TestApply(unittest.TestCase):
     def test_no_origin_label_fail(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir, origin=None)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             rc, out, _ = capture(OB.main, ["apply", str(home)])
             self.assertEqual(rc, 1)
             self.assertIn("FAIL: label ensure — no origin remote", out)
@@ -622,7 +695,7 @@ class TestIntegrationApplyVerify(unittest.TestCase):
             old_key = os.environ.get("LLM_API_KEY")
             os.environ["LLM_API_KEY"] = "presence-only-test-value"
             try:
-                for cid in ("C-13", "U-1", "U-2", "A-2"):
+                for cid in ("C-13", "C-13:app", "U-1", "U-2", "A-2"):
                     RD.append_attest(home, cid, "fixture-human",
                                      f"integration attest {cid}")
                 rc, out, _ = capture(
@@ -665,7 +738,7 @@ class TestCli(unittest.TestCase):
             self.assertEqual((rc, next_count(out)), (0, 1))
             rc, out, _ = capture(OB.main, ["inspect", str(home)])
             self.assertEqual((rc, next_count(out)), (0, 1))
-            rc, out, _ = capture(OB.main, ["propose", str(home)])
+            rc, out, _ = capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             self.assertEqual((rc, next_count(out)), (0, 1))
             rc, out, _ = capture(OB.main, ["apply", str(home),
                                            "--forge-fixture", str(ds)])
@@ -730,7 +803,7 @@ class TestHouseLaws(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp, home = make_tmp_target(tmpdir)
             ds = dataset_with_label_ensure(tmp)
-            capture(OB.main, ["propose", str(home)])
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
             capture(OB.main, ["apply", str(home), "--forge-fixture", str(ds),
                               "--ui"])
             for path in hash_walk(home):  # every installed/written file

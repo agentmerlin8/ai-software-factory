@@ -29,6 +29,14 @@ PIPELINE_COMMANDS = ("preflight", "inspect", "propose", "apply",
 DELETED_ASSETS = ("onboard.sh", "templates/DASHBOARD.md",
                   "templates/runbook.md")
 
+# G7: the KICKOFF template's human-gate list must include the spec
+# freeze — SPEC_FROZEN requires an answered spec_freeze gate /
+# allowlisted approval, so a session that doesn't know it is a gate
+# will either stall or drift past a human touchpoint.
+KICKOFF_TEMPLATE = (REPO_ROOT / "onboarding" / "templates" / "KICKOFF.md")
+SPEC_FREEZE_LINE = ("- **spec freeze** — the spec is frozen with human "
+                    "approval before planning starts")
+
 
 def tracked_docs() -> list[Path]:
     """The scanned docs: sorted, from git ls-files (argv list)."""
@@ -48,6 +56,23 @@ def tracked_docs() -> list[Path]:
 
 
 class TestDocsConsistency(unittest.TestCase):
+
+    def test_kickoff_template_gate_list_includes_spec_freeze(self):
+        """G7: the shipped KICKOFF template's human-gate list must name
+        the spec freeze (SPEC_FROZEN requires an answered spec_freeze
+        gate or an allowlisted human approval — controller.py). The
+        kickoff-message block refers sessions to the same list ("the
+        gates listed below"), so ONE list carries both places."""
+        self.assertTrue(KICKOFF_TEMPLATE.is_file(),
+                        "onboarding/templates/KICKOFF.md missing")
+        text = KICKOFF_TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn(SPEC_FREEZE_LINE, text,
+                      "KICKOFF.md human-gate list lacks the spec freeze")
+        # the gate list lives under the ONLY "Stop and ask a human" list
+        # and the kickoff-message block points at it
+        self.assertIn("Stop and ask a human ONLY for:", text)
+        self.assertIn("stop and ask a human only at the gates listed below",
+                      text)
 
     def test_docs_name_the_pipeline_and_drop_deleted_assets(self) -> None:
         # (a) root ONBOARDING.md names every pipeline command

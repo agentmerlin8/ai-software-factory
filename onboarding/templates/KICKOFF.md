@@ -45,6 +45,7 @@ Stop and ask a human ONLY for:
 
 - **Storybook approvals** — for UI stories, no feature code wires components until the story is human-approved
 - **the merge gate** — PR merges are human-approved
+- **spec freeze** — the spec is frozen with human approval before planning starts
 - **escalations** — two failed revision loops at any stage
 
 Anything else a session asks a human is a process defect — record it as an

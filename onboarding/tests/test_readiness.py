@@ -494,6 +494,47 @@ class FailPathPerCheck(unittest.TestCase):
             detail,
             "multiple integration bypasses — expected the factory bot only")
 
+    def test_c3_fail_empty_home_bypass(self):
+        # G5: the HOME requires EXACTLY ONE Integration bypass — zero
+        # means no bot can push, which is a FAIL (not a silent pass)
+        def mutate(rs):
+            rs["rulesets"][0]["bypass_actors"] = []
+        detail = self.ruleset_variant(mutate)
+        self.assertEqual(
+            detail,
+            "no factory bypass actor — the bot cannot bypass branch "
+            "protection")
+
+    def test_bypass_error_home_exactly_one_rule(self):
+        # G5 pure-helper semantics: home rule = exactly one Integration
+        one = [{"actor_type": "Integration", "actor_id": 1, "mode": "always"}]
+        two = one + [{"actor_type": "Integration", "actor_id": 2,
+                      "mode": "always"}]
+        human = [{"actor_type": "User", "actor_id": 1, "mode": "always"}]
+        self.assertIsNone(RD.bypass_error(one))
+        self.assertEqual(
+            RD.bypass_error([]),
+            "no factory bypass actor — the bot cannot bypass branch "
+            "protection")
+        self.assertEqual(
+            RD.bypass_error(two),
+            "multiple integration bypasses — expected the factory bot only")
+        self.assertEqual(
+            RD.bypass_error(human),
+            "human bypass present — the merge gate is not mechanically real")
+
+    def test_target_variant_still_requires_zero_integration(self):
+        # G5: the TARGET rule is unchanged — zero Integrations passes
+        # (the good fixture's target has an empty bypass list and C-3
+        # is GREEN); one Integration on the target FAILs with the
+        # existing message (covered by test_c3_target_factory_bypass_fails)
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            rc, _out, jdata = verify_home(home)
+            self.assertEqual(rc, 0, detail_of(jdata, "C-3"))
+            self.assertIn("targets: app standard protection ok",
+                          detail_of(jdata, "C-3"))
+
     # -- F10: protection-rules validation (home variant) ----------------------
 
     def test_c3_fail_empty_rules(self):
@@ -810,6 +851,103 @@ class FailPathPerCheck(unittest.TestCase):
             home = make_home(Path(td), defects=["drop-attest-C-13"])
             rc, out, _data = verify_home(home)
             self.assertIn("attest <target> C-13 --by <you>", out)
+
+    # -- G6: binding-scoped C-13 (dedicated mode) ------------------------------
+
+    def test_c13_fail_missing_binding_attest_lists_ids(self):
+        # the good fixture carries plain C-13 AND C-13:app; dropping the
+        # scoped row FAILs C-13 listing the missing binding id
+        home_defects = ["drop-attest-C-13:app"]
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td), defects=home_defects)
+            rc, out, jdata = verify_home(home)
+            self.assertEqual(rc, 1)
+            row = next(r for r in jdata["checks"]
+                       if r["id"] == "C-13" and r["status"] == "FAIL")
+            self.assertIn(
+                "no answered attest recorded for bindings: app",
+                row["detail"])
+            # the remedy names the scoped form
+            self.assertIn("C-13:<repo-id>", row["remedy"])
+
+    def test_c13_missing_both_plain_and_binding(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td), defects=["drop-attest-C-13",
+                                                "drop-attest-C-13:app"])
+            rc, _out, jdata = verify_home(home)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-13")
+            self.assertIn("no answered attest recorded", detail)
+            self.assertIn("bindings: app", detail)
+
+    def test_c13_binding_row_via_attest_cli_restores_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td), defects=["drop-attest-C-13:app"])
+            rc, _out, _data = verify_home(home)
+            self.assertEqual(rc, 1)
+            # the engine accepts the scoped id for a DECLARED binding
+            rc2, out2, err2 = capture(
+                RD.main, ["attest", str(home), "C-13:app",
+                          "--by", "fixture-human",
+                          "--note", "pytest -q green in app"])
+            self.assertEqual(rc2, 0, err2)
+            self.assertIn("attest recorded: C-13:app", out2)
+            rc3, _out3, data3 = verify_home(home)
+            self.assertEqual(rc3, 0)
+            row = next(r for r in data3["checks"] if r["id"] == "C-13")
+            self.assertEqual(row["status"], "PASS")
+            self.assertIn("bindings attested: app", row["detail"])
+            # the appended row keeps the scoped id in its question and
+            # passes the ledger's own validation
+            rows = L.load_ledger(home / "factory" / "ledger" / "events.jsonl")
+            scoped = [r for r in rows
+                      if r.get("question", "").startswith(
+                          "onboard attest: C-13:app ")]
+            self.assertEqual(len(scoped), 1)
+            self.assertEqual(L.validate_ledger(
+                home / "factory" / "ledger" / "events.jsonl"), [])
+
+    def test_attest_scoped_id_unknown_binding_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            ledger = home / "factory" / "ledger" / "events.jsonl"
+            before = ledger.read_bytes()
+            rc, _out, err = capture(
+                RD.main, ["attest", str(home), "C-13:nope",
+                          "--by", "who", "--note", "x"])
+            self.assertEqual(rc, 1)
+            self.assertIn("unknown binding 'nope'", err)
+            self.assertIn("declared bindings: app", err)
+            self.assertEqual(ledger.read_bytes(), before)  # nothing written
+
+    def test_attest_scoped_id_on_machine_checked_base_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            rc, _out, err = capture(
+                RD.main, ["attest", str(home), "C-4:app",
+                          "--by", "who", "--note", "x"])
+            self.assertEqual(rc, 1)
+            self.assertIn("not attest-allowed", err)
+
+    def test_c13_in_repo_mode_unchanged_plain_only(self):
+        # in-repo: plain C-13 suffices — no scoped rows required even
+        # when bindings are declared
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td), defects=["in-repo",
+                                                "drop-attest-C-13:app"])
+            rc, _out, jdata = verify_home(home)
+            self.assertEqual(rc, 0, detail_of(jdata, "C-13"))
+            row = next(r for r in jdata["checks"] if r["id"] == "C-13")
+            self.assertEqual(row["status"], "PASS")
+            self.assertNotIn("bindings", row["detail"])
+
+    def test_declared_binding_ids_helper(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            self.assertEqual(RD.declared_binding_ids(home), ["app"])
+            missing = Path(td) / "no-home"
+            missing.mkdir()
+            self.assertEqual(RD.declared_binding_ids(missing), [])
 
     def test_c14_fail_no_locks(self):
         self.assert_defect(["no-locks"], "C-14",

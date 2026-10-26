@@ -420,6 +420,24 @@ def cmd_propose(args: argparse.Namespace) -> int:
                   "kit templates.")
             return 1
 
+    # G4: a dedicated control home must not self-bind — inferring the
+    # binding from the target's own origin would put the factory bypass
+    # on the home itself (C-3's Mode-2 target variant rejects it).
+    # Fail closed with BOTH actionable fixes named. (`in-repo` +
+    # self-binding stays allowed — the home IS the target repo.)
+    if args.control_home == "dedicated":
+        home_slug = RD.repo_slug_from_url(
+            normalize_repo_url(facts["origin_url"]) or "")
+        binding_slug = RD.repo_slug_from_url(
+            normalize_repo_url(args.repo_url) or args.repo_url or "")
+        if home_slug and binding_slug and home_slug == binding_slug:
+            print(f"refused: dedicated control_home with a self-binding "
+                  f"({home_slug}) — pass --repo-url <distinct target> or "
+                  "use --control-home in-repo")
+            print("NEXT: re-run propose with --repo-url <distinct target "
+                  "repo> (or --control-home in-repo).")
+            return 1
+
     drafts_dir = target / "onboarding-drafts"
     ws_draft = drafts_dir / "workspace.toml"
     text = render_workspace_draft(facts, args)

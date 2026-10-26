@@ -109,15 +109,21 @@ def validate_dir_name(name: str) -> None:
 
 # ---------------------------------------------------------------- plumbing --
 
-def child_env() -> dict[str, str]:
-    """The subprocess environment: bytecode off everywhere, the fake
-    git identity scope, and a dummy value for every `env:` credential
-    ref the default drafts declare (W-3 is presence-only — values are
-    never read)."""
+def child_env(live: bool = False) -> dict[str, str]:
+    """The subprocess environment: bytecode off everywhere, and a dummy
+    value for every `env:` credential ref the default drafts declare
+    (W-3 is presence-only — values are never read).
+
+    G8: git-config isolation (/dev/null for GIT_CONFIG_GLOBAL/SYSTEM)
+    applies to the SMOKE path only. The LIVE path (--full) clones and
+    pushes a REAL private GitHub repo, which needs the operator's git
+    configuration (e.g. the gh credential helper) — nulling it there
+    would break auth. `live=True` keeps os.environ's git config."""
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
-    env["GIT_CONFIG_SYSTEM"] = "/dev/null"
+    if not live:
+        env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        env["GIT_CONFIG_SYSTEM"] = "/dev/null"
     env.setdefault("LLM_API_KEY", "dummy-presence-only-value")
     return env
 
@@ -126,6 +132,13 @@ def run_argv(argv: list[str]) -> subprocess.CompletedProcess:
     """The ONE subprocess seam: argv lists only (never a shell)."""
     return subprocess.run(argv, capture_output=True, text=True,
                           env=child_env())
+
+
+def run_argv_live(argv: list[str]) -> subprocess.CompletedProcess:
+    """The LIVE-path runner: same argv-list seam, but the child keeps
+    the operator's git configuration (G8)."""
+    return subprocess.run(argv, capture_output=True, text=True,
+                          env=child_env(live=True))
 
 
 def python_argv(script: Path, *args: str) -> list[str]:
@@ -223,9 +236,22 @@ def align_project_id(repo: Path, project_id: str) -> None:
 def ensure_gitignore_secrets(repo: Path) -> None:
     """Operator-review edit (c): the seed may carry its own .gitignore
     (apply's never-overwrite law keeps it), so append the secret-ish
-    ignore patterns C-12 requires when they are absent."""
+    ignore patterns C-12 requires when they are absent. G9: a seed
+    .gitignore that is not valid UTF-8 is a NAMED operator-review
+    StepFailure — never a raw UnicodeDecodeError traceback."""
     gitignore = repo / ".gitignore"
-    text = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    text = ""
+    if gitignore.is_file():
+        try:
+            text = gitignore.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise StepFailure(
+                "operator-review",
+                f"seed .gitignore unreadable: {gitignore} — {exc}")
+        except OSError as exc:
+            raise StepFailure(
+                "operator-review",
+                f"seed .gitignore unreadable: {gitignore} — {exc}")
     if any(pat in text.lower() for pat in RD.SECRETISH_PATTERNS):
         return
     block = ("\n# secrets posture (test-out operator review — C-12)\n"
@@ -451,10 +477,12 @@ def run_full(args: argparse.Namespace) -> int:
         print(FAIL_NEXT)
         return 1
     # --- live execution (unexercised in v0.1-S3) --------------------------
+    # G8: EVERY live-path subprocess uses run_argv_live — the operator's
+    # git configuration (credential helper etc.) must reach clone/push.
     tmp_dir = Path(tempfile.mkdtemp(prefix="test-out-full."))
     repo = tmp_dir / args.repo_name
     try:
-        out = expect(run_argv, ["gh", "auth", "status"], "gh-auth")
+        out = expect(run_argv_live, ["gh", "auth", "status"], "gh-auth")
         print(f"PASS: gh-auth — {first_error_line(out)}")
         login = None
         for ln in f"{out.stdout}\n{out.stderr}".splitlines():
@@ -463,21 +491,21 @@ def run_full(args: argparse.Namespace) -> int:
         owner = login or "<owner>"
         argv = ["gh", "repo", "create", args.repo_name, visibility]
         print(f"RUN: {argv!r}")
-        out = expect(run_argv, argv, "gh-repo-create")
+        out = expect(run_argv_live, argv, "gh-repo-create")
         url = out.stdout.strip() or out.stderr.strip()
         clone_url = url if url.startswith("http") else \
             f"https://github.com/{owner}/{args.repo_name}.git"
         print(f"PASS: gh-repo-create — {clone_url}")
         argv = ["git", "clone", clone_url, str(repo)]
         print(f"RUN: {argv!r}")
-        expect(run_argv, argv, "clone")
+        expect(run_argv_live, argv, "clone")
         print(f"PASS: clone — {repo}")
         for argv in (["git", "-C", str(repo), *GIT_IDENTITY, "commit",
                       "--allow-empty", "-m", "initial commit (test-out)"],
                      ["git", "-C", str(repo), "push", "origin", "HEAD"]):
             print(f"RUN: {argv!r}")
-            expect(run_argv, argv, "initial-commit")
-        run_pipeline(repo, None, args.project_id, run_argv,
+            expect(run_argv_live, argv, "initial-commit")
+        run_pipeline(repo, None, args.project_id, run_argv_live,
                      lambda step, detail: print(f"PASS: {step} — {detail}"),
                      postures=("greenfield", "brownfield"),
                      attest_mode="operator")

@@ -414,10 +414,17 @@ def append_attest(home: Path | str, check_id: str, by: str, note: str) -> dict:
 # --------------------------------------------------------------- mechanics --
 
 def bypass_error(bypass: list[dict]) -> Optional[str]:
-    """The frozen bypass rule (C-3 + W-7): all entries Integration, at
-    most ONE; anything else is a named FAIL."""
+    """The frozen bypass rule for the CONTROL HOME (C-3 home variant +
+    W-7): EXACTLY ONE Integration entry (the factory bot). Zero means
+    no bot can push (G5); a human entry makes the merge gate not
+    mechanically real; more than one Integration is over-broad. The
+    Mode-2 TARGET variant is the opposite rule — ZERO Integrations —
+    and lives in target_ruleset_problem()."""
     if any(b.get("actor_type") != "Integration" for b in bypass):
         return "human bypass present — the merge gate is not mechanically real"
+    if not bypass:
+        return ("no factory bypass actor — the bot cannot bypass branch "
+                "protection")
     if len(bypass) > 1:
         return "multiple integration bypasses — expected the factory bot only"
     return None
@@ -775,8 +782,55 @@ def check_c12(ctx: Context, row: dict) -> tuple[str, str]:
     return PASS, "factory/SECRETS.md present; .gitignore ignores secret-ish paths"
 
 
+def declared_binding_ids(home: Path) -> list[str]:
+    """The repo binding ids declared in <home>/workspace.toml
+    (declaration order; tolerant — an unreadable/invalid config yields
+    no ids and the workspace checks name that problem, not this)."""
+    ws = home / "workspace.toml"
+    if not ws.is_file():
+        return []
+    doc, err = parse_toml(ws)
+    if err or not isinstance(doc, dict):
+        return []
+    ids: list[str] = []
+    repos = doc.get("repos")
+    for item in repos if isinstance(repos, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("url"), str):
+            rid = item.get("id")
+            ids.append(rid if isinstance(rid, str) else item["url"])
+    return ids
+
+
+def binding_attest_ok(events: list[Any], scoped_id: str) -> bool:
+    """True when the latest answered attest row for a binding-scoped id
+    (`C-13:<rid>`) exists and is approved."""
+    row = find_attest(events or [], scoped_id)
+    return row is not None and row.get("decision") == "approved"
+
+
 def check_c13(ctx: Context, row: dict) -> tuple[str, str]:
-    return attest_status(ctx, "C-13")
+    """C-13: the plain home attest, PLUS — in dedicated mode — one
+    binding-scoped `C-13:<rid>` attest per declared repo binding (G6:
+    the test environment must be proven runnable for the home AND every
+    bound target). In-repo mode is unchanged (plain C-13 only)."""
+    status, detail = attest_status(ctx, "C-13")
+    if ctx.control_home != "dedicated" or ctx.ledger_error:
+        return status, detail
+    events = ctx.ledger_events or []
+    binding_ids = [rid for rid, _ in ctx.repo_bindings]
+    missing = [rid for rid in binding_ids
+               if not binding_attest_ok(events, f"C-13:{rid}")]
+    if missing:
+        extra = ("no answered attest recorded for bindings: "
+                 + ", ".join(missing))
+        if status == PASS:
+            return FAIL, extra
+        return FAIL, f"{detail}; {extra}"
+    if status != PASS:
+        return status, detail
+    if binding_ids:
+        return PASS, f"{detail}; bindings attested: {', '.join(binding_ids)}"
+    return PASS, detail
 
 
 def check_c14(ctx: Context, row: dict) -> tuple[str, str]:
@@ -1155,18 +1209,33 @@ def run_verify(target: str, forge_fixture: Optional[str] = None,
 
 def run_attest(target: str, check_id: str, by: str, note: str,
                registry_path: Path | str = REGISTRY_PATH) -> int:
-    """The attest command; returns the rc (0 recorded / 1 refused)."""
+    """The attest command; returns the rc (0 recorded / 1 refused).
+    G6: a binding-scoped id `C-13:<rid>` is accepted when the base
+    `C-13` is attest-allowed AND `<rid>` is a binding declared in the
+    home's workspace.toml — the appended row keeps the scoped id in its
+    question. An unknown binding is a named refusal."""
     try:
         registry = load_registry(registry_path)
         home = Path(target).resolve()
         if not home.is_dir():
             raise EngineError(f"target not found: {target}")
-        row = next((r for r in registry["checks"] if r["id"] == check_id), None)
+        base_id, _, binding = check_id.partition(":")
+        row = next((r for r in registry["checks"] if r["id"] == base_id),
+                   None)
         if row is None:
             raise EngineError(f"unknown check id: {check_id}")
         if not row.get("attest_allowed"):
             raise EngineError(
-                f"check {check_id} is not attest-allowed (machine-checked)")
+                f"check {base_id} is not attest-allowed (machine-checked)")
+        if binding:
+            if check_id.count(":") != 1 or not binding.strip():
+                raise EngineError(f"unknown check id: {check_id}")
+            declared = declared_binding_ids(home)
+            if binding not in declared:
+                raise EngineError(
+                    f"refused: unknown binding '{binding}' for "
+                    f"{base_id} — declared bindings: "
+                    + (", ".join(declared) if declared else "(none)"))
         append_attest(home, check_id, by, note)
     except (EngineError, AttestError) as exc:
         print(f"attest refused: {exc}", file=sys.stderr)

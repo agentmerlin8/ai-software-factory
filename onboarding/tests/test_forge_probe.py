@@ -256,6 +256,126 @@ class TestRulesetExcludeMatching(unittest.TestCase):
         self.assertFalse(result["found"])
 
 
+class TestRulesetAllSelectorAndActivePreference(unittest.TestCase):
+    """G2: `~ALL` matches ANY branch in include/exclude; G3: among
+    matching rulesets the first ACTIVE one is selected — non-active
+    only as fallback (deterministic, order-independent)."""
+
+    def _forge(self, rulesets):
+        return FP.Forge(RecorderTransport({"rulesets": None,
+                                           "ruleset": {"rulesets": rulesets}}))
+
+    def _rs(self, rid, enforcement, include, exclude=None):
+        cond = {"include": include}
+        if exclude is not None:
+            cond["exclude"] = exclude
+        return {"id": rid, "target": "branch", "enforcement": enforcement,
+                "conditions": {"ref_name": cond}, "bypass_actors": []}
+
+    # -- G2: ~ALL selector ---------------------------------------------------
+
+    def test_all_include_selects_any_branch(self):
+        forge = self._forge([self._rs(1, "active", ["~ALL"])])
+        result = forge.ruleset("o/r", "main")
+        self.assertTrue(result["found"])
+        result = forge.ruleset("o/r", "some-feature")
+        self.assertTrue(result["found"])
+
+    def test_all_exclude_never_selected(self):
+        forge = self._forge([self._rs(1, "active", ["~ALL"], ["~ALL"])])
+        result = forge.ruleset("o/r", "main")
+        self.assertFalse(result["found"])
+
+    def test_all_include_with_literal_exclude(self):
+        # ~ALL include + refs/heads/main exclude -> main not selected
+        forge = self._forge([self._rs(1, "active", ["~ALL"],
+                                      ["refs/heads/main"])])
+        self.assertFalse(forge.ruleset("o/r", "main")["found"])
+        self.assertTrue(forge.ruleset("o/r", "dev")["found"])
+
+    def test_all_combined_with_default_branch_semantics(self):
+        # ~DEFAULT_BRANCH exclude still beats ~ALL include on main
+        forge = self._forge([self._rs(1, "active", ["~ALL"],
+                                      ["~DEFAULT_BRANCH"])])
+        self.assertFalse(forge.ruleset("o/r", "main")["found"])
+
+    # -- G3: active preference ------------------------------------------------
+
+    def test_disabled_then_active_selects_active(self):
+        forge = self._forge([self._rs(1, "disabled", ["refs/heads/main"]),
+                             self._rs(2, "active", ["refs/heads/main"])])
+        result = forge.ruleset("o/r", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["enforcement"], "active")
+
+    def test_active_then_disabled_selects_active(self):
+        forge = self._forge([self._rs(1, "active", ["refs/heads/main"]),
+                             self._rs(2, "disabled", ["refs/heads/main"])])
+        result = forge.ruleset("o/r", "main")
+        self.assertEqual(result["enforcement"], "active")
+
+    def test_disabled_only_falls_back_to_disabled(self):
+        # staged, not enforcing — the diagnosis must still surface
+        forge = self._forge([self._rs(1, "disabled", ["refs/heads/main"])])
+        result = forge.ruleset("o/r", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["enforcement"], "disabled")
+
+    def test_first_active_wins_among_multiple_active(self):
+        forge = self._forge([self._rs(1, "disabled", ["refs/heads/main"]),
+                             self._rs(2, "active", ["refs/heads/main"]),
+                             self._rs(3, "active", ["refs/heads/main"])])
+        result = forge.ruleset("o/r", "main")
+        self.assertEqual(result["enforcement"], "active")
+
+
+class TestRealTransportLabelsPagination(unittest.TestCase):
+    """G1: the labels op pages `gh api repos/<repo>/labels` to
+    exhaustion — a required label that only appears on page 2 must be
+    present (the old --limit 200 single call truncated large repos)."""
+
+    def test_two_page_stub_flattens_labels(self):
+        page1 = [{"name": f"filler-{i}", "color": "ededed",
+                  "description": ""} for i in range(100)]
+        page2 = [{"name": "factory:run", "color": "0E8A16",
+                  "description": "kick off"}]
+        stub = _stub_run(json.dumps(page1), json.dumps(page2))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "labels", {"repo": "github.com/fixture-org/app"})
+        argvs = [call.args[0] for call in stub.call_args_list]
+        self.assertEqual(len(argvs), 2)  # paged to exhaustion
+        self.assertIn("page=1", argvs[0][2])
+        self.assertIn("page=2", argvs[1][2])
+        self.assertEqual(len(result["labels"]), 101)
+        names = {lbl["name"] for lbl in result["labels"]}
+        self.assertIn("factory:run", names)
+        # present/missing correct through the Forge probe
+        forge = FP.Forge(RecorderTransport({"labels": result}))
+        probe = forge.labels("fixture-org/app", ["factory:run", "idea"])
+        self.assertEqual(probe["missing"], ["idea"])
+        self.assertEqual(probe["present"]["factory:run"]["color"], "0E8A16")
+
+    def test_single_short_page_stops_after_one_call(self):
+        stub = _stub_run(json.dumps([{"name": "a", "color": "000000",
+                                      "description": None}]))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "labels", {"repo": "fixture-org/app"})
+        self.assertEqual(len(stub.call_args_list), 1)
+        self.assertEqual(result["labels"],
+                         [{"name": "a", "color": "000000",
+                           "description": None}])
+
+    def test_non_array_page_named_refusal(self):
+        stub = _stub_run(json.dumps({"message": "API rate limit exceeded"}))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport("labels", {"repo": "o/r"})
+        self.assertIn("labels", str(ctx.exception))
+        self.assertIn("expected an array", str(ctx.exception))
+
+
 class TestRulesetCarriesRules(unittest.TestCase):
     """F10: the probe preserves the protection `rules` array."""
 
@@ -338,8 +458,8 @@ class TestRealTransportRepoNormalization(unittest.TestCase):
             FP.rest_repo("https://github.com/fixture-org/app.git"),
             "fixture-org/app")
 
-    def test_repo_view_and_labels_keep_host_prefixed_form(self):
-        # `gh repo view` / `gh label list -R` accept github.com/owner/name
+    def test_repo_view_keeps_host_prefixed_form(self):
+        # `gh repo view` accepts github.com/owner/name (left untouched)
         stub = _stub_run(json.dumps({"nameWithOwner": "fixture-org/app",
                                      "defaultBranchRef": {"name": "main"},
                                      "visibility": "PRIVATE"}))
@@ -350,11 +470,20 @@ class TestRealTransportRepoNormalization(unittest.TestCase):
             self._argvs(stub)[0][:3],
             ["gh", "repo", "view"])
         self.assertEqual(self._argvs(stub)[0][3], "github.com/fixture-org/app")
+
+    def test_labels_op_normalizes_and_pages_to_exhaustion(self):
+        # G1: the labels op now hits the REST endpoint (normalized to
+        # owner/name) and pages to exhaustion — the host-prefixed form
+        # is NOT kept (it would break the REST path segment).
         stub = _stub_run(json.dumps([]))
         with mock.patch.object(FP.subprocess, "run", stub):
             FP.gh_probe_transport(
                 "labels", {"repo": "github.com/fixture-org/app"})
-        self.assertEqual(self._argvs(stub)[0][4], "github.com/fixture-org/app")
+        argv = self._argvs(stub)[0]
+        self.assertEqual(argv[:2], ["gh", "api"])
+        self.assertTrue(argv[2].startswith("repos/fixture-org/app/labels?"))
+        self.assertIn("per_page=100", argv[2])
+        self.assertIn("page=1", argv[2])
 
 
 class TestRealTransportRulesetDetailMerge(unittest.TestCase):

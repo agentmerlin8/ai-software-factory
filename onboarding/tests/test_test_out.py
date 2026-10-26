@@ -28,6 +28,7 @@ import ast
 import contextlib
 import hashlib
 import io
+import os
 import re
 import subprocess
 import sys
@@ -290,11 +291,15 @@ class FullStubRunner:
 
 def run_full_stubbed(extra_argv: list[str] | None = None):
     """Run --full --confirm-full-run with the stubbed runner + recorded
-    append_attest. -> (rc, out, err, runner, attest_calls, tmp_path)."""
+    append_attest. -> (rc, out, err, runner, attest_calls, tmp_path).
+    G8: the live path now runs through run_argv_live — stub BOTH seams
+    so nothing ever executes for real."""
     runner = FullStubRunner()
     attest_calls: list[tuple] = []
-    original_run, original_attest = TO.run_argv, TO.RD.append_attest
+    original_run, original_live, original_attest = (
+        TO.run_argv, TO.run_argv_live, TO.RD.append_attest)
     TO.run_argv = runner
+    TO.run_argv_live = runner
     TO.RD.append_attest = lambda *a, **k: attest_calls.append((a, k))
     try:
         argv = ["--full", "--confirm-full-run", "--repo-name", "fresh-app",
@@ -302,7 +307,8 @@ def run_full_stubbed(extra_argv: list[str] | None = None):
         argv += extra_argv or []
         rc, out, err = capture(TO.main, argv)
     finally:
-        TO.run_argv, TO.RD.append_attest = original_run, original_attest
+        TO.run_argv, TO.run_argv_live = original_run, original_live
+        TO.RD.append_attest = original_attest
     kept = [ln for ln in out.splitlines() if ln.startswith("kept: ")]
     tmp_path = Path(kept[0].split(": ", 1)[1]) if kept else None
     return rc, out, err, runner, attest_calls, tmp_path
@@ -364,14 +370,15 @@ class TestFullLivePathDiscipline(unittest.TestCase):
                 return super().__call__(argv)
 
         runner = FailPreflight()
-        original_run = TO.run_argv
+        original_run, original_live = TO.run_argv, TO.run_argv_live
         TO.run_argv = runner
+        TO.run_argv_live = runner
         try:
             rc, out, _err = capture(TO.main, [
                 "--full", "--confirm-full-run", "--repo-name", "fresh-app",
                 "--project-id", "fixture-org/projects/7"])
         finally:
-            TO.run_argv = original_run
+            TO.run_argv, TO.run_argv_live = original_run, original_live
         self.assertEqual(rc, 1)
         kept = [ln for ln in out.splitlines() if ln.startswith("kept: ")]
         self.assertTrue(kept, out)
@@ -501,6 +508,109 @@ class TestSeedSymlinkGuard(unittest.TestCase):
 
 
 # ------------------------------------------------------------- seed-dir/keep --
+
+class TestLivePathGitAuth(unittest.TestCase):
+    """G8: child_env isolates git config for the SMOKE path only — the
+    LIVE path (--full) must retain the operator's git configuration so
+    clone/push of a private repo can use the gh credential helper."""
+
+    def test_smoke_env_isolates_git_config(self):
+        env = TO.child_env()
+        self.assertEqual(env["GIT_CONFIG_GLOBAL"], "/dev/null")
+        self.assertEqual(env["GIT_CONFIG_SYSTEM"], "/dev/null")
+        self.assertEqual(env["PYTHONDONTWRITEBYTECODE"], "1")
+
+    def test_live_env_preserves_git_config(self):
+        sentinel = "/tmp/g8-sentinel-gitconfig"
+        old_g, old_s = (os.environ.get("GIT_CONFIG_GLOBAL"),
+                        os.environ.get("GIT_CONFIG_SYSTEM"))
+        os.environ["GIT_CONFIG_GLOBAL"] = sentinel
+        try:
+            env = TO.child_env(live=True)
+        finally:
+            if old_g is None:
+                os.environ.pop("GIT_CONFIG_GLOBAL", None)
+            else:
+                os.environ["GIT_CONFIG_GLOBAL"] = old_g
+            if old_s is not None:
+                os.environ["GIT_CONFIG_SYSTEM"] = old_s
+        self.assertEqual(env["GIT_CONFIG_GLOBAL"], sentinel)
+        self.assertNotEqual(env.get("GIT_CONFIG_SYSTEM"), "/dev/null")
+        self.assertEqual(env["PYTHONDONTWRITEBYTECODE"], "1")  # kept
+
+    def test_run_argv_live_uses_live_env(self):
+        # stub-level: run_argv_live must pass child_env(live=True) down
+        captured: list[dict] = []
+        original_run = TO.subprocess.run
+
+        def fake_run(argv, **kwargs):
+            captured.append(kwargs.get("env"))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        TO.subprocess.run = fake_run
+        try:
+            TO.run_argv_live(["true"])
+        finally:
+            TO.subprocess.run = original_run
+        self.assertEqual(len(captured), 1)
+        self.assertNotEqual(captured[0].get("GIT_CONFIG_GLOBAL"), "/dev/null")
+
+    def test_full_live_path_runs_through_run_argv_live(self):
+        # G8 threading: --full's clone/push go through run_argv_live —
+        # the live stub records them (nothing executes for real).
+        rc, out, _err, runner, _attests, tmp_path = run_full_stubbed()
+        try:
+            self.assertEqual(rc, 0, out)
+            joined = [" ".join(str(a) for a in call)
+                      for call in runner.calls]
+            self.assertTrue(any("clone" in c for c in joined), joined)
+            self.assertTrue(any("push" in c for c in joined), joined)
+        finally:
+            if tmp_path:
+                import shutil
+                shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+class TestSeedGitignoreDecode(unittest.TestCase):
+    """G9: a non-UTF-8 seed .gitignore is a NAMED operator-review
+    StepFailure — never a raw UnicodeDecodeError traceback."""
+
+    def test_non_utf8_gitignore_named_step_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            (repo / ".gitignore").write_bytes(b"\xff\xfe\x00bad bytes\n")
+            with self.assertRaises(TO.StepFailure) as ctx:
+                TO.ensure_gitignore_secrets(repo)
+            self.assertEqual(ctx.exception.step, "operator-review")
+            self.assertIn("seed .gitignore unreadable:",
+                          ctx.exception.detail)
+            self.assertIn(str(repo / ".gitignore"), ctx.exception.detail)
+
+    def test_utf8_gitignore_still_processed(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            (repo / ".gitignore").write_text("__pycache__/\n",
+                                             encoding="utf-8",
+                                             newline="\n")
+            TO.ensure_gitignore_secrets(repo)  # no raise
+            text = (repo / ".gitignore").read_text(encoding="utf-8")
+            self.assertIn(".env", text)
+
+    def test_smoke_non_utf8_seed_gitignore_rc1_no_traceback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            seed = tiny_seed(Path(tmpdir))
+            (seed / ".gitignore").write_bytes(b"\x80\x81 not utf-8\n")
+            rc, out, err = capture(TO.main, ["--smoke", "--seed-dir",
+                                             str(seed)])
+            self.assertEqual(rc, 1)
+            self.assertEqual(err, "")  # no traceback escapes
+            self.assertNotIn("Traceback", out)
+            self.assertIn("FAIL: operator-review — seed .gitignore "
+                          "unreadable:", out)
+            self.assertEqual(next_count(out), 1)
+
 
 class TestSeedDirAndKeep(unittest.TestCase):
     def test_seed_dir_override_honored(self):

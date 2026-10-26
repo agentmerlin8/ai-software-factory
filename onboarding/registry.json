@@ -147,7 +147,7 @@
       "required": true,
       "applies": "always",
       "verify": {"kind": "attest", "name": "answered human_gate attest row"},
-      "remedy": "run: python3 onboarding/onboard.py attest <target> C-13 --by <you> --note \"<command|manual>\"",
+      "remedy": "run: python3 onboarding/onboard.py attest <target> C-13 --by <you> --note \"<command|manual>\" (dedicated control home: ALSO one binding-scoped row per repo binding — python3 onboarding/onboard.py attest <target> C-13:<repo-id> --by <you> --note \"<command|manual>\")",
       "attest_allowed": true
     },
     {

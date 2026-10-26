@@ -161,8 +161,11 @@ def render(events: list[dict], sid: str, header: str) -> str:
                 "|---|---|---|---|---|---|"]
         for t in trans:
             ap = t.get("approved_by")
+            # round 26 AA2: the formatted null reason is untrusted text —
+            # escape it BEFORE wrapping in emphasis so a `|`/newline in
+            # approved_by_reason cannot corrupt the timeline row
             gate = _cell(ap) if ap else \
-                f"_{fmt_null(None, 'approved_by_reason', t)}_"
+                _cell(f"_{fmt_null(None, 'approved_by_reason', t)}_")
             checks = ", ".join(t.get("checks_run", []))
             out.append(f"| {t['recorded_at']} | {t['from_state']} → "
                        f"**{t['to_state']}** | {_cell(t.get('repo') or '—')} "
@@ -228,8 +231,11 @@ def render(events: list[dict], sid: str, header: str) -> str:
                 dec = _cell(g["decision"])
                 aby = _cell(g["answered_by"])
             else:
-                dec = fmt_null(g.get("decision"), "decision_reason", g)
-                aby = fmt_null(g.get("answered_by"), "answered_by_reason", g)
+                # round 26 AA2: formatted null reasons are untrusted text
+                dec = _cell(fmt_null(g.get("decision"),
+                                     "decision_reason", g))
+                aby = _cell(fmt_null(g.get("answered_by"),
+                                     "answered_by_reason", g))
             out.append(f"| {g['gate']} | {_cell(g['question'])} "
                        f"| {g['asked_at']} | {_cell(ans)} "
                        f"| {dec} | {aby} |")
@@ -402,9 +408,16 @@ def main(argv: list[str] | None = None) -> int:
             # R14-O4: compare raw BYTES — read_text() would normalize a
             # CRLF-mangled file back to LF and let it pass --check
             # despite violating the required LF format.
+            # Round 26 AA4: a MISSING artifact for a story in the ledger
+            # is stale too (rc 1) — deleting PROVENANCE.md must not make
+            # --check report fresh. The handwritten-file exemption stays:
+            # an existing file WITHOUT the generated marker is prose the
+            # renderer never owned, so it is skipped.
             cur = p.read_bytes() if p.exists() else None
-            if cur is not None \
-                    and cur.startswith(HEADER_START.encode("utf-8")) \
+            if cur is None:
+                print(f"OUT OF DATE: {p} (missing)")
+                rc = 1
+            elif cur.startswith(HEADER_START.encode("utf-8")) \
                     and cur != text.encode("utf-8"):
                 print(f"OUT OF DATE: {p}")
                 rc = 1

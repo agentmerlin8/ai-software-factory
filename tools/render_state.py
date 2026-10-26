@@ -160,7 +160,10 @@ def render(events: list[dict], sid: str, header: str,
                 "|---|---|---|---|---|---|---|"]
         for t in trans:
             checks = ", ".join(t.get("checks_run", []))
-            ap = t.get("approved_by") or fmt_null(None, "approved_by_reason", t)
+            # round 26 AA3: the approval cell carries either the approver
+            # or the formatted null reason — both untrusted text
+            ap = _cell(t.get("approved_by")
+                       or fmt_null(None, "approved_by_reason", t))
             out.append(f"| {t['recorded_at']} | {t['from_state']} | "
                        f"**{t['to_state']}** | {t.get('repo') or '—'} | "
                        f"{t.get('requested_by')} | "
@@ -222,12 +225,15 @@ def render(events: list[dict], sid: str, header: str,
         out += ["| ID | Source | Class | Severity | Logic touched | Disposition | Fix | Overlap |",
                 "|---|---|---|---|---|---|---|---|"]
         for f in finds:
-            fix = f.get("fix_sha") or fmt_null(None, "fix_sha_reason", f)
+            # round 26 AA3: severity/fix cells carry formatted null
+            # reasons — escape before insertion
+            fix = _cell(f.get("fix_sha")
+                        or fmt_null(None, "fix_sha_reason", f))
             ov = f.get("overlap_id") or "—"
             out.append(
                 f"| {f.get('finding_id') or '—'} "
                 f"| {f.get('source')} | {f.get('class')} "
-                f"| {f.get('severity') or fmt_null(None, 'severity_reason', f)} "
+                f"| {_cell(f.get('severity') or fmt_null(None, 'severity_reason', f))} "
                 f"| {f.get('logic_touched')} | {f.get('disposition')} "
                 f"| {fix} | {ov} |")
         out.append("")
@@ -272,9 +278,11 @@ def render(events: list[dict], sid: str, header: str,
             else:
                 dec = fmt_null(g.get("decision"), "decision_reason", g)
                 aby = fmt_null(g.get("answered_by"), "answered_by_reason", g)
+            # round 26 AA3: decision/respondent cells (incl. the pending
+            # null-reason form) are untrusted text — escape at insertion
             out.append(f"| {g['gate']} | {_cell(g['question'])} "
                        f"| {g['asked_at']} "
-                       f"| {answered} | {dec} | {aby} |")
+                       f"| {answered} | {_cell(dec)} | {_cell(aby)} |")
         out.append("")
 
     # ---- outcome
@@ -364,10 +372,17 @@ def main(argv: list[str] | None = None) -> int:
             # R14-O4: compare raw BYTES — read_text() would normalize a
             # CRLF-mangled file back to LF and let it pass --check
             # despite violating the required LF format.
+            # Round 26 AA4: a MISSING artifact for a story in the ledger
+            # is stale too (rc 1) — deleting state.md must not make
+            # --check report fresh. The handwritten-file exemption stays:
+            # an existing file WITHOUT the generated marker is prose the
+            # renderer never owned, so it is skipped.
             cur = p.read_bytes() if p.exists() else None
-            if cur is not None \
-                    and cur.startswith("<!-- GENERATED from"
-                                       .encode("utf-8")) \
+            if cur is None:
+                print(f"OUT OF DATE: {p} (missing)")
+                rc = 1
+            elif cur.startswith("<!-- GENERATED from"
+                                .encode("utf-8")) \
                     and cur != text.encode("utf-8"):
                 print(f"OUT OF DATE: {p}")
                 rc = 1

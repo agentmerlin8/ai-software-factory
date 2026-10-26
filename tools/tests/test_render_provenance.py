@@ -514,6 +514,93 @@ class RenderProvenanceTests(unittest.TestCase):
         self.assertNotIn("\\|", drow)
         self.assertEqual(drow.replace("\\|", "").count("|"), 7)
 
+    # ---- round 26 AA2: formatted null reasons in timeline + gate rows
+    def _transition(self, **overrides) -> dict:
+        t = {"event": "transition", "event_id": "transition-STORY-216-1",
+             "story_id": "STORY-216", "repo": None,
+             "repo_reason": "single-repo",
+             "from_state": "CODING", "to_state": "BUILD_GREEN",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T07:00:00Z", "provenance": "live"}
+        t.update(overrides)
+        return t
+
+    def test_timeline_null_reason_pipe_and_newline_stay_in_cell(self):
+        """approved_by_reason with `|`/newline must not add columns or
+        split the timeline row (the emphasis wrapper is escaped too)."""
+        t = self._transition(approved_by_reason="gate a|b\npending")
+        text = RP.render([t], "STORY-216", self.header)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| 2026-09-01T07:00:00Z |"))
+        self.assertIn("_not recorded: gate a\\|b pending_", row)
+        # exactly the 6 declared columns: 7 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+        self.assertTrue(row.endswith("|  |"))
+
+    def test_pending_gate_reasons_pipe_and_newline_stay_in_cell(self):
+        """A pending gate's decision_reason/answered_by_reason with
+        `|`/newline must not corrupt the human-gate table."""
+        g = {"event": "human_gate", "event_id": "human_gate-STORY-216-1",
+             "story_id": "STORY-216", "gate": "merge",
+             "question": "Merge?", "asked_at": "2026-09-02T00:00:00Z",
+             "answered_at": None, "answered_at_reason": "waiting",
+             "decision": None, "decision_reason": "un|answered\nx",
+             "answered_by": None, "answered_by_reason": "u|nanswered",
+             "recorded_at": "2026-09-02T00:00:00Z", "provenance": "live"}
+        text = RP.render([g], "STORY-216", self.header)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| merge |"))
+        self.assertIn("not recorded: un\\|answered x", row)
+        self.assertIn("not recorded: u\\|nanswered", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+
+    def test_plain_reason_cells_render_unchanged(self):
+        """Plain reasons keep their exact prior form."""
+        t = self._transition()
+        text = RP.render([t], "STORY-216", self.header)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| 2026-09-01T07:00:00Z |"))
+        self.assertIn("_not recorded: no gate required_", row)
+        self.assertNotIn("\\|", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+
+    # ---- round 26 AA4: --check treats a MISSING artifact as stale
+    def test_check_missing_artifact_is_stale(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = build_ledger(root)
+            self.assertEqual(
+                RP.main(["STORY-201", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            p = root / "stories" / "STORY-201" / "PROVENANCE.md"
+            self.assertTrue(p.exists())
+            p.unlink()  # a deleted artifact is stale, never fresh
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = RP.main(["STORY-201", "--check", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("(missing)", out.getvalue())
+            # re-render clears it
+            self.assertEqual(
+                RP.main(["STORY-201", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            self.assertEqual(
+                RP.main(["STORY-201", "--check", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+
+    def test_check_missing_artifact_never_rendered_is_stale(self):
+        """A ledger story whose PROVENANCE.md was NEVER rendered also
+        reports stale (rc 1), not silently clean."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = build_ledger(root)
+            self.assertEqual(
+                RP.main(["STORY-201", "--check", "--root", str(root),
+                         "--ledger", str(ledger)]), 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

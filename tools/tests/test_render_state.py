@@ -492,6 +492,129 @@ class RenderStateTests(unittest.TestCase):
         self.assertNotIn("\\|", next(l for l in text.splitlines()
                                      if l.startswith("| full_suite |")))
 
+    # ---- round 26 AA3: formatted nullable cells in transitions,
+    #      findings, and pending human-gate rows
+    def _trans(self, **overrides) -> dict:
+        t = {"event": "transition", "event_id": "transition-STORY-216-1",
+             "story_id": "STORY-216", "repo": None,
+             "repo_reason": "single-repo",
+             "from_state": "CODING", "to_state": "BUILD_GREEN",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T07:00:00Z", "provenance": "live"}
+        t.update(overrides)
+        return t
+
+    def test_transition_approval_reason_pipe_and_newline_stay_in_cell(self):
+        """approved_by_reason with `|`/newline must not add a column to
+        the transitions table or split the row."""
+        t = self._trans(approved_by_reason="gate a|b\npending")
+        text = RS.render([t], "STORY-216", self.header, self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| 2026-09-01T07:00:00Z |"))
+        self.assertIn("— (gate a\\|b pending)", row)
+        # exactly the 7 declared columns: 8 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+        self.assertTrue(row.endswith("| — (gate a\\|b pending) |"))
+
+    def _finding(self, **overrides) -> dict:
+        f = {"event": "finding", "event_id": "finding-STORY-216-1",
+             "story_id": "STORY-216", "finding_id": "F-216-1",
+             "source": "internal", "reviewed_sha": "b" * 40,
+             "introduced_sha": "b" * 40, "class": "reasoning",
+             "severity": None, "severity_reason": "triage pending",
+             "disposition": "deferred", "logic_touched": False,
+             "overlap_id": None, "overlap_id_reason": "independent",
+             "fixer": None, "fixer_reason": "n/a",
+             "fix_sha": None, "fix_sha_reason": "deferred to next story",
+             "validation": None, "validation_reason": "n/a",
+             "evidence_path": "stories/STORY-216/review.md",
+             "recorded_at": "2026-09-01T08:00:00Z", "provenance": "live"}
+        f.update(overrides)
+        return f
+
+    def test_finding_reason_cells_pipe_and_newline_stay_in_column(self):
+        """severity_reason/fix_sha_reason with `|`/newline must not
+        corrupt the findings row (8 declared columns hold)."""
+        f = self._finding(severity_reason="tri|aged\nlater",
+                          fix_sha_reason="not|fixed\nyet")
+        text = RS.render([f], "STORY-216", self.header, self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| F-216-1 |"))
+        self.assertIn("— (tri\\|aged later)", row)
+        self.assertIn("— (not\\|fixed yet)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 9)
+
+    def test_pending_gate_decision_cells_pipe_and_newline_stay_in_column(
+            self):
+        """A pending gate's decision_reason/answered_by_reason with
+        `|`/newline must not corrupt the human-gates row."""
+        g = {"event": "human_gate", "event_id": "human_gate-STORY-216-1",
+             "story_id": "STORY-216", "gate": "merge",
+             "question": "Merge?", "asked_at": "2026-09-02T00:00:00Z",
+             "answered_at": None, "answered_at_reason": "waiting",
+             "decision": None, "decision_reason": "un|answered\nx",
+             "answered_by": None, "answered_by_reason": "u|nanswered",
+             "recorded_at": "2026-09-02T00:00:00Z", "provenance": "live"}
+        text = RS.render([g], "STORY-216", self.header, self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| merge |"))
+        self.assertIn("— (un\\|answered x)", row)
+        self.assertIn("— (u\\|nanswered)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+
+    def test_plain_nullable_cells_render_unchanged(self):
+        """Plain approval/finding reasons keep their exact prior form."""
+        text = RS.render([self._trans(), self._finding()], "STORY-216",
+                         self.header, self.stories)
+        trow = next(l for l in text.splitlines()
+                    if l.startswith("| 2026-09-01T07:00:00Z |"))
+        self.assertIn("— (no gate required)", trow)
+        self.assertNotIn("\\|", trow)
+        self.assertEqual(trow.replace("\\|", "").count("|"), 8)
+        frow = next(l for l in text.splitlines()
+                    if l.startswith("| F-216-1 |"))
+        self.assertIn("— (triage pending)", frow)
+        self.assertIn("— (deferred to next story)", frow)
+        self.assertNotIn("\\|", frow)
+        self.assertEqual(frow.replace("\\|", "").count("|"), 9)
+
+    # ---- round 26 AA4: --check treats a MISSING artifact as stale
+    def test_check_missing_artifact_is_stale(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = build_ledger(root)
+            self.assertEqual(
+                RS.main(["STORY-201", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            p = root / "stories" / "STORY-201" / "state.md"
+            self.assertTrue(p.exists())
+            p.unlink()  # a deleted artifact is stale, never fresh
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = RS.main(["STORY-201", "--check", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("(missing)", out.getvalue())
+            # re-render clears it
+            self.assertEqual(
+                RS.main(["STORY-201", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            self.assertEqual(
+                RS.main(["STORY-201", "--check", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+
+    def test_check_missing_artifact_never_rendered_is_stale(self):
+        """A ledger story whose state.md was NEVER rendered also reports
+        stale (rc 1), not silently clean."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger = build_ledger(root)
+            self.assertEqual(
+                RS.main(["STORY-201", "--check", "--root", str(root),
+                         "--ledger", str(ledger)]), 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -306,6 +306,58 @@ class DestinationConfinementTests(unittest.TestCase):
             dest = root / "stories" / "draft-notes" / "context-bundle.md"
             self.assertTrue(dest.exists())
 
+    # ---- round 26 AA1: the resolved-path check covers CANONICAL ids too
+    def test_symlinked_canonical_story_dir_refused_nothing_written_outside(
+            self):
+        """A canonical STORY-NNN spelling proves nothing about the
+        destination: with stories/STORY-001 symlinked to an unrelated
+        directory, the default-output invocation must refuse (rc 2) and
+        write NOTHING through the symlink — the old spelling-only fast
+        path exited 0 and wrote outside."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            (root / "stories").mkdir()
+            (root / "stories" / "STORY-001").symlink_to(outside)
+            rc, _stdout, stderr = self._run_default(
+                root, "STORY-001", ["src/a.py"])
+            self.assertEqual(rc, 2)
+            self.assertIn("refusing story id 'STORY-001'", stderr)
+            self.assertIn("escapes the stories directory", stderr)
+            # nothing written through the symlink
+            self.assertEqual(list(outside.iterdir()), [])
+            self.assertFalse((outside / "context-bundle.md").exists())
+
+    def test_symlinked_noncanonical_story_dir_refused_too(self):
+        """Same confinement for a non-canonical id whose story directory
+        is a symlink out of <root>/stories."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            (root / "stories").mkdir()
+            (root / "stories" / "draft-notes").symlink_to(outside)
+            rc, _stdout, stderr = self._run_default(
+                root, "draft-notes", ["src/a.py"])
+            self.assertEqual(rc, 2)
+            self.assertIn("escapes the stories directory", stderr)
+            self.assertEqual(list(outside.iterdir()), [])
+
+    def test_symlink_inside_stories_still_writes(self):
+        """A story dir symlinked to ANOTHER location inside <root>/stories
+        resolves under the stories root — confined, so it writes."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(str(Path(td) / "repo"), {"src/a.py": "x = 1\n"})
+            (root / "stories").mkdir()
+            real = root / "stories" / "real-dir"
+            real.mkdir()
+            (root / "stories" / "STORY-002").symlink_to(real)
+            rc, _stdout, stderr = self._run_default(
+                root, "STORY-002", ["src/a.py"])
+            self.assertEqual(rc, 0, stderr)
+            self.assertTrue((real / "context-bundle.md").exists())
+
     def test_explicit_out_override_is_the_callers_own_path(self):
         """--out is an explicit caller-chosen destination, not id-derived:
         it is taken as given (documented override), including paths

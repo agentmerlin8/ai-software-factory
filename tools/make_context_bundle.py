@@ -43,12 +43,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-try:
-    from .ledger_schema import STORY_ID_RE
-except ImportError:  # direct-run layout: the tools dir holds the schema
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from ledger_schema import STORY_ID_RE
-
 
 def git(root: Path, *args: str) -> str:
     """Run git in `root`; raise RuntimeError on nonzero exit (callers
@@ -136,17 +130,17 @@ def main(argv: list[str] | None = None) -> int:
         text += "\n"
 
     # Destination confinement: story_id is untrusted input that becomes a
-    # path component. Canonical STORY-NNN ids (ledger_schema.STORY_ID_RE —
-    # the controller's validate-story-id form) cannot contain separators;
-    # anything else must resolve strictly under <root>/stories or the run
-    # refuses BEFORE any mkdir/write — `../../outside` must never escape.
-    # An explicit --out is the user's own override (not id-derived), so it
-    # is taken as given.
+    # path component. EVERY id — canonical STORY-NNN (ledger_schema.
+    # STORY_ID_RE) or not — must resolve (following symlinks) strictly
+    # under <root>/stories or the run refuses BEFORE any mkdir/write:
+    # `../../outside` must never escape, and a canonical id whose story
+    # directory is a SYMLINK to somewhere outside must not write through
+    # it either — spelling alone proves nothing about the destination.
+    # An explicit --out is the user's own override (not id-derived), so
+    # it is taken as given.
     stories_root = (root / "stories").resolve()
     if args.out:
         dest = Path(args.out)
-    elif STORY_ID_RE.fullmatch(args.story_id):
-        dest = stories_root / args.story_id / "context-bundle.md"
     else:
         cand = (root / "stories" / args.story_id
                 / "context-bundle.md").resolve()

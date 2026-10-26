@@ -6,7 +6,7 @@
 ## How this list is used
 
 1. **Before onboarding**: the operator (or the orchestrator) works the checklist top to bottom.
-2. **Onboard verify** (to build): each item becomes a machine check with a PASS/FAIL line and a remedy printed on failure. Required items gate; advisories warn.
+2. **Onboard verify** (shipped in S3 — `onboarding/readiness.py` + `onboarding/registry.json`): each item is a machine check with a PASS/FAIL line and a remedy printed on failure. Required items gate; advisories warn (S4-owned components render as `DEFERRED(S4)` until the S4 alignment pass).
 3. **Re-check on every significant change** (new board field, changed branch protection, new adapter) — verify is re-runnable and CI-gateable.
 
 Check categories: **CORE** (required for any factory run) · **UI** (only when stories touch UI) · **ADAPTER** (required only when that adapter executes work) · **ADVISORY** (recommended).

@@ -103,9 +103,13 @@ def extract_anchors(text: str) -> list[dict]:
     git_grep = re.compile(
         rf"git grep(?:\s+--?[\w-]+)*\s+(?:\"[^\"]*\"|'[^']*'|\S+)\s+"
         rf"({SHA_RE})\s+--\s+([^\s`)\]]+)")
+    # table-cell citations keep path/line/sha APART: group 1 is the path
+    # ONLY — capturing the whole `path:line[@sha]` cell as the path made
+    # looks_like_repo_path() reject it (contains ':') and the row yielded
+    # ZERO anchors, bypassing validation entirely.
     table_cell = re.compile(
-        rf"^((?:[A-Za-z0-9/._-]+\.(?:{_EXT})):(\d+)"
-        rf"(?:\s*@\s*({SHA_RE}))?)$")
+        rf"^([A-Za-z0-9/._-]+\.(?:{_EXT})):(\d+)"
+        rf"(?:\s*@\s*({SHA_RE}))?$")
 
     for idx, raw in enumerate(lines, 1):
         for m in backtick.finditer(raw):
@@ -133,6 +137,19 @@ def git_show_at(root: Path, sha: str, path: str) -> str | None:
     r = subprocess.run(["git", "-C", str(root), "show", f"{sha}:{path}"],
                        capture_output=True, text=True)
     return r.stdout if r.returncode == 0 else None
+
+
+def resolves_to_commit(root: Path, rev: str) -> bool:
+    """True when `rev` names a readable commit object. The missing-file
+    exemption must NEVER fire on an unresolvable revision: git_show_at()
+    returns None for every Git failure alike, so `path@deadbee` would be
+    accepted as a confirmed CREATE absence even when the commit does not
+    exist. Type-qualified (^{commit}) so tags/blobs/trees refuse."""
+    r = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "-q",
+         f"{rev}^{{commit}}"],
+        capture_output=True, text=True)
+    return r.returncode == 0 and bool(r.stdout.strip())
 
 
 def resolve_base_sha(story_dir: Path, base_sha_flag: str | None,
@@ -173,12 +190,15 @@ def check_plan_anchors(root: Path, story_dir: Path, sid: str, base_sha: str,
                        info: Callable[[str], None]) -> dict:
     """Anchor resolution (plan): every repo-rooted code anchor in
     impl-plan.md resolves at its embedded sha (or the base sha): file
-    exists and the cited line is within EOF. Line-less `path@sha` pins
+    exists and the cited line is within EOF (and >= 1 — a line number
+    below one cannot identify a source line). Line-less `path@sha` pins
     carry one extra semantics: a pin whose file is ABSENT at the sha is a
     legitimate absence claim when the contract declares the path CREATE
-    ("git cat-file -e fails → CREATE op correct"); absent + NOT declared
-    CREATE = reject. Informational: non-base shas (count), partial paths,
-    zero anchors."""
+    ("git cat-file -e fails → CREATE op correct") AND the revision itself
+    resolves to a readable commit (`git rev-parse --verify <rev>^{commit}`
+    — an unresolvable revision is a named failure, never an exemption);
+    absent + NOT declared CREATE = reject. Informational: non-base shas
+    (count), partial paths, zero anchors."""
     plan = story_dir / "impl-plan.md"
     if not plan.exists():
         fail("impl-plan.md missing — cannot verify anchor resolution")
@@ -201,7 +221,19 @@ def check_plan_anchors(root: Path, story_dir: Path, sid: str, base_sha: str,
         content = git_show_at(root, sha, a["path"])
         if content is None:
             if is_pin and a["path"] in create_paths:
-                # legitimate absence claim: new-file pin against a CREATE
+                # legitimate absence claim: new-file pin against a CREATE —
+                # but ONLY when the revision itself resolves to a readable
+                # commit; git_show_at() returns None for every Git failure
+                # alike, so an unresolvable revision must never be laundered
+                # into a confirmed absence (resolve BEFORE exempting).
+                if not resolves_to_commit(root, sha):
+                    stats["failed"] += 1
+                    fail(f"anchor {label} — revision `{sha}` does not "
+                         "resolve to a readable commit (git rev-parse "
+                         f"--verify {sha}^{{commit}} failed) — the "
+                         "missing-file CREATE exemption cannot confirm an "
+                         "absence at a revision that does not exist")
+                    continue
                 stats["absence_ok"] += 1
                 info(f"anchors: anchor {label} — file absent at {sha} and "
                      "declared CREATE in files: (absence claim consistent)")
@@ -212,8 +244,16 @@ def check_plan_anchors(root: Path, story_dir: Path, sid: str, base_sha: str,
                  "memory class)")
             continue
         if a["line"]:
+            n = int(a["line"])
+            if n < 1:
+                # a line number below one cannot identify a source line
+                # (`:0` on an empty file passed the upper-bound-only check)
+                stats["failed"] += 1
+                fail(f"anchor {label} — line {a['line']} is below 1 — not "
+                     f"a valid source line of `{a['path']}`")
+                continue
             n_lines = len(content.splitlines())
-            if int(a["line"]) > n_lines:
+            if n > n_lines:
                 stats["failed"] += 1
                 fail(f"anchor {label} — line {a['line']} beyond EOF of "
                      f"`{a['path']}` ({n_lines} lines at {sha})")

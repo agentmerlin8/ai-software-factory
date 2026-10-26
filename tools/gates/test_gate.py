@@ -219,6 +219,139 @@ class PlanLaneUnits(unittest.TestCase):
         finally:
             PC.SEAM_VERIFY = saved
 
+    # ---- round 37 AL1/AL2/AL3 regressions ----
+    def test_table_cell_citation_keeps_path_line_sha_apart(self):
+        """AL1: a non-backticked `| path:line |` table cell must yield ONE
+        anchor with the path/line in SEPARATE fields — capturing the whole
+        cell as the path made looks_like_repo_path() reject it (contains
+        ':') and the row bypassed validation with zero anchors."""
+        anchors = PC.extract_anchors("| src/ghost.py:99 | evidence |\n")
+        self.assertEqual(len(anchors), 1,
+                         "non-backticked table citation yielded no anchors "
+                         f"(validation bypass): {anchors}")
+        self.assertEqual(anchors[0]["path"], "src/ghost.py")
+        self.assertEqual(anchors[0]["line"], "99")
+        self.assertIsNone(anchors[0]["sha"])
+        self.assertEqual(anchors[0]["form"], "table cell")
+        # with an embedded sha the three parts still stay apart
+        anchors = PC.extract_anchors(
+            "| src/ghost.py:99 @abc1234 | evidence |\n")
+        self.assertEqual(len(anchors), 1, anchors)
+        self.assertEqual((anchors[0]["path"], anchors[0]["line"],
+                          anchors[0]["sha"]),
+                         ("src/ghost.py", "99", "abc1234"))
+        # ghost table row now REJECTS through check_plan_anchors
+        with tempfile.TemporaryDirectory() as td:
+            root, story = self._seed_git_repo(td)
+            (story / "impl-plan.md").write_text(
+                "# plan\n\n| Anchor | Note |\n|---|---|\n"
+                "| src/ghost.py:99 | evidence |\n")
+            fails, notes = [], []
+            PC.check_plan_anchors(root, story, "S", "HEAD", set(),
+                                  fails.append, notes.append)
+            self.assertTrue(any("src/ghost.py" in f and "missing" in f
+                                for f in fails), fails)
+        # valid table row resolves: real path, line within EOF → no failure
+        with tempfile.TemporaryDirectory() as td:
+            root, story = self._seed_git_repo(td)
+            (story / "impl-plan.md").write_text(
+                "# plan\n\n| src/app/core.py:2 | evidence |\n")
+            fails, notes = [], []
+            PC.check_plan_anchors(root, story, "S", "HEAD", set(),
+                                  fails.append, notes.append)
+            self.assertEqual(fails, [], notes)
+        # backticked table cells keep working (unchanged form)
+        anchors = PC.extract_anchors("| `src/app/core.py:2` | evidence |\n")
+        self.assertTrue(any(a["path"] == "src/app/core.py"
+                            and a["line"] == "2" for a in anchors), anchors)
+
+    @staticmethod
+    def _seed_git_repo(td: str) -> tuple[Path, Path]:
+        """Temp git repo with one commit + a story dir (test helper)."""
+        root = Path(td) / "repo"
+        (root / "src" / "app").mkdir(parents=True)
+        (root / "src" / "app" / "core.py").write_text(
+            "class WidgetCore:\n    def reset(self):\n        pass\n")
+        (root / "src" / "empty.py").write_text("")
+        for args in (["init", "-q"], ["add", "-A"],
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", "seed"]):
+            subprocess.run(["git", "-C", str(root), *args], check=True,
+                           capture_output=True)
+        story = Path(td) / "story"
+        story.mkdir()
+        return root, story
+
+    def test_bogus_sha_create_claim_rejected_not_exempted(self):
+        """AL2: `src/new.py@deadbee` with deadbee unresolvable must be a
+        NAMED gate failure — the missing-file CREATE exemption may only
+        fire at a revision that resolves to a readable commit."""
+        with tempfile.TemporaryDirectory() as td:
+            root, story = self._seed_git_repo(td)
+            (story / "impl-plan.md").write_text(
+                "CREATE pin: `src/new.py@deadbee`\n")
+            fails, notes = [], []
+            stats = PC.check_plan_anchors(root, story, "S", "deadbee",
+                                          {"src/new.py"}, fails.append,
+                                          notes.append)
+            self.assertTrue(any("deadbee" in f and "does not resolve" in f
+                                for f in fails),
+                            f"bogus-sha create claim exempted: {fails}")
+            self.assertEqual(stats["absence_ok"], 0, stats)
+            self.assertEqual(stats["failed"], 1, stats)
+        # valid revision + genuinely absent file → exemption as before
+        with tempfile.TemporaryDirectory() as td:
+            root, story = self._seed_git_repo(td)
+            head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True).stdout.strip()
+            (story / "impl-plan.md").write_text(
+                f"CREATE pin: `src/new.py@{head}`\n")
+            fails, notes = [], []
+            stats = PC.check_plan_anchors(root, story, "S", head,
+                                          {"src/new.py"}, fails.append,
+                                          notes.append)
+            self.assertEqual(fails, [], notes)
+            self.assertEqual(stats["absence_ok"], 1, stats)
+            self.assertTrue(any("absence claim consistent" in n
+                                for n in notes), notes)
+
+    def test_line_number_below_one_rejected(self):
+        """AL3: `path:0` (or negative) cannot identify a source line —
+        named rejection BEFORE the EOF bound check; `:1` on a 1-line file
+        passes; the beyond-EOF failure is unchanged."""
+        with tempfile.TemporaryDirectory() as td:
+            root, story = self._seed_git_repo(td)
+            (story / "impl-plan.md").write_text(
+                "zero line: `src/empty.py:0`\n")
+            fails, notes = [], []
+            PC.check_plan_anchors(root, story, "S", "HEAD", set(),
+                                  fails.append, notes.append)
+            self.assertTrue(any("below 1" in f for f in fails),
+                            f"`:0` on an empty file passed: {fails}")
+        with tempfile.TemporaryDirectory() as td:
+            root, story = self._seed_git_repo(td)
+            (root / "src" / "one.py").write_text("only line\n")
+            subprocess.run(["git", "-C", str(root), "add", "-A"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c",
+                            "user.email=t@t", "-c", "user.name=t",
+                            "commit", "-qm", "one"], check=True,
+                           capture_output=True)
+            (story / "impl-plan.md").write_text(
+                "first line: `src/one.py:1`\n")
+            fails, notes = [], []
+            PC.check_plan_anchors(root, story, "S", "HEAD", set(),
+                                  fails.append, notes.append)
+            self.assertEqual(fails, [], notes)
+            # EOF bound check unchanged: line 2 of a 1-line file rejects
+            (story / "impl-plan.md").write_text(
+                "past eof: `src/one.py:2`\n")
+            fails = []
+            PC.check_plan_anchors(root, story, "S", "HEAD", set(),
+                                  fails.append, notes.append)
+            self.assertTrue(any("beyond EOF" in f for f in fails), fails)
+
     def test_batch_create_collision(self):
         gate = G.Gate(root=REPO)
         batches = {"A": {"src/x.py"}, "B": {"src/x.py"}}

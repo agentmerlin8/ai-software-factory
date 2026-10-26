@@ -340,6 +340,33 @@ class RenderProvenanceTests(unittest.TestCase):
         text = RP.render([ask], "STORY-210", self.header)
         self.assertIn("PENDING — no reason recorded", text)
 
+    # ---- round 37 AL4: question-aware supersession
+    def test_answer_supersedes_only_its_own_question(self):
+        """An answer to question A on a gate supersedes ONLY A's ask row;
+        a distinct question B on the same (story, gate) stays PENDING —
+        the (story_id, gate, question) identity rule of render_state.py."""
+        ask, answer, _lone = self._gate_rows()
+        ask_b = {**ask, "event_id": "human_gate-STORY-210-9",
+                 "question": "Second scope question B?",
+                 "asked_at": "2026-09-02T00:05:00Z",
+                 "recorded_at": "2026-09-02T00:05:00Z"}
+        text = RP.render([ask, ask_b, answer], "STORY-210", self.header)
+        row_a = next(l for l in text.splitlines()
+                     if l.startswith("| merge | Merge approved diff? |"))
+        row_b = next(l for l in text.splitlines()
+                     if l.startswith("| merge | Second scope question B? |"))
+        self.assertIn("superseded by human_gate-STORY-210-2", row_a)
+        self.assertIn("PENDING — awaiting the allowlisted approver", row_b)
+        self.assertNotIn("superseded", row_b)
+
+    def test_exact_question_repeat_still_supersedes(self):
+        """Same gate + same question + answered → the ask row is still
+        superseded (the identity combination matches exactly)."""
+        ask, answer, _lone = self._gate_rows()
+        text = RP.render([ask, answer], "STORY-210", self.header)
+        self.assertIn("superseded by human_gate-STORY-210-2", text)
+        self.assertNotIn("PENDING", text)
+
     # ---- gate decision + respondent in the trace (R15-P2)
     def test_gate_decision_and_respondent_rendered(self):
         _ask, answer, _lone = self._gate_rows()

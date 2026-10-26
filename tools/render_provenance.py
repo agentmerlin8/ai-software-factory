@@ -239,10 +239,15 @@ def render(events: list[dict], sid: str, header: str) -> str:
                 ans = g["answered_at"]
             else:
                 # append-only ledger: an ask row stays unanswered forever
-                # once a later answered row for the same (story, gate)
-                # records the reply — mirror render_state.py's supersede
+                # once a later answered row for the SAME REQUEST IDENTITY
+                # records the reply. Round 37 AL4: identity is the
+                # documented combination (story_id, gate, question) —
+                # an answer to scope question A supersedes only A's ask;
+                # a distinct question B on the same story+gate stays
+                # PENDING. IDENTICAL rule in render_state.py.
                 supers = [s.get("event_id") for s in gates[i + 1:]
                           if s.get("gate") == g.get("gate")
+                          and s.get("question") == g.get("question")
                           and s.get("answered_at")]
                 ans = f"superseded by {supers[0]}" if supers else \
                     f"PENDING — {g.get('answered_at_reason') or 'no reason recorded'}"

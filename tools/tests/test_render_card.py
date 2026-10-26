@@ -411,6 +411,46 @@ class OutcomeOnlyStateTests(unittest.TestCase):
         # no start-of-lifecycle move hint (BACKLOG → GRILLED)
         self.assertNotIn("advance to **GRILLED**", card)
 
+    def test_derived_state_suppresses_executable_move(self):
+        """Round 29 AD1: the derived label must not advertise a move the
+        controller would reject (BACKLOG state, no transitions — the
+        order check refuses `request <derived successor>`). No CLI line,
+        no `advance to …`, and a reconciliation note in its place."""
+        card = self._card("STORY-987", [self._outcome_row("STORY-987")])
+        self.assertIn("**State:** MERGED (derived from outcome)", card)
+        self.assertNotIn("CLI:", card)
+        self.assertNotIn("advance to", card)
+        moves = card.split("### Next legal move(s)\n", 1)[1]
+        moves = moves.split("\n\n", 1)[0]
+        self.assertIn("— none (state derived from outcome; reconcile "
+                      "transition history before the controller can "
+                      "accept moves) —", moves)
+
+    def test_derived_live_proven_suppresses_executable_move(self):
+        card = self._card("STORY-988", [
+            self._outcome_row("STORY-988", live_proof_status="proven")])
+        self.assertIn("**State:** LIVE_PROVEN (derived from outcome)", card)
+        self.assertNotIn("CLI:", card)
+        self.assertNotIn("advance to", card)
+        self.assertIn("state derived from outcome", card)
+
+    def test_transitioned_story_moves_section_unchanged(self):
+        """A story WITH transitions keeps the exact executable-moves
+        output — the suppression applies only to derived state."""
+        events = [
+            {"event": "transition", "story_id": "STORY-989", "repo": None,
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator"},
+            self._outcome_row("STORY-989"),
+        ]
+        card = self._card("STORY-989", events)
+        self.assertIn("**State:** CODING", card)
+        self.assertNotIn("derived from outcome", card)
+        self.assertIn("advance to **BUILD_GREEN**", card)
+        self.assertIn("CLI: `python3 factory/tools/controller.py request "
+                      "STORY-989 BUILD_GREEN", card)
+        self.assertNotIn("state derived from outcome", card)
+
     def test_outcome_only_live_proven_shows_live_proven(self):
         card = self._card("STORY-982", [
             self._outcome_row("STORY-982", live_proof_status="proven")])

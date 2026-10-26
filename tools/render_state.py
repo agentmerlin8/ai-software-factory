@@ -212,8 +212,10 @@ def render(events: list[dict], sid: str, header: str,
                 f"| {_cell(fmt_null(s.get('tests_failed'), 'tests_failed_reason', s))} "
                 f"| {_cell(fmt_null(s.get('tests_skipped'), 'tests_skipped_reason', s))} "
                 f"| {_cell(fmt_null(s.get('tests_excluded'), 'tests_excluded_reason', s))} "
-                f"| {s.get('commit_sha') or '—'} "
-                f"| {s.get('evidence_path') or '—'} |")
+                # round 29 AD4: commit/evidence cells carry their
+                # recorded null reasons too — both untrusted text
+                f"| {_cell(fmt_null(s.get('commit_sha'), 'commit_sha_reason', s))} "
+                f"| {_cell(fmt_null(s.get('evidence_path'), 'evidence_path_reason', s))} |")
         out.append("")
 
     # ---- loops

@@ -1477,5 +1477,126 @@ class AnchorSignatureMemberTests(unittest.TestCase):
                           "['not_present_anywhere']", errors)
 
 
+class ParenOrderedAnchorTests(unittest.TestCase):
+    """Round 29 AD2: `1) src/ghost.py:99 — …` used to miss the ordered
+    marker regex (only `1.` was accepted) and be silently skipped —
+    invalid evidence passed. Both ordered delimiter forms parse."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=R8_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_paren_ghost_anchor_rejected_by_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-980",
+                              "1) `src/ghost.py:99` — def compute_total\n")
+            errors = CD.run_gate(root, "STORY-980", "HEAD")
+            self.assertIn("anchor path missing at HEAD: src/ghost.py",
+                          errors)
+
+    def test_paren_valid_anchor_resolves(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-981",
+                              "1) `src/app.py:3` — async def existing\n")
+            self.assertEqual(CD.run_gate(root, "STORY-981", "HEAD"), [])
+
+    def test_paren_symbol_mismatch_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-982",
+                              "2) `src/app.py:3` — async def missing\n")
+            errors = CD.run_gate(root, "STORY-982", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['missing']", errors)
+
+    def test_ordered_marker_regex_grammar(self):
+        """Both `1.` and `1)` delimiters parse; other forms unchanged."""
+        for line, path, lineno in (
+                ("1. `bin/build:3` — set -e", "bin/build", 3),
+                ("1) `bin/build:3` — set -e", "bin/build", 3),
+                ("12) src/ghost.py:99 — def x", "src/ghost.py", 99),
+                ("- `src/app.py:12` — def f", "src/app.py", 12)):
+            mm = re.match(r"^\s*(?:[-*+]|\d+[.)])?\s*"
+                          r"`?([^`:\s]+):(-?\d+)`?\s*—?\s*([^—]*)",
+                          line)
+            self.assertIsNotNone(mm, line)
+            self.assertEqual(mm.group(1), path)
+            self.assertEqual(int(mm.group(2)), lineno)
+
+
+DECL_ASSIGN_SRC = (
+    "// app\n"
+    "export const Existing = makeWidget()\n"
+    "let total = 0\n"
+    "if (a == b) { run(); }\n"
+    "function checkSum(a == b) { }\n")
+
+
+class AnchorDeclaredNameTests(unittest.TestCase):
+    """Round 29 AD3: `export const Missing = makeWidget()` used to PASS
+    against `export const Existing = makeWidget()` — only the trailing
+    initializer call was checked. The assignment form recognizes the
+    DECLARED NAME (first non-keyword token before `=`) first."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=DECL_ASSIGN_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_assignment_wrong_declared_name_flagged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-983",
+                              "- `src/app.py:2` — export const Missing = "
+                              "makeWidget()\n")
+            errors = CD.run_gate(root, "STORY-983", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_assignment_matching_declared_name_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-984",
+                              "- `src/app.py:2` — export const Existing = "
+                              "makeWidget()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-984", "HEAD"), [])
+
+    def test_const_assignment_declared_name(self):
+        """A keyword (`const`) before `=` is skipped — the DECLARED NAME
+        is the checked symbol, not the initializer."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-985",
+                              "- `src/app.py:3` — const subtotal = 0\n")
+            errors = CD.run_gate(root, "STORY-985", "HEAD")
+            self.assertIn("anchor symbol not on line 3 of src/app.py: "
+                          "['subtotal']", errors)
+
+    def test_comparison_operators_not_treated_as_assignment(self):
+        """`==` is not an assignment — the description keeps the
+        call-signature branch. `total == checkSum()` checks the member
+        `checkSum` (on line 5); had `==` matched as an assignment, the
+        spurious declared name `total` (NOT on the line) would flag."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-986",
+                              "- `src/app.py:5` — total == checkSum()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-986", "HEAD"), [])
+            root2 = self._repo(td + "b", "STORY-987",
+                               "- `src/app.py:5` — total == "
+                               "missingMember()\n")
+            errors = CD.run_gate(root2, "STORY-987", "HEAD")
+            self.assertIn("anchor symbol not on line 5 of src/app.py: "
+                          "['missingMember']", errors)
+
+    def test_pure_signature_branch_unchanged(self):
+        """No `=` in the description → the call-signature check applies
+        exactly as before (R24-Y1)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-988", src_lines=R8_SRC,
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:6` — public static Foo "
+                                    "Missing()\n")
+            errors = CD.run_gate(root, "STORY-988", "HEAD")
+            self.assertIn("anchor symbol not on line 6 of src/app.py: "
+                          "['Missing']", errors)
+
+
 if __name__ == "__main__":
     unittest.main()

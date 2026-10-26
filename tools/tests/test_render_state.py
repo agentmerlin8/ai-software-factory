@@ -492,6 +492,33 @@ class RenderStateTests(unittest.TestCase):
         self.assertNotIn("\\|", next(l for l in text.splitlines()
                                      if l.startswith("| full_suite |")))
 
+    # ---- round 29 AD4: nullable commit/evidence cells keep reasons
+    def test_stage_commit_evidence_reasons_rendered_escaped(self):
+        """A null commit_sha/evidence_path renders its recorded
+        <field>_reason — not a bare `— | —` that loses it — with the
+        untrusted text escaped so the row keeps its columns."""
+        text = RS.render(
+            [self._stage(commit_sha=None,
+                         commit_sha_reason="build failed | no commit\n"
+                                           "runner stopped",
+                         evidence_path=None,
+                         evidence_path_reason="no artifact produced")],
+            "STORY-201", self.header, self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| full_suite |"))
+        self.assertIn("— (build failed \\| no commit runner stopped)", row)
+        self.assertIn("— (no artifact produced)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_stage_commit_evidence_present_values_unchanged(self):
+        """Present commit_sha/evidence_path render exactly as before."""
+        text = RS.render([self._stage()], "STORY-201", self.header,
+                         self.stories)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| full_suite |"))
+        self.assertIn("| " + "e" * 40 + " |", row)
+        self.assertIn("| stories/STORY-201/evidence/full-suite.txt |", row)
+
     # ---- round 26 AA3: formatted nullable cells in transitions,
     #      findings, and pending human-gate rows
     def _trans(self, **overrides) -> dict:

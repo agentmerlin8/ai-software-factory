@@ -250,7 +250,10 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
             # like `src/ghost.py:-1` used to miss the unsigned regex and
             # be silently skipped; capturing the sign lets the lineno < 1
             # check below reject it by name.
-            mm = re.match(r"^\s*(?:[-*+]|\d+\.)?\s*"
+            # Round 29 AD2: parenthesized ordered markers (`1)`) are
+            # accepted alongside `1.` — a `1)`-numbered ghost anchor
+            # must not be silently skipped either.
+            mm = re.match(r"^\s*(?:[-*+]|\d+[.)])?\s*"
                           r"`?([^`:\s]+):(-?\d+)`?\s*—?\s*([^—]*)",
                           line)
             if not mm:
@@ -277,8 +280,26 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                 # `public static Widget MissingMethod()` must NOT pass
                 # against `public static Widget ExistingMethod()` on the
                 # strength of the shared return type alone.
+                # Round 29 AD3: an ASSIGNMENT / declaration-with-
+                # initializer form (`NAME = …`) is recognized FIRST —
+                # the checked symbol is the DECLARED NAME (first non-
+                # keyword token before the `=`), not the trailing
+                # initializer call. `export const Missing = makeWidget()`
+                # must NOT pass against `export const Existing =
+                # makeWidget()` on the shared initializer alone. The
+                # lookarounds keep comparison/compound operators
+                # (`==`, `<=`, `+=`, …) out of the assignment match.
+                asg = re.search(r"(?<![<>=!+\-*/&|^%])=(?!=)", desc)
+                declared = None
+                if asg:
+                    left = re.findall(r"\w+", desc[:asg.start()])
+                    lsyms = [t for t in left if t not in DECL_KEYWORDS]
+                    if lsyms:
+                        declared = lsyms[0]
                 sig = re.search(r"(\w+)\s*\([^()]*\):?\s*$", desc)
-                if sig:
+                if declared is not None:
+                    check = [declared]
+                elif sig:
                     check = [sig.group(1)]
                 else:
                     # R8-I4: skip leading declaration keywords/modifiers —

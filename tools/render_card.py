@@ -268,9 +268,19 @@ def render_card_text(sid: str, events: list[dict], state: str,
     lines.append("")
 
     lines.append("### Next legal move(s)")
-    for i, m in enumerate(next_moves(sid, state, blocked_from,
-                                     stories_root), 1):
-        lines.append(f"{i}. {m}")
+    if derived_from_outcome:
+        # Round 29 AD1: a derived state is display-only — the controller
+        # has no transition history for the story, so its order check
+        # rejects any `request` for the derived state's successor. Never
+        # advertise an executable move the controller cannot accept;
+        # point at reconciliation instead.
+        lines.append("— none (state derived from outcome; reconcile "
+                     "transition history before the controller can "
+                     "accept moves) —")
+    else:
+        for i, m in enumerate(next_moves(sid, state, blocked_from,
+                                         stories_root), 1):
+            lines.append(f"{i}. {m}")
     lines.append("")
 
     lines.append("### Open findings")

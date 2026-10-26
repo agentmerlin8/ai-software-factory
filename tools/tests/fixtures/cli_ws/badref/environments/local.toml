@@ -1,0 +1,14 @@
+# fixture environment: both credential references resolve to MISSING
+runtime = "hermes"
+
+[dispatch]
+mechanism = "delegate_task"
+
+[models]
+T1 = "model-a"
+
+[credentials]
+refs = ["env:CLI_WS_ABSENT_KEY", "file:secrets/absent.txt"]
+
+[limits]
+wall = "1h"

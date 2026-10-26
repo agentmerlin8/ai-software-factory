@@ -1,0 +1,14 @@
+# fixture environment: deferred placeholders (template mode)
+runtime = "hermes"
+
+[dispatch]
+mechanism = "delegate_task"
+
+[models]
+T1 = "<model-id>"
+
+[credentials]
+refs = ["<token-ref>"]
+
+[limits]
+wall = "2h"

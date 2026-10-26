@@ -1,0 +1,4 @@
+scope: STORY-001
+by: human-ops
+reason: recovery from a stuck claim lock during incident response
+date: 2026-10-25T00:00:00Z

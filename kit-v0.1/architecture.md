@@ -125,7 +125,8 @@ limits = { wall = "…", runs = "…", budget = "…" }
 
 ### CLI surface (candidate additions)
 
-Shipped in the reference and ported genericized: `status` · `doctor` · `prepare` (sealed, non-launching) · `validate`, plus the run-phase record path, surfaced in the kit as `run-stage`. Workspace layer (candidates): `factory workspace init|add-repo|show` · `factory env show|resolve` · `render` · `claim` / `transition` (wraps the existing controller — no second state machine; read path first).
+Shipped in the reference (execution seam): `status` · `doctor` · `prepare` (sealed, non-launching) · `validate`, plus the run-phase record path (the kit surfaces it as `run-stage`) — **not ported in S2** (follow-on increment with the execution seam). Workspace layer: `workspace show` · `env show|resolve` — **shipped (S2-T7, read path; see below)**. Candidates (follow-on): `workspace init|add-repo` · `render` · `claim` / `transition` (wraps the existing controller — no second state machine).
+Read path SHIPPED (S2-T7): `python3 factory/tools/factory.py workspace show [--repo <path>] [--json]` · `env show|resolve <name|path> [--strict] [--json]`, global `--workspace <dir>` — stable text/JSON (same data, sorted keys), validation delegated verbatim to `config_validator`/`ledger_lib`, nonzero refusals (0 ok · 1 findings · 2 usage), strictly read-only.
 
 ## Ledger durability and the single writer
 
@@ -182,7 +183,7 @@ Work artifacts (code) live on the story branch in each touched repo; the control
 | Tool | Responsibility | Notes |
 |---|---|---|
 | `controller.py` | Transition engine: validates every state change against ledger + git + gh; refuses with named checks; claim-lock enforcement; override consultation; claim/handover/override commands | Judgment-free |
-| `ledger_lib.py` | Event schema + validation (null+reason) + append/read helpers — the S2 port: the S1 schema/validation half ships as `ledger_schema.py`; the append/load I/O lands with the port | Schema is the contract |
+| `ledger_lib.py` | Event schema + validation (null+reason) + append/read helpers — the S1 schema/validation half ships as `ledger_schema.py`; the append/load I/O + field-set strictness ship as `tools/ledger_lib.py` (S2) | Schema is the contract |
 | `config_validator.py` | Workspace + environment config validation (`workspace.toml` + `environments/*`) | New in the kit (S1); named refusal classes (unknown key · malformed binding · malformed/unresolvable pin · inline secret · unknown gate profile); stdlib `tomllib` |
 | `gates/` | Mechanical pre-checks (plan gate, pre-review gate, digest gate) with fixtures | Run before any LLM review |
 | `make_context_bundle.py` | Deterministic context assembly: inline pinned inputs at base SHA into one bundle | Feeds dispatch packages |
@@ -201,7 +202,7 @@ Prep-tool terms (defined inline): the **hard-read gate block** (`dispatch_prep`)
 
 Gate scripts live under `tools/gates/` in the kit repo; on install they land at `factory/gates/` (a sibling of `factory/tools/`, per §Canonical layouts).
 
-Since the draft, the reference shipped a read-only CLI (`status`, `doctor`) and a sealed, non-launching preparation/validation path (the **execution seam**). The kit ports those genericized; the launch surface remains gated in the reference (no cloud runner, no spend).
+Since the draft, the reference shipped a read-only CLI (`status`, `doctor`) and a sealed, non-launching preparation/validation path (the **execution seam**). The kit's port of the seam CLI comes with the execution-seam increment (not S2); the launch surface remains gated in the reference (no cloud runner, no spend).
 
 ## Gate catalog (extracted)
 
@@ -211,7 +212,7 @@ Four mechanical gates, extracted from the reference with descriptive slugs (no n
 |---|---|---|---|---|
 | `digest-gate` | Context digest completeness + anchors at a pinned base SHA | `check_digest.py` | `python3 factory/tools/check_digest.py <STORY-ID> [BASE_SHA]` | After context acquisition, before the planner dispatch. Exit 0 = planner may dispatch; non-zero = re-dispatch context acquisition, never hand-patch the digest |
 | `plan-gate` | Plan-lane mechanical checks: contract block schema, AC coverage, cross-story collisions, anchor resolution, seam verification, coverage set-diffs, snippet annotations | `pre_review_gate.py` (plan mode) | `python3 factory/gates/pre_review_gate.py plan <story-dir> [--spec <path>] [--inflight auto\|none]` | PLANNED → GATE_PASSED (run live by the controller) and before any LLM plan review. Exit 0 = pass |
-| `build-gate` | Build-lane mechanical checks: manifest↔diff, AC↔test discovery, pinned command execution, api-shape, UI DOM assertions, fidelity checks | `pre_review_gate.py` (build mode) | `python3 factory/gates/pre_review_gate.py build <story-dir> [--base main] [--diff-file <name-status file>] [--discovery <project>=<list-tests file>]... [--run-discovery] [--run-verify]` | At BUILD_GREEN, before any LLM code review. Exit 0 = pass |
+| `build-gate` | Build-lane mechanical checks: manifest↔diff, AC↔test discovery, pinned command execution, api-shape + UI assertions (activation-gated project declarations; the reference's seed check families are not ported) | `pre_review_gate.py` (build mode) | `python3 factory/gates/pre_review_gate.py build <story-dir> [--base main] [--diff-file <name-status file>] [--discovery <project>=<list-tests file>]... [--run-discovery] [--run-verify]` | At BUILD_GREEN, before any LLM code review. Exit 0 = pass |
 | `gate-selftest` | Gate acceptance harness: seeded-invalid fixtures rejected, valid-but-unusual accepted | `test_gate.py` | `python3 factory/gates/test_gate.py` | CI and before any gate change deploys. Non-zero if any fixture behaves wrongly |
 
 Notes:
@@ -221,6 +222,7 @@ Notes:
 - **Mechanical gates run BEFORE any LLM review** (mechanical-before-judgment law).
 - Fixtures policy: a gate change is not deployed until the acceptance harness rejects every seeded-invalid fixture and accepts every valid-but-unusual one.
 - Machine-readable form: `tools/gate_catalog.py` (`GATES`).
+- Project-specific build-check extensions (source-grammar API parsing, live UI renderers, fidelity/ORM seed checks) are **project-declared**: the generic families activate only when a project declares the surface — the reference's seed checks are not ported.
 
 ## State machine
 
@@ -365,6 +367,25 @@ One generated markdown per dispatch. Schema (six sections):
 | Resume preamble | check git status/log/artifacts first; READ-ONLY priors; budget; first edit within N calls |
 
 Generation: **one assembler owns the final package file**; the prep tools (`plan_prep`, `dispatch_prep`, `build_handoff`, `make_context_bundle`) produce its inputs. Consumption: **any** executor — adapter or human. Parity rule: same package through any adapter → same artifact paths + same contract shape (contract shape = required artifact paths + required sections/front-matter keys per role output).
+
+### Plan contract block (frozen schema)
+
+The impl plan's fenced ```contract.yaml block — extracted with a small YAML subset (block/flow sequences, block mappings, scalars, comments; anything else is a parse error the gate rejects).
+
+| Key | Required | Null-allowed (`<field>_reason`) | Enums / type rules |
+|---|---|---|---|
+| `contract_version` | yes | — | must be `1` |
+| `files` | yes, non-empty | — | entries: `path` (repo-relative, not absolute, no `..`) + `op` ∈ {CREATE, EXTEND} |
+| `tests` | yes, non-empty | — | entries: `ac` + `name` required; optional `project` (repo-relative), `asserts` |
+| `invariants` | yes, non-empty | — | entries: `id` + `text` |
+| `verify_commands` | yes, non-empty | — | non-empty strings; command grammar is project-declared, never interpreted here |
+| `decisions` | yes, non-empty | — | entries: `decision` required; `rejected` optional |
+| `failure_model` | optional | — | entries: `risk` + `discriminating_test`; a project gate profile may declare conditions making it required |
+| `api_operations` | optional | — | entries: `method` ∈ {GET, POST, PUT, PATCH, DELETE}, `route` (starts `/`, no `?`/`..`), repo-relative `source`, `action`, non-empty `responses` (status int 100–599 + type; `removed: true` exempts); duplicate (method, route) and duplicate status refused |
+
+Refusals: `malformed contract block: <detail>` (parse/schema) · `contract block: <check> — <detail>` (semantic). Layout/toolchain-specific rules (source-tree prefixes, extensions, test-runner grammar) are NOT hardcoded — they are project gate declarations (hook points documented in the module).
+
+Machine-readable form: `tools/contract_lib.py`; this section and the module are the same contract.
 
 ## Adapter interface
 

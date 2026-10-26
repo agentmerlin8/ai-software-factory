@@ -1,0 +1,2 @@
+A	web/stories/widgets.stories.js
+A	tests/test_widget_ui.py

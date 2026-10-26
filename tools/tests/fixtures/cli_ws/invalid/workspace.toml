@@ -1,0 +1,12 @@
+# fixture workspace: schema-invalid (unknown key)
+workspace = "cli-fixture"
+control_home = "dedicated"
+unknown_section_key = true
+
+[factory]
+pin = "<kit tag/sha>"
+
+[[repos]]
+id = "app"
+role = "primary"
+url = "github.com/ORG/app"

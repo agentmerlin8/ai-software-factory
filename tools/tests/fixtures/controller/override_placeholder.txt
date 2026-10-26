@@ -1,0 +1,4 @@
+scope: <STORY-NNN or ALL>
+by: <human name>
+reason: <why — required, no placeholders>
+date: <UTC>

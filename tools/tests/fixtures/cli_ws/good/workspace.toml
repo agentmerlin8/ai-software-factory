@@ -1,0 +1,26 @@
+# fixture workspace (fictional ids only)
+workspace = "cli-fixture"
+control_home = "dedicated"
+default_branch = "main"
+
+[factory]
+pin = "<kit tag/sha>"
+
+[[repos]]
+id = "app"
+role = "primary"
+url = "github.com/ORG/app"
+
+[[repos]]
+id = "web"
+role = "member"
+url = "github.com/ORG/web"
+
+[[repos]]
+id = "tools"
+role = "member"
+url = "github.com/ORG/tools"
+path = "checkout/tools"
+
+[policy]
+gates = "default"

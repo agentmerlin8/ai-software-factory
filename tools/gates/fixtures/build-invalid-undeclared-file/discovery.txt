@@ -1,0 +1,2 @@
+The following tests are available:
+    tests.test_widget.widget_rejects_duplicate

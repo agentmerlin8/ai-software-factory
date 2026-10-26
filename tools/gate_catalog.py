@@ -47,8 +47,9 @@ GATES: tuple[dict[str, str], ...] = (
     {
         "slug": "build-gate",
         "purpose": "Build-lane mechanical checks: manifest↔diff, AC↔test "
-                   "discovery, pinned command execution, api-shape, UI DOM "
-                   "assertions, fidelity checks",
+                   "discovery, pinned command execution, api-shape + UI "
+                   "assertions (activation-gated project declarations; the "
+                   "reference's seed check families are not ported)",
         "script": "pre_review_gate.py (build mode)",
         "invocation": "python3 factory/gates/pre_review_gate.py build "
                       "<story-dir> [--base main] [--diff-file <name-status "

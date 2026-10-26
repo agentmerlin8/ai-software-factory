@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """Tests for onboarding/forge_probe.py — the forge probe layer.
 
-Every test drives Forge through an in-test recorder transport (the
-sync_board FakeTransport pattern): NO network, NO gh, and the default
-gh-backed transport is never constructed here. Covers: auth scopes
-(full/partial/unparseable), repo view (ok/error), rulesets
+Every Forge-level test drives an in-test recorder transport (the
+sync_board FakeTransport pattern): NO network, NO gh. The real
+gh-backed transport is covered separately with subprocess.run stubbed
+via unittest.mock — still no network, no gh, no shell. Covers: auth
+scopes (full/partial/unparseable), repo view (ok/error), rulesets
 (active+bypass / disabled / absent / refused-without-raise), labels
 (all/subset), issue form (present/absent), project fields
 (resolved/unresolvable/bad-grammar), the pure label-ensure argv builder
 (verbatim equality) + the single recorded write call, fixture datasets
-(load/unknown-op/malformed/end-to-end), read purity, stdlib-only
-imports, and LF endings.
+(load/unknown-op/malformed/end-to-end), parse_project_locator grammar,
+the real transport's project branch (resolution -> fields, null
+resolution, bad locator refuses before any subprocess call), read
+purity, stdlib-only imports, and LF endings.
 """
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from onboarding import forge_probe as FP
 
@@ -435,6 +440,89 @@ class TestHouseLaws(unittest.TestCase):
         recorder = RecorderTransport({"auth_scopes": AUTH_FULL})
         forge = FP.Forge(recorder)
         self.assertIs(forge._t, recorder)
+
+
+def _stub_run(*outputs: str):
+    """A subprocess.run stub returning rc=0 with the given stdouts in
+    call order (capture_output/text kwargs shape)."""
+    results = [subprocess.CompletedProcess(args=["gh"], returncode=0,
+                                           stdout=text, stderr="")
+               for text in outputs]
+    return mock.Mock(side_effect=results)
+
+
+GH_JSON_RESOLVE = json.dumps(
+    {"data": {"organization": {"projectV2": {"id": "PVT_X"}}}})
+GH_JSON_FIELDS = json.dumps(
+    {"data": {"node": {"fields": {"nodes": [
+        {"__typename": "ProjectV2SingleSelectField", "id": "F_STAGE",
+         "name": "Stage",
+         "options": [{"id": "OPT_CODING", "name": "CODING"},
+                     {"id": "OPT_MERGED", "name": "MERGED"}]},
+    ]}}}})
+GH_JSON_NULL_RESOLVE = json.dumps(
+    {"data": {"organization": {"projectV2": None}}})
+
+
+class TestParseProjectLocator(unittest.TestCase):
+    def test_valid_locator_parses(self):
+        self.assertEqual(FP.parse_project_locator("fixture-org/projects/7"),
+                         ("fixture-org", 7))
+
+    def test_bad_locators_refused_with_named_message(self):
+        for bad in ("fixture-org/projects/x", "nope", "org/projects/7/x",
+                    ""):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.parse_project_locator(bad)
+            self.assertEqual(
+                str(ctx.exception),
+                f"refused: bad project locator '{bad}' — must match "
+                "<org>/projects/<n>")
+
+
+class TestRealTransportProject(unittest.TestCase):
+    """The REAL gh_probe_transport with subprocess.run stubbed — closes
+    the fixture-masked transport gap. No network, no gh, no shell."""
+
+    def test_resolve_then_fields_two_argv_list_calls(self):
+        stub = _stub_run(GH_JSON_RESOLVE, GH_JSON_FIELDS)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "project", {"locator": "fixture-org/projects/7"})
+        self.assertEqual(result["node_id"], "PVT_X")
+        self.assertEqual(result["fields"],
+                         json.loads(GH_JSON_FIELDS)["data"]["node"]["fields"])
+        self.assertEqual(stub.call_count, 2)
+        for call in stub.call_args_list:
+            argv = call.args[0]
+            self.assertIsInstance(argv, list)  # argv LIST, never a shell str
+            self.assertEqual(argv[:4], ["gh", "api", "graphql", "-f"])
+            self.assertTrue(argv[4].startswith("query="))
+            self.assertNotIn("shell", call.kwargs)
+        self.assertIn('organization(login: "fixture-org")',
+                      stub.call_args_list[0].args[0][4])
+        self.assertIn('node(id: "PVT_X")',
+                      stub.call_args_list[1].args[0][4])
+
+    def test_null_resolution_returns_empty_no_raise(self):
+        stub = _stub_run(GH_JSON_NULL_RESOLVE)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "project", {"locator": "fixture-org/projects/7"})
+        self.assertEqual(result, {"node_id": None, "fields": {"nodes": []}})
+        self.assertEqual(stub.call_count, 1)  # never reads fields
+
+    def test_bad_locator_refused_before_any_subprocess(self):
+        stub = _stub_run()
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "project", {"locator": "fixture-org/projects/x"})
+        self.assertEqual(
+            str(ctx.exception),
+            "refused: bad project locator 'fixture-org/projects/x' — "
+            "must match <org>/projects/<n>")
+        stub.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -74,8 +74,9 @@ from typing import Any, Callable, Optional
 # Frozen required classic-scope set (see docstring for the C-2 mapping).
 REQUIRED_SCOPES = ("repo", "project", "read:org")
 
-# Locator grammar — mirrors sync_board's PROJECT_ID_RE (not imported).
-PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9-]+/projects/\d+$")
+# Locator grammar — mirrors sync_board's PROJECT_ID_RE (not imported),
+# with capture groups so ONE fullmatch parse yields (org, number).
+_PROJECT_LOCATOR_RE = re.compile(r"([A-Za-z0-9-]+)/projects/(\d+)")
 
 _TOKEN_SCOPES_RE = re.compile(r"Token scopes:\s*(.*)$")
 _LOGIN_RE = re.compile(r"Logged in to github\.com account\s+([^\s(]+)")
@@ -94,6 +95,19 @@ class FixtureError(ProbeError):
 # ---------------------------------------------------------------------------
 # pure builders (deterministic argv lists — tests assert them verbatim)
 # ---------------------------------------------------------------------------
+
+def parse_project_locator(locator: str) -> tuple[str, int]:
+    """Parse `<org>/projects/<n>` -> (org, number). ONE parser used by
+    both the transport's project branch and Forge.project_fields'
+    grammar check; fullmatch strictness, named refusal on bad grammar
+    (mirrors tools/sync_board.py's parse semantics)."""
+    m = _PROJECT_LOCATOR_RE.fullmatch(locator)
+    if not m:
+        raise ProbeError(
+            f"refused: bad project locator '{locator}' — must match "
+            "<org>/projects/<n>")
+    return m.group(1), int(m.group(2))
+
 
 def build_label_ensure_argv(repo: str, name: str, color: str,
                             description: str) -> list[str]:
@@ -193,13 +207,7 @@ def gh_probe_transport(op: str, params: dict) -> dict:
             return {"present": False, "path": None}
         raise ProbeError(f"probe failed: issue form — {detail}")
     if op == "project":
-        locator = params["locator"]
-        m = PROJECT_ID_RE.fullmatch(locator)
-        if not m:
-            raise ProbeError(
-                f"refused: bad project locator '{locator}' — must match "
-                "<org>/projects/<n>")
-        org, number = m.group(1), int(m.group(2))
+        org, number = parse_project_locator(params["locator"])
         resolve_q = (
             "query {\n"
             f'  organization(login: "{org}") {{\n'
@@ -423,10 +431,7 @@ class Forge:
         """{node_id, fields, found[, error]} for `<org>/projects/<n>`.
         Bad grammar -> named refusal; unresolvable locator -> found=False
         + error key (the CHECK decides, not the probe)."""
-        if not PROJECT_ID_RE.fullmatch(locator):
-            raise ProbeError(
-                f"refused: bad project locator '{locator}' — must match "
-                "<org>/projects/<n>")
+        parse_project_locator(locator)  # grammar check — ONE parser
         try:
             data = self._call("project", "project fields",
                               {"locator": locator})

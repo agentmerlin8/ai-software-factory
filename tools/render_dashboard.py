@@ -392,7 +392,15 @@ def main(argv: list[str] | None = None) -> int:
         # CRLF-mangled dashboard back to LF and let it pass --check
         # despite violating the frozen LF byte contract (as
         # render_state/render_provenance already do).
-        cur = dash.read_bytes() if dash.exists() else b""
+        # Round 28 AC4: a MISSING dashboard is STALE, not "not yet
+        # generated" — deleting factory/DASHBOARD.md after generation used
+        # to set cur to b"" and take the success branch. The handwritten
+        # exemption stays: an EXISTING file without the generated marker
+        # is prose the renderer never owned.
+        if not dash.exists():
+            print(f"OUT OF DATE: {dash} (missing)")
+            return 1
+        cur = dash.read_bytes()
         if not cur.startswith(b"<!-- GENERATED from"):
             print("dashboard not yet generated")
             return 0

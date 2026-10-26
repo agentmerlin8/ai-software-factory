@@ -616,5 +616,220 @@ class RenderStateTests(unittest.TestCase):
                          "--ledger", str(ledger)]), 1)
 
 
+class SymlinkConfinementTests(unittest.TestCase):
+    """Round 28 AC1: the canonical-id check alone permitted
+    `stories/<sid>` as a SYMLINK outward — the renderer then read an
+    unrelated narrative.md and OVERWRITES an unrelated state.md. The
+    resolved story dir / output file / narrative sidecar must all stay
+    under the resolved stories root BEFORE any render; refusal is named
+    and writes nothing."""
+
+    def _minimal_ledger(self, root: Path, sid: str = "STORY-230") -> Path:
+        ledger = root / "factory" / "ledger" / "events.jsonl"
+        L.append_event(ledger, {
+            "event": "transition", "event_id": f"transition-{sid}-1",
+            "story_id": sid, "repo": None, "repo_reason": "story-level",
+            "from_state": "BACKLOG", "to_state": "CODING",
+            "requested_by": "orchestrator", "checks_run": [],
+            "check_results": {}, "approved_by": None,
+            "approved_by_reason": "no gate required",
+            "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"})
+        return ledger
+
+    def test_symlinked_story_dir_outward_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            (outside / "narrative.md").write_text(
+                "unrelated prose that must never be read\n",
+                encoding="utf-8")
+            ledger = self._minimal_ledger(root)
+            stories = root / "stories"
+            stories.mkdir()
+            (stories / "STORY-230").symlink_to(outside)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RS.main(["STORY-230", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED: story id STORY-230", err.getvalue())
+            self.assertIn("outside the stories directory", err.getvalue())
+            # nothing written outside; the unrelated narrative was not read
+            self.assertFalse((outside / "state.md").exists())
+            self.assertEqual(
+                (outside / "narrative.md").read_text(encoding="utf-8"),
+                "unrelated prose that must never be read\n")
+            # and no state.md inside the stories tree either
+            self.assertFalse((stories / "STORY-230" / "state.md").exists())
+
+    def test_symlinked_story_dir_outward_refused_with_all(self):
+        """--all applies the same confinement: a symlinked escape refuses
+        the whole run BEFORE any sibling is written."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            ledger = self._minimal_ledger(root)
+            L.append_event(ledger, {
+                "event": "transition",
+                "event_id": "transition-STORY-231-1",
+                "story_id": "STORY-231", "repo": None,
+                "repo_reason": "story-level",
+                "from_state": "BACKLOG", "to_state": "CODING",
+                "requested_by": "orchestrator", "checks_run": [],
+                "check_results": {}, "approved_by": None,
+                "approved_by_reason": "no gate required",
+                "recorded_at": "2026-09-01T00:00:00Z",
+                "provenance": "live"})
+            stories = root / "stories"
+            stories.mkdir()
+            (stories / "STORY-230").symlink_to(outside)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RS.main(["--all", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED: story id STORY-230", err.getvalue())
+            self.assertFalse((outside / "state.md").exists())
+            # the valid sibling was NOT written either — refuse before any
+            self.assertFalse((stories / "STORY-231" / "state.md").exists())
+
+    def test_symlinked_narrative_sidecar_outward_refused(self):
+        """A confined story dir whose narrative.md is a SYMLINK outward
+        still refuses — the sidecar is read only after validation."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            (outside / "narrative.md").write_text("secret prose\n",
+                                                  encoding="utf-8")
+            ledger = self._minimal_ledger(root)
+            sdir = root / "stories" / "STORY-230"
+            sdir.mkdir(parents=True)
+            (sdir / "narrative.md").symlink_to(outside / "narrative.md")
+            err = io.StringIO()
+            out = io.StringIO()
+            with contextlib.redirect_stderr(err), \
+                    contextlib.redirect_stdout(out):
+                rc = RS.main(["STORY-230", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED: story id STORY-230", err.getvalue())
+            self.assertNotIn("secret prose", out.getvalue())
+            self.assertFalse((sdir / "state.md").exists())
+            self.assertEqual(
+                (outside / "narrative.md").read_text(encoding="utf-8"),
+                "secret prose\n")
+
+    def test_symlinked_state_file_outward_refused(self):
+        """An existing state.md that is a SYMLINK outward refuses too —
+        the write would land outside the stories tree."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            victim = outside / "state.md"
+            victim.write_text("unrelated state\n", encoding="utf-8")
+            ledger = self._minimal_ledger(root)
+            sdir = root / "stories" / "STORY-230"
+            sdir.mkdir(parents=True)
+            (sdir / "state.md").symlink_to(victim)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RS.main(["STORY-230", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED: story id STORY-230", err.getvalue())
+            self.assertEqual(victim.read_text(encoding="utf-8"),
+                             "unrelated state\n")
+
+    def test_symlink_inside_stories_ok(self):
+        """A story dir symlinked to another location UNDER the stories
+        root stays confined and renders normally."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            ledger = self._minimal_ledger(root)
+            stories = root / "stories"
+            real = stories / "real-dir"
+            real.mkdir(parents=True)
+            (stories / "STORY-230").symlink_to(real)
+            self.assertEqual(
+                RS.main(["STORY-230", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            self.assertTrue((real / "state.md").exists())
+            self.assertTrue((real / "state.md").read_text(
+                encoding="utf-8").startswith("<!-- GENERATED from"))
+
+    def test_normal_dir_unchanged(self):
+        """A plain directory renders exactly as before the fix."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            ledger = self._minimal_ledger(root)
+            self.assertEqual(
+                RS.main(["STORY-230", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            p = root / "stories" / "STORY-230" / "state.md"
+            self.assertTrue(p.exists())
+            self.assertTrue(p.read_text(encoding="utf-8")
+                            .startswith("<!-- GENERATED from"))
+
+
+class CellCRTests(unittest.TestCase):
+    """Round 28 AC5: `_cell` must flatten CRLF and lone CR as well as
+    LF — `not required\r\nfor this state` used to keep `\r`, splitting
+    the table row and violating the LF-only byte contract."""
+
+    def test_cell_direct(self):
+        self.assertEqual(RS._cell("a\r\nb"), "a b")
+        self.assertEqual(RS._cell("a\rb"), "a b")
+        self.assertEqual(RS._cell("a\nb"), "a b")
+        self.assertEqual(RS._cell("a|b"), "a\\|b")
+        self.assertEqual(RS._cell("plain"), "plain")
+
+    def _trans(self, **overrides) -> dict:
+        t = {"event": "transition", "event_id": "transition-STORY-232-1",
+             "story_id": "STORY-232", "repo": None,
+             "repo_reason": "single-repo",
+             "from_state": "CODING", "to_state": "BUILD_GREEN",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T07:00:00Z", "provenance": "live"}
+        t.update(overrides)
+        return t
+
+    def _row(self, reason: str) -> str:
+        text = RS.render([self._trans(approved_by_reason=reason)],
+                         "STORY-232", "HEADER", Path("/nonexistent"))
+        rows = [l for l in text.splitlines()
+                if l.startswith("| 2026-09-01T07:00:00Z |")]
+        self.assertEqual(len(rows), 1, text)  # exactly ONE row — no split
+        return rows[0]
+
+    def test_crlf_reason_stays_one_line(self):
+        row = self._row("not required\r\nfor this state")
+        self.assertNotIn("\r", row)
+        self.assertIn("— (not required for this state)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_lone_cr_reason_stays_one_line(self):
+        row = self._row("not required\rfor this state")
+        self.assertNotIn("\r", row)
+        self.assertIn("— (not required for this state)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_plain_reason_unchanged(self):
+        row = self._row("no gate required")
+        self.assertIn("— (no gate required)", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

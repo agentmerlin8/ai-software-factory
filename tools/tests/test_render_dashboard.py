@@ -13,7 +13,9 @@ ledger_lib.append_event. No network, no writes outside tempdirs.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import tempfile
 import unittest
@@ -429,14 +431,55 @@ class RenderDashboardTests(unittest.TestCase):
         self.assertEqual(RD.main(["--root", str(self.root)]), 0)
         self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 0)
 
-    def test_check_before_generation_exits_zero(self):
+    def test_check_missing_dashboard_is_stale(self):
+        """Round 28 AC4: a MISSING factory/DASHBOARD.md is STALE (rc 1,
+        `(missing)` message) — deleting it after generation used to set
+        `cur` to empty bytes and take the success branch. Covers both
+        the never-generated and the deleted-after-generation cases."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("factory", "ledger").mkdir(parents=True)
             (root / "factory" / "ledger" / "events.jsonl").write_bytes(
                 self.ledger.read_bytes())
-            rc = RD.main(["--check", "--root", str(root)])
-            self.assertEqual(rc, 0)  # not yet generated → not stale
+            dash = root / "factory" / "DASHBOARD.md"
+            self.assertFalse(dash.exists())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = RD.main(["--check", "--root", str(root)])
+            self.assertEqual(rc, 1)  # missing artifact is stale
+            self.assertIn(f"OUT OF DATE: {dash} (missing)", out.getvalue())
+            # deleted after generation → same refusal
+            self.assertEqual(RD.main(["--root", str(root)]), 0)
+            self.assertTrue(dash.exists())
+            dash.unlink()
+            out2 = io.StringIO()
+            with contextlib.redirect_stdout(out2):
+                rc2 = RD.main(["--check", "--root", str(root)])
+            self.assertEqual(rc2, 1)
+            self.assertIn("(missing)", out2.getvalue())
+            # re-render clears it
+            self.assertEqual(RD.main(["--root", str(root)]), 0)
+            self.assertEqual(RD.main(["--check", "--root", str(root)]), 0)
+
+    def test_check_handwritten_dashboard_exemption_retained(self):
+        """Round 28 AC4: the handwritten exemption stays — an EXISTING
+        file WITHOUT the generated marker is prose the renderer never
+        owned, so --check skips it (rc 0)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("factory", "ledger").mkdir(parents=True)
+            (root / "factory" / "ledger" / "events.jsonl").write_bytes(
+                self.ledger.read_bytes())
+            dash = root / "factory" / "DASHBOARD.md"
+            dash.write_text("# hand-written dashboard prose\n",
+                            encoding="utf-8")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = RD.main(["--check", "--root", str(root)])
+            self.assertEqual(rc, 0)
+            self.assertIn("dashboard not yet generated", out.getvalue())
+            self.assertEqual(dash.read_text(encoding="utf-8"),
+                             "# hand-written dashboard prose\n")
 
     def test_check_compares_bytes_crlf_fails(self):
         """R16-Q2: a CRLF-converted DASHBOARD.md violates the frozen LF

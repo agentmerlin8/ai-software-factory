@@ -37,10 +37,13 @@ except ImportError:  # direct-run layout: load the tools package itself
 
 
 def _cell(s) -> str:
-    """Escape a value for a markdown table cell (mirrors
-    render_provenance._cell exactly) — an unescaped `|` adds a column and
-    shifts every following field; an embedded newline breaks the row."""
-    return str(s).replace("|", "\\|").replace("\n", " ")
+    """Escape a value for a markdown table cell — an unescaped `|` adds a
+    column and shifts every following field; an embedded newline breaks
+    the row. Round 28 AC5: CR is flattened too — a CRLF (or a lone CR)
+    value would otherwise survive the LF-only replacement, split the row,
+    and violate the LF byte contract."""
+    return (str(s).replace("|", "\\|")
+            .replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
 
 
 def workspace_name(root: Path) -> str:
@@ -75,6 +78,32 @@ def is_canonical_sid(sid) -> bool:
     schema-valid but non-canonical string (`../outside`, an absolute path)
     must never be used to build a path."""
     return isinstance(sid, str) and L.S.STORY_ID_RE.fullmatch(sid) is not None
+
+
+def story_dir_escape(stories_root: Path, sid: str,
+                     out_name: str) -> str | None:
+    """Round 28 AC1: the canonical-id SPELLING check alone does not prove
+    the render target — `stories/<sid>` may be a SYMLINK outward (and the
+    output file or the narrative.md sidecar symlinks themselves), letting
+    the renderer read an unrelated narrative and OVERWRITE an unrelated
+    state file. Resolve every path involved (following symlinks) and
+    require it strictly under the resolved stories root BEFORE rendering;
+    return a named refusal string on escape, None when confined. The
+    narrative sidecar is checked only when it exists — the renderer skips
+    a missing sidecar, and a dangling symlink resolves to itself."""
+    root = stories_root.resolve()
+    sdir = root / sid
+    checks = [("story directory", sdir), (out_name, sdir / out_name)]
+    narr = sdir / "narrative.md"
+    if narr.exists():
+        checks.append(("narrative.md sidecar", narr))
+    for label, p in checks:
+        rp = p.resolve()
+        if not rp.is_relative_to(root):
+            return (f"REFUSED: story id {sid} — the {label} ({p}) resolves "
+                    f"to {rp}, outside the stories directory ({root}); "
+                    "nothing was rendered")
+    return None
 
 
 def stories_in_ledger(events: list[dict]) -> list[str]:
@@ -363,6 +392,15 @@ def main(argv: list[str] | None = None) -> int:
         if not is_canonical_sid(sid):
             print(f"REFUSED: story id {sid} is not a canonical STORY-NNN",
                   file=sys.stderr)
+            return 1
+    # Round 28 AC1: spelling is not confinement — validate the RESOLVED
+    # story dir / output file / narrative sidecar for EVERY id BEFORE any
+    # render or write, so a symlinked escape refuses the whole run with
+    # nothing written anywhere.
+    for sid in sids:
+        esc = story_dir_escape(stories_root, sid, "state.md")
+        if esc:
+            print(esc, file=sys.stderr)
             return 1
     rc = 0
     for sid in sids:

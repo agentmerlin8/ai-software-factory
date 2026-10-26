@@ -222,9 +222,11 @@ def evidence_lines(events: list[dict]) -> list[str]:
 
 def render_card_text(sid: str, events: list[dict], state: str,
                      blocked_from: str | None, stories_root: Path,
-                     digest: str) -> str:
+                     digest: str, derived_from_outcome: bool = False) -> str:
     """Pure renderer: card markdown from ledger events + computed state.
-    Deterministic — no wall-clock content."""
+    Deterministic — no wall-clock content. `derived_from_outcome` labels
+    the state line with its derivation (round 28 AC3) — the machine state
+    stays plain, so next-move legality is unchanged."""
     story_events = [e for e in events if e.get("story_id") == sid]
     # Last-transition line is STORY scope: repo-tagged sub-events (which
     # can legitimately differ from the story state, e.g. one repo MERGED
@@ -236,6 +238,10 @@ def render_card_text(sid: str, events: list[dict], state: str,
     findings = L.latest_findings(story_events, sid)
 
     state_txt = state
+    if derived_from_outcome:
+        # round 28 AC3: label the derivation — the same "(derived …)"
+        # convention render_state uses for a backfilled outcome
+        state_txt = f"{state} (derived from outcome)"
     if state == "BLOCKED" and blocked_from:
         state_txt = f"BLOCKED (from {blocked_from})"
 
@@ -280,19 +286,44 @@ def render_card_text(sid: str, events: list[dict], state: str,
     return "\n".join(lines)
 
 
+def outcome_state(events: list[dict], sid: str) -> str | None:
+    """Round 28 AC3: a backfilled story can carry an outcome row with a
+    merged_sha but NO story-level transition rows — current_state is then
+    None and the card used to fall back to BACKLOG, presenting a
+    delivered story as unstarted. Derive the displayed state from the
+    latest merged outcome, matching render_state's derivation (proven
+    live proof → LIVE_PROVEN, else MERGED). None when no merged outcome
+    exists — the true no-data story keeps the BACKLOG fallback."""
+    outcomes = [e for e in events
+                if isinstance(e, dict) and e.get("story_id") == sid
+                and e.get("event") == "outcome" and e.get("merged_sha")]
+    if not outcomes:
+        return None
+    return ("LIVE_PROVEN" if outcomes[-1].get("live_proof_status") == "proven"
+            else "MERGED")
+
+
 def build_card(sid: str, events: list[dict], root: Path,
                digest: str) -> tuple[str, bool]:
     """(card markdown, known?). Unknown ids render the refusal card and
     are never pinned."""
     if not story_known(sid, events, root):
         return unknown_card(sid), False
-    state = L.current_state(events, sid) or "BACKLOG"
+    derived = False
+    state = L.current_state(events, sid)
+    if state is None:
+        # transitions absent — an outcome row (if any) is the state
+        # evidence; only a story with neither keeps the BACKLOG fallback
+        state = outcome_state(events, sid)
+        derived = state is not None
+    if state is None:
+        state = "BACKLOG"
     blocked_from = SM.blocked_origin(
         [e for e in events
          if e.get("story_id") == sid and e.get("event") == "transition"]) \
         if state == "BLOCKED" else None
     return render_card_text(sid, events, state, blocked_from,
-                            root / "stories", digest), True
+                            root / "stories", digest, derived), True
 
 
 # ---------------------------------------------------------------------------

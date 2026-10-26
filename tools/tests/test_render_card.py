@@ -372,6 +372,107 @@ class UnknownStoryTests(unittest.TestCase):
             self.assertIn("unknown", card)
 
 
+class OutcomeOnlyStateTests(unittest.TestCase):
+    """Round 28 AC3: a backfilled merged story with NO transition rows
+    used to display `BACKLOG` + the start-of-lifecycle move. The state
+    must derive from the outcome (merged / live-proven), matching
+    render_state/dashboard semantics; a true no-data story keeps the
+    BACKLOG fallback; a normal story is unchanged."""
+
+    def _outcome_row(self, sid: str, **over) -> dict:
+        o = {"event": "outcome", "event_id": f"outcome-{sid}-1",
+             "story_id": sid, "merged_sha": "deadbeef1234",
+             "merged_at": "2026-09-02T01:00:00Z",
+             "live_proof_status": None,
+             "live_proof_status_reason": "window not opened",
+             "observation_end": None,
+             "observation_end_reason": "window not opened",
+             "escaped_defects": None,
+             "escaped_defects_reason": "none known",
+             "totals": None, "totals_reason": "not instrumented",
+             "recommendation": None, "recommendation_reason": "n/a",
+             "recorded_at": "2026-09-02T01:30:00Z",
+             "provenance": "backfilled"}
+        o.update(over)
+        return o
+
+    def _card(self, sid: str, events: list[dict]) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "stories").mkdir()
+            card, known = R.build_card(sid, events, root, "digest123456")
+            self.assertTrue(known)
+            return card
+
+    def test_outcome_only_story_shows_merged(self):
+        card = self._card("STORY-981", [self._outcome_row("STORY-981")])
+        self.assertIn("**State:** MERGED (derived from outcome)", card)
+        self.assertNotIn("**State:** BACKLOG", card)
+        # no start-of-lifecycle move hint (BACKLOG → GRILLED)
+        self.assertNotIn("advance to **GRILLED**", card)
+
+    def test_outcome_only_live_proven_shows_live_proven(self):
+        card = self._card("STORY-982", [
+            self._outcome_row("STORY-982", live_proof_status="proven")])
+        self.assertIn("**State:** LIVE_PROVEN (derived from outcome)", card)
+
+    def test_unmerged_outcome_only_story_keeps_backlog(self):
+        """An outcome row WITHOUT merged_sha is not delivery evidence —
+        the no-data fallback stays (render_state derives only from a
+        merged outcome too)."""
+        card = self._card("STORY-983", [
+            self._outcome_row("STORY-983", merged_sha=None,
+                          merged_sha_reason="not merged yet")])
+        self.assertIn("**State:** BACKLOG", card)
+
+    def test_true_no_data_story_backlog_fallback(self):
+        """A story known only from intake surfaces (no events at all)
+        keeps the BACKLOG fallback unchanged."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "stories").mkdir()
+            (root / "stories" / "BACKLOG.md").write_text(
+                "- STORY-984 candidate\n", encoding="utf-8")
+            card, known = R.build_card("STORY-984", [], root,
+                                       "digest123456")
+            self.assertTrue(known)
+            self.assertIn("**State:** BACKLOG", card)
+            self.assertIn("advance to **GRILLED**", card)
+            self.assertNotIn("derived from outcome", card)
+
+    def test_transitioned_story_unchanged(self):
+        """A story WITH story-level transitions keeps the transition
+        state even when an outcome row exists — derivation applies only
+        when transitions are absent."""
+        events = [
+            {"event": "transition", "story_id": "STORY-985", "repo": None,
+             "from_state": "BACKLOG", "to_state": "CODING",
+             "requested_by": "orchestrator"},
+            {"event": "transition", "story_id": "STORY-985", "repo": None,
+             "from_state": "CODING", "to_state": "MERGED",
+             "requested_by": "orchestrator"},
+            self._outcome_row("STORY-985"),
+        ]
+        card = self._card("STORY-985", events)
+        self.assertIn("**State:** MERGED", card)
+        self.assertNotIn("derived from outcome", card)
+        self.assertIn("**Last transition:** CODING → MERGED", card)
+
+    def test_outcome_state_helper(self):
+        self.assertEqual(
+            R.outcome_state([self._outcome_row("STORY-986")], "STORY-986"),
+            "MERGED")
+        self.assertEqual(
+            R.outcome_state([self._outcome_row("STORY-986",
+                                           live_proof_status="proven")],
+                            "STORY-986"),
+            "LIVE_PROVEN")
+        self.assertIsNone(
+            R.outcome_state([self._outcome_row("STORY-986", merged_sha=None)],
+                            "STORY-986"))
+        self.assertIsNone(R.outcome_state([], "STORY-986"))
+
+
 class UpsertSeamTests(unittest.TestCase):
     """Marker-anchored upsert via stub gh_fn — no network, no gh."""
 

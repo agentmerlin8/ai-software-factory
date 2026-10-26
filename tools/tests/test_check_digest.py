@@ -321,6 +321,77 @@ class ZeroAnchorTests(unittest.TestCase):
             self.assertIn("anchor line must be >= 1: src/app.py:0", errors)
 
 
+class NegativeAnchorTests(unittest.TestCase):
+    """Round 28 AC2: `- src/ghost.py:-1 — def compute_total` used to
+    MISS the unsigned line-number regex and be silently skipped — invalid
+    evidence passed. The signed capture feeds the same `lineno < 1`
+    refusal, so `:0` and `:-1` are both rejected by name."""
+
+    def _repo(self, td: str, anchor_line: str, sid: str) -> Path:
+        root = Path(td)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "app.py").write_text(
+            "# a\ndef f(x):\n    return x\n", encoding="utf-8")
+        sdir = root / "stories" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "story.md").write_text("# s\n\n- AC-1: one.\n",
+                                       encoding="utf-8")
+        (sdir / "context-digest.md").write_text(
+            f"# digest — {sid}\n\n"
+            "## 1. File manifest\n\n"
+            "| path | role |\n|---|---|\n"
+            "| `src/app.py` | subject |\n\n"
+            "## 2. Story contract\n\nAcceptance criteria: exactly 1.\n\n"
+            "## 3. Frozen decisions\n\n- none.\n\n"
+            f"## 4. Code anchors\n\n{anchor_line}\n\n"
+            "## 5. Conventions\n\n- stdlib only.\n\n"
+            "## 6. Open questions\n\n- none.\n\n"
+            "## 7. Risk list\n\n- drift — L\n\n"
+            "## 8. Verification block\n\nBASE_SHA: HEAD\n",
+            encoding="utf-8")
+        _commit(root)
+        return root
+
+    def test_negative_anchor_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "- `src/ghost.py:-1` — def compute_total",
+                              "STORY-909")
+            errors = CD.run_gate(root, "STORY-909", "HEAD")
+            self.assertIn("anchor line must be >= 1: src/ghost.py:-1",
+                          errors)
+
+    def test_negative_anchor_bare_form_refused(self):
+        """No backticks, no em-dash description — still captured."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "- src/ghost.py:-3", "STORY-910")
+            errors = CD.run_gate(root, "STORY-910", "HEAD")
+            self.assertIn("anchor line must be >= 1: src/ghost.py:-3",
+                          errors)
+
+    def test_signed_regex_grammar(self):
+        """The signed pattern captures negatives AND keeps normal
+        anchors parsing unchanged."""
+        for line, path, lineno in (
+                ("- `src/app.py:12` — def f", "src/app.py", 12),
+                ("- `src/ghost.py:-1` — def compute_total",
+                 "src/ghost.py", -1),
+                ("- `src/app.py:0`", "src/app.py", 0),
+                ("1. `bin/build:3` — set -e", "bin/build", 3)):
+            mm = re.match(r"^\s*(?:[-*+]|\d+\.)?\s*"
+                          r"`?([^`:\s]+):(-?\d+)`?\s*—?\s*([^—]*)",
+                          line)
+            self.assertIsNotNone(mm, line)
+            self.assertEqual(mm.group(1), path)
+            self.assertEqual(int(mm.group(2)), lineno)
+
+    def test_normal_anchor_unchanged(self):
+        """A valid positive anchor still passes end-to-end."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "- `src/app.py:2` — def f", "STORY-911")
+            errors = CD.run_gate(root, "STORY-911", "HEAD")
+            self.assertEqual(errors, [])
+
+
 class StoryFileCandidatesTests(unittest.TestCase):
     def test_canonical_spec_path_first(self):
         """R8-I2: `stories/<sid>/spec.md` leads (architecture.md §Installed

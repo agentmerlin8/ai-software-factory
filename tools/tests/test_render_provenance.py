@@ -602,5 +602,90 @@ class RenderProvenanceTests(unittest.TestCase):
                          "--ledger", str(ledger)]), 1)
 
 
+class SymlinkConfinementTests(unittest.TestCase):
+    """Round 28 AC1 sibling: render_provenance had the identical
+    canonical-ID-only pattern — `stories/<sid>` as a SYMLINK outward let
+    the renderer OVERWRITE an unrelated PROVENANCE.md. The resolved
+    story dir / output file / sidecar must stay under the resolved
+    stories root BEFORE rendering; refusal is named, nothing written."""
+
+    def _minimal_ledger(self, root: Path, sid: str = "STORY-230") -> Path:
+        ledger = root / "factory" / "ledger" / "events.jsonl"
+        L.append_event(ledger, {
+            "event": "transition", "event_id": f"transition-{sid}-1",
+            "story_id": sid, "repo": None, "repo_reason": "story-level",
+            "from_state": "BACKLOG", "to_state": "CODING",
+            "requested_by": "orchestrator", "checks_run": [],
+            "check_results": {}, "approved_by": None,
+            "approved_by_reason": "no gate required",
+            "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"})
+        return ledger
+
+    def test_symlinked_story_dir_outward_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            victim = outside / "PROVENANCE.md"
+            victim.write_text("unrelated provenance\n", encoding="utf-8")
+            ledger = self._minimal_ledger(root)
+            stories = root / "stories"
+            stories.mkdir()
+            (stories / "STORY-230").symlink_to(outside)
+            err = io.StringIO()
+            out = io.StringIO()
+            with contextlib.redirect_stderr(err), \
+                    contextlib.redirect_stdout(out):
+                rc = RP.main(["STORY-230", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED: story id STORY-230", err.getvalue())
+            self.assertIn("outside the stories directory", err.getvalue())
+            self.assertNotIn("rendered", out.getvalue())
+            self.assertEqual(victim.read_text(encoding="utf-8"),
+                             "unrelated provenance\n")
+
+    def test_symlinked_story_dir_outward_refused_with_all(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            outside = Path(td) / "outside"
+            outside.mkdir()
+            ledger = self._minimal_ledger(root)
+            stories = root / "stories"
+            stories.mkdir()
+            (stories / "STORY-230").symlink_to(outside)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = RP.main(["--all", "--root", str(root),
+                              "--ledger", str(ledger)])
+            self.assertEqual(rc, 1)
+            self.assertIn("REFUSED: story id STORY-230", err.getvalue())
+            self.assertFalse((outside / "PROVENANCE.md").exists())
+
+    def test_symlink_inside_stories_ok_and_normal_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "home"
+            root.mkdir()
+            ledger = self._minimal_ledger(root)
+            stories = root / "stories"
+            real = stories / "real-dir"
+            real.mkdir(parents=True)
+            (stories / "STORY-230").symlink_to(real)
+            self.assertEqual(
+                RP.main(["STORY-230", "--root", str(root),
+                         "--ledger", str(ledger)]), 0)
+            self.assertTrue((real / "PROVENANCE.md").read_text(
+                encoding="utf-8").startswith(RP.HEADER_START))
+            # a plain directory renders as before
+            self.assertEqual(
+                RP.main(["STORY-231", "--root", str(root),
+                         "--ledger", str(self._minimal_ledger(
+                             root, "STORY-231"))]), 0)
+            self.assertTrue((stories / "STORY-231" / "PROVENANCE.md")
+                            .exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

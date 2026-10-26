@@ -246,8 +246,12 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
         errors.append("unparseable section: ## 4. Code anchors")
     if am:
         for line in am.group(1).splitlines():
+            # Round 28 AC2: the line-number group is SIGNED — an anchor
+            # like `src/ghost.py:-1` used to miss the unsigned regex and
+            # be silently skipped; capturing the sign lets the lineno < 1
+            # check below reject it by name.
             mm = re.match(r"^\s*(?:[-*+]|\d+\.)?\s*"
-                          r"`?([^`:\s]+):(\d+)`?\s*—?\s*([^—]*)",
+                          r"`?([^`:\s]+):(-?\d+)`?\s*—?\s*([^—]*)",
                           line)
             if not mm:
                 continue

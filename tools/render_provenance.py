@@ -399,6 +399,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"REFUSED: story id {sid} is not a canonical STORY-NNN",
                   file=sys.stderr)
             return 1
+    # Round 28 AC1 (sibling of render_state): spelling is not confinement —
+    # validate the RESOLVED story dir / PROVENANCE.md target / sidecar for
+    # EVERY id BEFORE any render or write, so a canonical id whose story
+    # directory is a SYMLINK outward refuses instead of overwriting an
+    # unrelated PROVENANCE.md.
+    for sid in sids:
+        esc = RSt.story_dir_escape(stories_root, sid, "PROVENANCE.md")
+        if esc:
+            print(esc, file=sys.stderr)
+            return 1
     rc = 0
     wrote = 0
     for sid in sids:

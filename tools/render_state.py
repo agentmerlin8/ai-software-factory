@@ -136,6 +136,18 @@ def fmt_null(v, reason_key: str, evt: dict) -> str:
     return f"— ({evt.get(reason_key) or 'no reason recorded'})"
 
 
+def _normalize_eol(text: str) -> str:
+    """Round 34 AI2: flatten line endings of the ASSEMBLED output —
+    CRLF→LF first, then any lone CR→LF. Free-form values rendered OUTSIDE
+    markdown tables (assignment owners, correction corrected_value /
+    citations, sidecar prose) never pass through `_cell`, so a CR carried
+    by a ledger value would otherwise land in the artifact and violate the
+    frozen LF byte contract; writing with `newline="\\n"` does not remove
+    it. Normalizing the complete output makes the LF guarantee structural
+    instead of per-insertion-site."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def render(events: list[dict], sid: str, header: str,
            stories_root: Path) -> str:
     evs = L.events_for(events, sid)
@@ -371,7 +383,8 @@ def render(events: list[dict], sid: str, header: str,
             f"_Rendered from {len(evs)} ledger events "
             f"({sum(1 for e in evs if e.get('provenance') == 'backfilled')} "
             "backfilled) by tools/render_state.py._"]
-    return "\n".join(out) + "\n"
+    # round 34 AI2: normalize the ASSEMBLED output (CRLF→LF, lone CR→LF)
+    return _normalize_eol("\n".join(out)) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:

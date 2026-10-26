@@ -734,5 +734,63 @@ class ProvenanceCellSweepTests(unittest.TestCase):
         self.assertEqual(row.replace("\\|", "").count("|"), 7)
 
 
+class Round34LFNormalizationTests(unittest.TestCase):
+    """Round 34 sweep: identity/ownership bullets embed free-form ledger
+    values (owner, host, session, reason) OUTSIDE tables — no `_cell` —
+    so a CR used to land verbatim in PROVENANCE.md. The renderer now
+    normalizes the ASSEMBLED output (CRLF→LF, then lone CR→LF)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._td.name)
+        cls.ledger = build_ledger(cls.root)
+        cls.header = RS.generated_header("factory/ledger/events.jsonl")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def test_owner_cr_crlf_normalizes_to_lf(self):
+        claim = {"event": "assignment", "event_id": "assignment-STORY-201-90",
+                 "story_id": "STORY-201", "op": "claim",
+                 "owner": "agent\r\nx\ry", "host": "host\r1",
+                 "session": "sess-201",
+                 "claimed_at": "2026-09-01T00:00:00Z",
+                 "start_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"}
+        text = RP.render(L.load_events(self.ledger) + [claim],
+                         "STORY-201", self.header)
+        self.assertNotIn("\r", text)
+        self.assertIn("- **owner:** agent\nx\ny", text)
+        self.assertIn("- **host:** host\n1", text)
+
+    def test_cli_generated_provenance_has_no_cr_and_check_is_clean(self):
+        L.append_event(self.ledger, {
+            "event": "assignment", "event_id": "assignment-STORY-203-90",
+            "story_id": "STORY-203", "op": "claim", "owner": "o\rx",
+            "host": "host-1", "session": "sess-203",
+            "claimed_at": "2026-09-01T00:00:00Z",
+            "start_sha": "cccccccccccccccccccccccccccccccccccccccc",
+            "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"})
+        self.assertEqual(
+            RP.main(["STORY-203", "--root", str(self.root)]), 0)
+        p = self.root / "stories" / "STORY-203" / "PROVENANCE.md"
+        self.assertNotIn(b"\r", p.read_bytes())
+        self.assertEqual(
+            RP.main(["STORY-203", "--check", "--root", str(self.root)]), 0)
+
+    def test_crlf_mangled_provenance_still_stale(self):
+        p = self.root / "stories" / "STORY-203" / "PROVENANCE.md"
+        raw = p.read_bytes()
+        p.write_bytes(raw.replace(b"\n", b"\r\n"))
+        self.assertEqual(
+            RP.main(["STORY-203", "--check", "--root", str(self.root)]), 1)
+        self.assertEqual(
+            RP.main(["STORY-203", "--root", str(self.root)]), 0)
+        self.assertEqual(
+            RP.main(["STORY-203", "--check", "--root", str(self.root)]), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

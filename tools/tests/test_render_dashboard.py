@@ -979,5 +979,62 @@ class OwnerCellEscapeTests(unittest.TestCase):
             self.assertEqual(RD._cell(v), RS._cell(v), v)
 
 
+class Round34LFNormalizationTests(unittest.TestCase):
+    """Round 34 AI1: the corrections register embeds free-form
+    corrected_value / source_citation OUTSIDE any table (no _cell), so
+    CRLF / lone CR in them used to land verbatim in DASHBOARD.md —
+    `newline="\\n"` on write does not remove it and --check reported the
+    CR-carrying artifact fresh. The renderer now normalizes the ASSEMBLED
+    output (CRLF→LF, then lone CR→LF) before returning."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._td.name)
+        cls.ledger = build_ledger(cls.root)
+        cls.header = RS.generated_header("factory/ledger/events.jsonl")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    @staticmethod
+    def _corr(eid, value, citation):
+        return {"event": "correction", "event_id": eid,
+                "story_id": "STORY-201", "repo": None,
+                "repo_reason": "control-home level correction",
+                "contradicted_claim": "totals said zero plan loops",
+                "corrected_value": value,
+                "source_citation": citation,
+                "corrected_artifact": "stories/STORY-201/state.md",
+                "recorded_at": "2026-09-01T00:00:00Z",
+                "provenance": "live"}
+
+    def test_correction_crlf_and_lone_cr_normalize_to_lf(self):
+        events = L.load_events(self.ledger) + [
+            self._corr("correction-STORY-201-90",
+                       "alpha\r\nbeta\rgamma", "cite\r\nX\ry")]
+        text = RD.render(events, self.root, self.header,
+                         ledger_path=self.ledger)
+        self.assertNotIn("\r", text)
+        self.assertIn("alpha\nbeta\ngamma (_cite\nX\ny_)", text)
+
+    def test_cli_generated_dashboard_has_no_cr_and_check_is_clean(self):
+        L.append_event(self.ledger, self._corr(
+            "correction-STORY-201-91", "a\r\nb\rc", "s\r1"))
+        self.assertEqual(RD.main(["--root", str(self.root)]), 0)
+        dash = self.root / "factory" / "DASHBOARD.md"
+        self.assertNotIn(b"\r", dash.read_bytes())
+        self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 0)
+
+    def test_crlf_mangled_dashboard_still_stale(self):
+        dash = self.root / "factory" / "DASHBOARD.md"
+        raw = dash.read_bytes()
+        dash.write_bytes(raw.replace(b"\n", b"\r\n"))
+        self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 1)
+        self.assertEqual(RD.main(["--root", str(self.root)]), 0)
+        self.assertEqual(RD.main(["--check", "--root", str(self.root)]), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

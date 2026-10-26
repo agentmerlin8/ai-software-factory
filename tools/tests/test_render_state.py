@@ -916,5 +916,80 @@ class TransitionFreeTextCellEscapeTests(unittest.TestCase):
         self.assertEqual(row.replace("\\|", "").count("|"), 8)
 
 
+class Round34LFNormalizationTests(unittest.TestCase):
+    """Round 34 AI2: free-form values rendered OUTSIDE markdown tables
+    (assignment owner, correction corrected_value / citation) never pass
+    through `_cell`, so CRLF / lone CR in them used to land verbatim in
+    state.md — writing with `newline="\\n"` does not remove it and
+    --check reported the CR-carrying artifact fresh. The renderer now
+    normalizes the ASSEMBLED output (CRLF→LF, then lone CR→LF)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._td.name)
+        cls.ledger = build_ledger(cls.root)
+        cls.header = RS.generated_header("factory/ledger/events.jsonl")
+        cls.stories = cls.root / "stories"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def test_owner_and_correction_cr_crlf_normalize_to_lf(self):
+        claim = {"event": "assignment", "event_id": "assignment-STORY-201-90",
+                 "story_id": "STORY-201", "op": "claim",
+                 "owner": "agent\r\nx\ry", "host": "host-1",
+                 "session": "sess-201",
+                 "claimed_at": "2026-09-01T00:00:00Z",
+                 "start_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"}
+        corr = {"event": "correction", "event_id": "correction-STORY-201-90",
+                "story_id": "STORY-201", "repo": None,
+                "repo_reason": "control-home level correction",
+                "contradicted_claim": "claim said zero",
+                "corrected_value": "alpha\r\nbeta\rgamma",
+                "source_citation": "cite\rX",
+                "corrected_artifact": "stories/STORY-201/state.md",
+                "recorded_at": "2026-09-02T00:00:00Z", "provenance": "live"}
+        text = RS.render(L.load_events(self.ledger) + [claim, corr],
+                         "STORY-201", self.header, self.stories)
+        self.assertNotIn("\r", text)
+        self.assertIn("**claim** by agent\nx\ny on host-1", text)
+        self.assertIn("**Corrected:** alpha\nbeta\ngamma", text)
+        self.assertIn("**Citation:** cite\nX → stories/STORY-201/state.md",
+                      text)
+
+    def test_normal_render_unchanged_and_lf_only(self):
+        text = RS.render(L.load_events(self.ledger),
+                         "STORY-201", self.header, self.stories)
+        self.assertNotIn("\r", text)
+        self.assertIn("- **claim** by agent-a on host-1", text)
+
+    def test_cli_generated_state_has_no_cr_and_check_is_clean(self):
+        L.append_event(self.ledger, {
+            "event": "assignment", "event_id": "assignment-STORY-203-90",
+            "story_id": "STORY-203", "op": "claim", "owner": "o\rx",
+            "host": "host-1", "session": "sess-203",
+            "claimed_at": "2026-09-01T00:00:00Z",
+            "start_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"})
+        self.assertEqual(RS.main(["STORY-203", "--root", str(self.root)]), 0)
+        p = self.stories / "STORY-203" / "state.md"
+        self.assertNotIn(b"\r", p.read_bytes())
+        self.assertEqual(
+            RS.main(["STORY-203", "--check", "--root", str(self.root)]), 0)
+
+    def test_crlf_mangled_state_still_stale(self):
+        p = self.stories / "STORY-203" / "state.md"
+        raw = p.read_bytes()
+        p.write_bytes(raw.replace(b"\n", b"\r\n"))
+        self.assertEqual(
+            RS.main(["STORY-203", "--check", "--root", str(self.root)]), 1)
+        self.assertEqual(RS.main(["STORY-203", "--root", str(self.root)]), 0)
+        self.assertEqual(
+            RS.main(["STORY-203", "--check", "--root", str(self.root)]), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

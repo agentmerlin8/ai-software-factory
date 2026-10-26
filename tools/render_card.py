@@ -125,6 +125,15 @@ def unknown_card(sid: str) -> str:
     ])
 
 
+def _normalize_eol(text: str) -> str:
+    """Round 34 sweep: flatten line endings of the ASSEMBLED card —
+    CRLF→LF first, then any lone CR→LF. The card embeds free-form ledger
+    values OUTSIDE tables (owner, gate question, finding ids/classes,
+    evidence paths), so a CR carried by a ledger value would otherwise
+    land in the posted comment body and violate the LF render contract."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def next_moves(sid: str, state: str, blocked_from: str | None,
                stories_root: Path) -> list[str]:
     """The story's next legal move(s), from state_machine's own tables —
@@ -293,7 +302,8 @@ def render_card_text(sid: str, events: list[dict], state: str,
 
     lines.append(f"<sub>generated from ledger @ `{digest}` — never "
                  "hand-edit · render_card v1.0</sub>")
-    return "\n".join(lines)
+    # round 34 sweep: normalize the ASSEMBLED card (CRLF→LF, lone CR→LF)
+    return _normalize_eol("\n".join(lines))
 
 
 def outcome_state(events: list[dict], sid: str) -> str | None:

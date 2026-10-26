@@ -93,6 +93,15 @@ def _cell(s) -> str:
             .replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
 
 
+def _normalize_eol(text: str) -> str:
+    """Round 34 sweep: flatten line endings of the ASSEMBLED output —
+    CRLF→LF first, then any lone CR→LF. The unrouted-dispatch census
+    embeds story ids / dispatch_ids in bullets OUTSIDE tables, so they
+    never pass through `_cell`; a CR carried by a ledger value would
+    otherwise land in TOKEN-METRICS.md and violate the LF byte contract."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 class TokSum:
     """Aggregated token count that preserves unknown measurements.
 
@@ -352,7 +361,8 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
                    f"{_cell(tok_cell(d, 'input_tokens'))} | "
                    f"{_cell(tok_cell(d, 'output_tokens'))} | {models} |")
     out += ["", "_Regenerate: `python3 factory/tools/metrics_report.py`_", ""]
-    return "\n".join(out)
+    # round 34 sweep: normalize the ASSEMBLED output (CRLF→LF, lone CR→LF)
+    return _normalize_eol("\n".join(out))
 
 
 def validate_baseline(base: Any) -> str | None:

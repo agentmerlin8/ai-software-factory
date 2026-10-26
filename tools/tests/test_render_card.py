@@ -712,5 +712,61 @@ class MainCliTests(unittest.TestCase):
         self.assertIn("dry-run: no write performed", out)
 
 
+class Round34LFNormalizationTests(unittest.TestCase):
+    """Round 34 sweep: the card embeds free-form ledger values OUTSIDE
+    tables (owner line, gate question, evidence paths) — no `_cell` — so
+    a CR carried by a ledger value used to land verbatim in the posted
+    comment body. render_card_text now normalizes the ASSEMBLED card
+    (CRLF→LF, then lone CR→LF)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._td.name)
+        (cls.root / "workspace.toml").write_text(
+            '[[repos]]\nid = "app"\nrole = "primary"\n'
+            'url = "github.test/fixture-org/app"\n', encoding="utf-8")
+        cls.ledger = build_ledger(cls.root)
+        cls.digest = R.ledger_digest(cls.ledger)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def test_owner_and_gate_cr_crlf_normalize_to_lf(self):
+        claim = {"event": "assignment", "event_id": f"assignment-{STORY}-90",
+                 "story_id": STORY, "op": "claim",
+                 "owner": "agent\r\nx\ry", "host": "host-1",
+                 "session": "sess-901",
+                 "claimed_at": "2026-09-01T00:00:00Z",
+                 "start_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"}
+        gate = {"event": "human_gate", "event_id": f"human_gate-{STORY}-90",
+                "story_id": STORY, "gate": "merge",
+                "question": "Merge\r\nnow\ror later?",
+                "asked_at": "2026-09-01T00:00:00Z",
+                "answered_at": None, "answered_at_reason": "awaiting",
+                "decision": None, "decision_reason": "pending",
+                "answered_by": None, "answered_by_reason": "pending",
+                "recorded_at": "2026-09-01T00:00:00Z", "provenance": "live"}
+        events = L.load_events(self.ledger) + [claim, gate]
+        card, known = R.build_card(STORY, events, self.root, self.digest)
+        self.assertTrue(known)
+        self.assertNotIn("\r", card)
+        self.assertIn("**Owner:** agent\nx\ny", card)
+        self.assertIn("“Merge\nnow\nor later?”", card)
+
+    def test_normal_card_unchanged_and_lf_only(self):
+        events = L.load_events(self.ledger)
+        card, known = R.build_card(STORY, events, self.root, self.digest)
+        self.assertTrue(known)
+        self.assertNotIn("\r", card)
+        self.assertIn(R.CARD_MARKER, card)
+        # byte-identical for the same ledger (determinism preserved)
+        card2, _ = R.build_card(STORY, L.load_events(self.ledger),
+                                self.root, self.digest)
+        self.assertEqual(card, card2)
+
+
 if __name__ == "__main__":
     unittest.main()

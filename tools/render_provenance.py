@@ -122,6 +122,15 @@ def _tally_table(counter: Counter, header: str) -> list[str]:
     return out
 
 
+def _normalize_eol(text: str) -> str:
+    """Round 34 sweep: flatten line endings of the ASSEMBLED output —
+    CRLF→LF first, then any lone CR→LF. Identity/ownership bullets embed
+    free-form ledger values (owner, host, session, reason) OUTSIDE tables,
+    so they never pass through `_cell`; a CR would otherwise land in the
+    artifact and violate the frozen LF byte contract."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def render(events: list[dict], sid: str, header: str) -> str:
     evs = L.events_for(events, sid)
     out: list[str] = [header, "", f"# Provenance: {sid}", ""]
@@ -367,7 +376,8 @@ def render(events: list[dict], sid: str, header: str) -> str:
             f"_Rendered from {len(evs)} ledger events "
             f"({sum(1 for e in evs if e.get('provenance') == 'backfilled')} "
             f"backfilled) by {TOOL}._"]
-    return "\n".join(out) + "\n"
+    # round 34 sweep: normalize the ASSEMBLED output (CRLF→LF, lone CR→LF)
+    return _normalize_eol("\n".join(out)) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -472,5 +472,57 @@ class MetricsCellSweepTests(unittest.TestCase):
         self.assertNotIn("\\|", md)
 
 
+class Round34LFNormalizationTests(unittest.TestCase):
+    """Round 34 sweep: the unrouted-dispatch census embeds dispatch ids
+    in bullets OUTSIDE tables — no `_cell` — so a CR carried by a
+    ledger value used to land verbatim in TOKEN-METRICS.md. render_md
+    now normalizes the ASSEMBLED output (CRLF→LF, then lone CR→LF)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._td = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._td.name)
+        cls.ledger = build_ledger(cls.root)
+        cls.header = RS.generated_header("factory/ledger/events.jsonl")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._td.cleanup()
+
+    def test_census_ids_and_output_normalize_to_lf(self):
+        # an unrouted dispatch (requested_model null) whose event_id
+        # carries CRLF + lone CR — the census bullet embeds it outside
+        # tables, so before round 34 the CRs landed verbatim in the md
+        dispatch = {
+            "event": "dispatch",
+            "event_id": "STORY-240-coder-1-178\r\n9003\r000",
+            "story_id": "STORY-240", "role": "coder",
+            "requested_model": None,
+            "requested_model_reason": "routing not recorded",
+            "reported_model": None, "reported_model_reason": "n/a",
+            "thinking_setting": None, "thinking_setting_reason": "n/a",
+            "session_id": None, "session_id_reason": "pre-spawn row",
+            "parent_session_id": None, "parent_session_id_reason": "top",
+            "attempt": 1, "started_at": "2026-09-01T01:00:00Z",
+            "ended_at": None, "ended_at_reason": "pre-spawn row",
+            "outcome": None, "outcome_reason": "pre-spawn row",
+            "prompt_version": "coder-v0.1.0", "worktree": "/tmp/wt",
+            "model_unverified": True,
+            "recorded_at": "2026-09-01T01:00:00Z", "provenance": "live"}
+        md = MT.render_md(MT.collect([dispatch]), "t", self.header, 1)
+        self.assertNotIn("\r", md)
+        # census bullet renders the id with CRLF/CR flattened to LF
+        self.assertIn("- STORY-240: STORY-240-coder-1-178\n9003\n000", md)
+
+    def test_cli_written_metrics_file_is_lf_only(self):
+        events = L.load_events(self.ledger)
+        md = MT.render_md(MT.collect(events), "t", self.header,
+                          len(events))
+        self.assertNotIn("\r", md)
+        self.assertEqual(MT.main(["--root", str(self.root)]), 0)
+        out = self.root / "factory" / "metrics" / "TOKEN-METRICS.md"
+        self.assertNotIn(b"\r", out.read_bytes())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

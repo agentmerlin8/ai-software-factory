@@ -92,6 +92,17 @@ def _names_plan_review(evidence_path) -> bool:
     return "plan-review" in ev or "plan review" in ev
 
 
+def _normalize_eol(text: str) -> str:
+    """Round 34 AI1: flatten line endings of the ASSEMBLED output —
+    CRLF→LF first, then any lone CR→LF. Values embedded OUTSIDE markdown
+    tables (correction bullets, sidecar prose) never pass through `_cell`,
+    so a CR carried by a free-form ledger value would otherwise land in
+    the artifact and violate the frozen LF byte contract; writing with
+    `newline="\\n"` does not remove it. Normalizing the complete output
+    makes the LF guarantee structural instead of per-insertion-site."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def render(events: list[dict], root: Path, header: str,
            ledger_path: Path | None = None) -> str:
     name = RSt.workspace_name(root)
@@ -375,7 +386,8 @@ def render(events: list[dict], root: Path, header: str,
                 side.read_text(encoding="utf-8"), ""]
 
     out += ["---", "_Regenerate: `python3 factory/tools/render_dashboard.py`_"]
-    return "\n".join(out) + "\n"
+    # round 34 AI1: normalize the ASSEMBLED output (CRLF→LF, lone CR→LF)
+    return _normalize_eol("\n".join(out)) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:

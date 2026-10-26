@@ -370,5 +370,104 @@ class DestinationConfinementTests(unittest.TestCase):
             self.assertTrue(out.exists())
 
 
+def make_repo_with_blob(td: str, rel: str, data: bytes,
+                        extra: dict[str, str] | None = None) -> Path:
+    """Throwaway git repo committing a RAW-BYTE blob at `rel` (any
+    encoding, incl. non-UTF-8) plus optional text files; returns root."""
+    root = Path(td)
+    root.mkdir(parents=True, exist_ok=True)
+    for r, content in (extra or {}).items():
+        p = root / r
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8", newline="\n")
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    for args in (["init", "-q"], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-qm", "fixture"]):
+        subprocess.run(["git", "-C", str(root), *args], check=True,
+                       capture_output=True)
+    return root
+
+
+class NonUtf8SourceTests(unittest.TestCase):
+    """R35-AJ1: a pinned source that is not decodable as UTF-8 (a
+    committed UTF-16 file or binary blob) is a controlled, source-naming
+    refusal with rc 2 — BEFORE any bundle write — never an uncaught
+    UnicodeDecodeError traceback."""
+
+    def test_utf16_source_refused_rc2_named_nothing_written(self):
+        blob = "héllo wörld\n".encode("utf-16")
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo_with_blob(
+                td, "docs/notes.md", blob, {"src/a.py": "x = 1\n"})
+            out = Path(td) / "stories" / "STORY-NNN" / "context-bundle.md"
+            rc, stdout, stderr = run_bundle(
+                root, out, ["src/a.py", "docs/notes.md"])
+            self.assertEqual(rc, 2, stderr)
+            self.assertNotIn("Traceback", stderr)
+            self.assertIn("docs/notes.md", stderr)          # names offender
+            self.assertIn("not decodable as UTF-8", stderr)
+            self.assertFalse(out.exists())                   # nothing written
+            self.assertEqual(stdout, "")
+
+    def test_binary_blob_source_refused_rc2_named(self):
+        blob = bytes(range(256))
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo_with_blob(td, "assets/blob.bin", blob)
+            out = Path(td) / "bundle.md"
+            rc, _stdout, stderr = run_bundle(
+                root, out, ["assets/blob.bin"])
+            self.assertEqual(rc, 2, stderr)
+            self.assertNotIn("Traceback", stderr)
+            self.assertIn("assets/blob.bin", stderr)
+            self.assertIn("not decodable as UTF-8", stderr)
+            self.assertFalse(out.exists())
+
+    def test_all_offenders_named_in_one_refusal(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.mkdir(parents=True, exist_ok=True)
+            for rel, data in [("b1.bin", b"\xff\xfe\x00bad"),
+                              ("b2.bin", b"\x80\x81\x82")]:
+                (root / rel).write_bytes(data)
+            for args in (["init", "-q"], ["add", "-A"],
+                         ["-c", "user.email=t@t", "-c", "user.name=t",
+                          "commit", "-qm", "fixture"]):
+                subprocess.run(["git", "-C", str(root), *args], check=True,
+                               capture_output=True)
+            rc, _stdout, stderr = run_bundle(
+                root, Path(td) / "bundle.md", ["b1.bin", "b2.bin"])
+            self.assertEqual(rc, 2)
+            self.assertIn("b1.bin", stderr)
+            self.assertIn("b2.bin", stderr)
+
+    def test_show_at_raises_unicode_decode_error_on_blob(self):
+        """Unit-level: the decode failure surfaces from show_at as
+        UnicodeDecodeError (which main() now catches and refuses)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo_with_blob(td, "b.bin", "x".encode("utf-16"))
+            sha = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True).stdout.strip()
+            with self.assertRaises(UnicodeDecodeError):
+                MCB.show_at(root, sha, "b.bin")
+
+    def test_valid_utf8_inputs_unchanged(self):
+        """Regression guard: ordinary UTF-8 sources (incl. multi-byte)
+        still assemble exactly as before."""
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(td, {"src/a.py": "x = 1\n",
+                                  "docs/notes.md": "# nótés — 日本語\n"})
+            out = Path(td) / "stories" / "STORY-NNN" / "context-bundle.md"
+            rc, stdout, stderr = run_bundle(
+                root, out, ["src/a.py", "docs/notes.md"])
+            self.assertEqual(rc, 0, stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("# nótés — 日本語", text)
+            self.assertIn("bundle sha256:", stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

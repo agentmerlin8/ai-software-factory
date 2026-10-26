@@ -16,11 +16,14 @@ output. The footer pins the ledger digest instead of a timestamp.
 
 Behaviors:
 * Upsert target selection matches the PIN marker
-  ``<!-- factory-card:pin -->`` (written only by the upsert path); the
-  card body carries the identity marker ``<!-- factory-card -->``. A
-  markdown-only reply embedding the card can never capture the pin.
-  Newest pinned comment wins (PATCH); no pin yet → POST. `--dry-run`
-  prints the exact payload and performs no API call.
+  ``<!-- factory-card:pin -->`` (written only by the upsert path) AND the
+  trusted writer identity (the authenticated gh login, resolved once per
+  run) — a marker copied to the start of another author's comment can
+  never capture the PATCH; the card body carries the identity marker
+  ``<!-- factory-card -->``. A markdown-only reply embedding the card can
+  never capture the pin. Newest pinned same-author comment wins (PATCH);
+  no same-author pin yet → POST. `--dry-run` prints the exact payload and
+  performs no API call.
 * Unanswered human_gate rows superseded by a later answered row for the
   same gate are NOT pending — the ledger is append-only, so resolution is
   a new row, never an edit.
@@ -364,13 +367,31 @@ def pick_target(ids: list[str]) -> str | None:
     return ids[-1] if ids else None
 
 
+def resolve_trusted_login(gh_fn=None) -> str:
+    """The authenticated `gh` login — the trusted card writer identity.
+    Resolved ONCE per run (via the injectable gh transport) and used to
+    restrict pin selection to comments this identity authored: a marker
+    copied to the START of another author's comment must never capture
+    the PATCH target."""
+    gh_fn = gh_fn or gh
+    login = gh_fn("api", "user", "--jq", ".login").strip()
+    if not login:
+        raise SB.BoardError(
+            "could not resolve the authenticated gh login "
+            "(`gh api user --jq .login` returned no login)")
+    return login
+
+
 def upsert_comment(repo: str, issue: int, body: str,
-                   gh_fn=None, dry_run: bool = False) -> str:
-    """Upsert the card comment; matches ONLY the pin marker. The stored
-    body starts with the pin marker (written by THIS path only). With
-    `dry_run`, prints the exact payload (endpoint + JSON body) and calls
-    NO API at all — the POST form is printed; at apply time an existing
-    pinned comment retargets the write to PATCH."""
+                   gh_fn=None, dry_run: bool = False,
+                   login: str | None = None) -> str:
+    """Upsert the card comment; matches ONLY pin-marker comments written
+    by the TRUSTED identity (the authenticated gh login — resolved once
+    per run via `resolve_trusted_login` unless injected as `login`). The
+    stored body starts with the pin marker (written by THIS path only).
+    With `dry_run`, prints the exact payload (endpoint + JSON body) and
+    calls NO API at all — the POST form is printed; at apply time an
+    existing pinned comment retargets the write to PATCH."""
     gh_fn = gh_fn or gh
     stored = f"{PIN_MARKER}\n{body}"
     payload = json.dumps({"body": stored})
@@ -378,13 +399,21 @@ def upsert_comment(repo: str, issue: int, body: str,
         print(f"POST repos/{repo}/issues/{issue}/comments")
         print(payload)
         return "dry-run"
+    if login is None:
+        login = resolve_trusted_login(gh_fn)
     listing = gh_fn("api", f"repos/{repo}/issues/{issue}/comments",
                     "--paginate", "--jq",
                     # R14-O3: anchor to the START of the body — this path
                     # always stores the marker as the first line, and a
                     # `contains` selector would also match a later reply
                     # QUOTING the card (blockquote/code fence) and PATCH it.
-                    f'.[] | select(.body | startswith("{PIN_MARKER}")) | .id')
+                    # R35-AJ2: ALSO require the trusted writer identity —
+                    # a marker-at-start copy by ANOTHER author (forged or
+                    # pasted) never wins the selector; genuine same-author
+                    # cards still update, and no same-author card → POST.
+                    '.[] | select((.body | startswith('
+                    f'{json.dumps(PIN_MARKER)})) and .user.login == '
+                    f'{json.dumps(login)}) | .id')
     ids = [ln for ln in listing.splitlines() if ln.strip()]
     target = pick_target(ids)
     if target:

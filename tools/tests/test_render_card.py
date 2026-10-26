@@ -25,6 +25,7 @@ from pathlib import Path
 from tools import ledger_lib as L
 from tools import render_card as R
 from tools import state_machine as SM
+from tools import sync_board as SB
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cards"
 STORY = "STORY-901"
@@ -516,16 +517,27 @@ class OutcomeOnlyStateTests(unittest.TestCase):
 class UpsertSeamTests(unittest.TestCase):
     """Marker-anchored upsert via stub gh_fn — no network, no gh."""
 
+    TRUSTED = "factory-bot"
+
     def setUp(self):
         self.calls: list[tuple] = []
+        self.user_calls: list[tuple] = []
 
     def fake_gh(self, *args, stdin=None):
+        # R35-AJ2: login resolution rides the SAME transport; kept out of
+        # `calls` so the listing/write call indices stay stable.
+        if args[:2] == ("api", "user"):
+            self.user_calls.append(args)
+            return f"{self.TRUSTED}\n"
         self.calls.append((args, stdin))
         if len(self.calls) == 1:
             return "42\n"  # one existing pinned comment
         return "ok"
 
     def fake_gh_empty(self, *args, stdin=None):
+        if args[:2] == ("api", "user"):
+            self.user_calls.append(args)
+            return f"{self.TRUSTED}\n"
         self.calls.append((args, stdin))
         return "" if len(self.calls) == 1 else "ok"
 
@@ -557,6 +569,8 @@ class UpsertSeamTests(unittest.TestCase):
         captured: dict = {}
 
         def gh(*args, stdin=None):
+            if args[:2] == ("api", "user"):
+                return f"{self.TRUSTED}\n"
             if len(captured) == 0 and "--jq" in args:
                 captured["jq"] = args[args.index("--jq") + 1]
                 return "101\n"
@@ -567,9 +581,12 @@ class UpsertSeamTests(unittest.TestCase):
             self.skipTest("jq not installed — selector string verified by "
                           "test_selector_anchored_to_body_start")
         comments = [
-            {"id": 55, "body": f"As seen in:\n> {R.PIN_MARKER}\n"},
-            {"id": 77, "body": f"```\n{R.PIN_MARKER}\nCARD\n```\n"},
-            {"id": 101, "body": f"{R.PIN_MARKER}\nCARD BODY\n"},
+            {"id": 55, "user": {"login": self.TRUSTED},
+             "body": f"As seen in:\n> {R.PIN_MARKER}\n"},
+            {"id": 77, "user": {"login": self.TRUSTED},
+             "body": f"```\n{R.PIN_MARKER}\nCARD\n```\n"},
+            {"id": 101, "user": {"login": self.TRUSTED},
+             "body": f"{R.PIN_MARKER}\nCARD BODY\n"},
         ]
         out = subprocess.run(
             ["jq", "-r", captured["jq"]],
@@ -603,6 +620,121 @@ class UpsertSeamTests(unittest.TestCase):
     def test_plain_post_never_pins(self):
         R.post_comment("o/r", 9, "EXPLAIN", gh_fn=self.fake_gh_empty)
         self.assertNotIn(R.PIN_MARKER, json.loads(self.calls[0][1])["body"])
+
+
+class Round35AuthorTrustTests(unittest.TestCase):
+    """R35-AJ2: pin selection restricted to the trusted writer identity.
+    A marker-at-start comment by ANOTHER author must never capture the
+    PATCH target — the selector requires BOTH startswith(marker) AND
+    user.login == the authenticated login. Fake transport only: no
+    network, no gh calls."""
+
+    TRUSTED = "factory-bot"
+    INTRUDER = "someone-else"
+
+    def setUp(self):
+        self.user_calls: list[tuple] = []
+        self.calls: list[tuple] = []
+
+    def transport(self, listing: str):
+        """Fake gh: resolves the login once, serves `listing` for the
+        comment listing, records the write call."""
+        def gh(*args, stdin=None):
+            if args[:2] == ("api", "user"):
+                self.user_calls.append(args)
+                return f"{self.TRUSTED}\n"
+            self.calls.append((args, stdin))
+            if "--jq" in args:
+                return listing
+            return "ok"
+        return gh
+
+    def test_selector_string_has_both_clauses(self):
+        """Grounded jq-selector check: startswith(marker) AND user.login
+        equality with the resolved trusted login."""
+        R.upsert_comment("o/r", 7, "BODY", gh_fn=self.transport("42\n"))
+        jq = self.calls[0][0][-1]
+        self.assertIn(f'startswith("{R.PIN_MARKER}")', jq)
+        self.assertIn(f'.user.login == "{self.TRUSTED}"', jq)
+        self.assertNotIn("contains(", jq)
+        # the login was resolved through the transport exactly once
+        self.assertEqual(self.user_calls,
+                         [("api", "user", "--jq", ".login")])
+
+    def test_forged_marker_by_other_author_ignored_genuine_patched(self):
+        """Grounded jq check over a listing where a LATER comment by
+        another author starts with a copied pin marker: only the genuine
+        same-author card is selected, and the PATCH targets it."""
+        jq_box: dict = {}
+
+        def gh(*args, stdin=None):
+            if args[:2] == ("api", "user"):
+                return f"{self.TRUSTED}\n"
+            if "--jq" in args and "--paginate" in args:
+                jq_box["jq"] = args[args.index("--jq") + 1]
+                return "101\n"
+            self.calls.append((args, stdin))
+            return "ok"
+
+        R.upsert_comment("o/r", 7, "BODY", gh_fn=gh)
+        if not shutil.which("jq"):
+            self.skipTest("jq not installed — selector string verified by "
+                          "test_selector_string_has_both_clauses")
+        comments = [
+            {"id": 101, "user": {"login": self.TRUSTED},
+             "body": f"{R.PIN_MARKER}\nGENUINE CARD\n"},
+            {"id": 202, "user": {"login": self.INTRUDER},
+             "body": f"{R.PIN_MARKER}\nFORGED COPY BY ANOTHER AUTHOR\n"},
+        ]
+        out = subprocess.run(
+            ["jq", "-r", jq_box["jq"]],
+            input=json.dumps(comments), capture_output=True,
+            text=True, check=True)
+        self.assertEqual(out.stdout.split(), ["101"])
+        method_idx = self.calls[0][0].index("--method")
+        self.assertEqual(self.calls[0][0][method_idx + 1], "PATCH")
+        self.assertTrue(any("issues/comments/101" in a
+                            for a in self.calls[0][0]))
+
+    def test_no_same_author_pin_posts(self):
+        """All marker-at-start comments belong to another author → the
+        selector finds nothing → POST a fresh card (existing behavior)."""
+        gh = self.transport("")  # jq filter matched nothing
+        R.upsert_comment("o/r", 7, "BODY", gh_fn=gh)
+        method_idx = self.calls[1][0].index("--method")
+        self.assertEqual(self.calls[1][0][method_idx + 1], "POST")
+        self.assertTrue(any(a.endswith("/issues/7/comments")
+                            for a in self.calls[1][0]))
+
+    def test_injected_login_skips_resolution(self):
+        """`login=` is injectable: no `api user` call, and the selector
+        carries the injected identity."""
+        gh = self.transport("42\n")
+        R.upsert_comment("o/r", 7, "BODY", gh_fn=gh, login="pinned-id")
+        self.assertEqual(self.user_calls, [])
+        self.assertIn('.user.login == "pinned-id"',
+                      self.calls[0][0][-1])
+
+    def test_unresolvable_login_refuses(self):
+        """Empty login → BoardError (fail closed): no listing, no write."""
+        def gh(*args, stdin=None):
+            if args[:2] == ("api", "user"):
+                return "\n"
+            self.calls.append((args, stdin))
+            return "ok"
+        with self.assertRaises(SB.BoardError):
+            R.upsert_comment("o/r", 7, "BODY", gh_fn=gh)
+        self.assertEqual(self.calls, [])
+
+    def test_dry_run_never_resolves_login(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            got = R.upsert_comment("o/r", 7, "BODY",
+                                   gh_fn=self.transport("42\n"),
+                                   dry_run=True)
+        self.assertEqual(got, "dry-run")
+        self.assertEqual(self.user_calls, [])
+        self.assertEqual(self.calls, [])
 
 
 class MainCliTests(unittest.TestCase):

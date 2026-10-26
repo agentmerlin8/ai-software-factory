@@ -32,8 +32,10 @@ USAGE:
       [-o <out.md>]
 
 Exit codes (config_validator convention): 0 ok · 2 usage / missing input
-(unreadable sha, a source not present at the pinned SHA). Stdlib only.
-Python >= 3.11.
+(unreadable sha, a source not present at the pinned SHA, a pinned source
+not decodable as UTF-8 text — a committed binary blob or a non-UTF-8
+encoding is a controlled, source-naming refusal, never a traceback).
+Stdlib only. Python >= 3.11.
 """
 from __future__ import annotations
 
@@ -100,11 +102,19 @@ def main(argv: list[str] | None = None) -> int:
              "questions.", ""]
     manifest: list[tuple[str, int, int]] = []
     missing: list[str] = []
+    undecodable: list[str] = []
     for src in args.sources:
         try:
             content, nbytes = show_at(root, full_sha, src)
         except RuntimeError:
             missing.append(src)
+            continue
+        except UnicodeDecodeError:
+            # A pinned source is promised TEXT (the bundle is markdown).
+            # A committed UTF-16 file or binary blob must be a controlled
+            # input refusal naming the offending source — BEFORE any
+            # bundle write — never an uncaught traceback.
+            undecodable.append(src)
             continue
         lines = len(content.splitlines())
         manifest.append((src, nbytes, lines))
@@ -114,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print("error: sources not present at the pinned SHA: "
               + ", ".join(missing), file=sys.stderr)
+        return 2
+    if undecodable:
+        print("error: sources not decodable as UTF-8 text at the pinned "
+              "SHA (binary blobs or non-UTF-8 encodings cannot be "
+              "inlined): " + ", ".join(undecodable), file=sys.stderr)
         return 2
 
     body = "\n".join(parts)

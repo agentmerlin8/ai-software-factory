@@ -687,5 +687,52 @@ class SymlinkConfinementTests(unittest.TestCase):
                             .exists())
 
 
+class ProvenanceCellSweepTests(unittest.TestCase):
+    """Round 32 S2: render_provenance._cell is IDENTICAL to
+    render_state._cell (CR/CRLF flattened too), and the remaining
+    free-text cells (loop stage/class/co_classes, gate, asked_at) are
+    escaped before insertion."""
+
+    header = RP.RSt.generated_header("factory/ledger/events.jsonl")
+
+    def test_cell_handles_cr_variants(self):
+        self.assertEqual(RP._cell("a\r\nb"), "a b")
+        self.assertEqual(RP._cell("a\rb"), "a b")
+        self.assertEqual(RP._cell("a\nb"), "a b")
+        self.assertEqual(RP._cell("a|b"), "a\\|b")
+        self.assertEqual(RP._cell("plain"), "plain")
+        for v in ("a|b", "a\r\nb", "a\rb", "a\nb", "plain"):
+            self.assertEqual(RP._cell(v), RP.RSt._cell(v), v)
+
+    def test_loop_stage_class_cells_escaped(self):
+        lp = {"event": "loop", "event_id": "loop-STORY-218-1",
+              "story_id": "STORY-218", "stage": "plan|review",
+              "loop_n": 1, "class": "reason|ing", "co_classes": ["a|b"],
+              "root_cause_one_line": "x", "occurred_on": "2026-09-01",
+              "recorded_at": "2026-09-01T02:10:00Z", "provenance": "live"}
+        text = RP.render([lp], "STORY-218", self.header)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| 2026-09-01 |"))
+        self.assertIn("plan\\|review", row)
+        self.assertIn("reason\\|ing", row)
+        self.assertIn("(+a\\|b)", row)
+        # exactly the 5 declared columns: 6 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 6)
+
+    def test_gate_and_asked_at_cells_escaped(self):
+        g = {"event": "human_gate", "event_id": "human_gate-STORY-218-1",
+             "story_id": "STORY-218", "gate": "mer|ge",
+             "question": "Merge?", "asked_at": "2026-09-02|00:00",
+             "answered_at": None, "answered_at_reason": "waiting",
+             "decision": None, "decision_reason": "waiting",
+             "answered_by": None, "answered_by_reason": "waiting",
+             "recorded_at": "2026-09-02T00:00:00Z", "provenance": "live"}
+        text = RP.render([g], "STORY-218", self.header)
+        row = next(l for l in text.splitlines()
+                   if l.startswith("| mer\\|ge |"))
+        self.assertIn("2026-09-02\\|00:00", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 7)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

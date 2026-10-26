@@ -931,5 +931,53 @@ class GateLifecycleTotalsTests(unittest.TestCase):
         self.assertIn("total 2, avoidable 1, pending 1", line)
 
 
+class OwnerCellEscapeTests(unittest.TestCase):
+    """Round 32 AG3: a free-form owner like `ops | backup` used to add
+    a Markdown column and shift every following cell of the per-story
+    row; newline variants split the row. The owner cell (and its
+    ledger-sourced siblings) are escaped before insertion."""
+
+    def _claim(self, owner: str) -> dict:
+        return {"event": "assignment", "op": "claim", "story_id": "STORY-201",
+                "owner": owner, "host": "h", "session": "s",
+                "claimed_at": "2026-09-01T00:00:00Z", "start_sha": "a" * 40,
+                "event_id": "asg-1", "recorded_at": "2026-09-01T00:00:00Z",
+                "provenance": "live"}
+
+    def _row(self, owner: str) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            text = RD.render([self._claim(owner)], Path(td), "H")
+        return next(l for l in text.splitlines()
+                    if l.startswith("| STORY-201 |"))
+
+    def test_pipe_owner_escaped_columns_intact(self):
+        row = self._row("ops | backup")
+        self.assertIn("ops \\| backup", row)
+        # exactly the 8 declared columns: 9 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 9)
+
+    def test_newline_owner_flattened_columns_intact(self):
+        row = self._row("ops\nbackup")
+        self.assertNotIn("\n", row)
+        self.assertIn("ops backup", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 9)
+
+    def test_crlf_and_lone_cr_owner_flattened(self):
+        for owner in ("ops\r\nbackup", "ops\rbackup"):
+            row = self._row(owner)
+            self.assertNotIn("\r", row)
+            self.assertIn("ops backup", row)
+            self.assertEqual(row.replace("\\|", "").count("|"), 9)
+
+    def test_plain_owner_unchanged(self):
+        row = self._row("agent-a")
+        self.assertIn("| agent-a |", row)
+        self.assertNotIn("\\|", row)
+
+    def test_cell_helper_identical_to_render_state(self):
+        for v in ("a|b", "a\r\nb", "a\rb", "a\nb", "plain"):
+            self.assertEqual(RD._cell(v), RS._cell(v), v)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

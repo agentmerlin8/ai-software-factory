@@ -48,6 +48,15 @@ except ImportError:  # direct-run layout: load the tools package itself
     from tools import render_state as RSt
 
 
+def _cell(s) -> str:
+    """Escape a value for a markdown table cell — round 32 AG3/S2:
+    identical semantics to render_state._cell (pipe → `\\|`, CR/CRLF/
+    newline → space). A free-form owner like `ops | backup` used to add
+    a column and shift every following cell of the per-story row."""
+    return (str(s).replace("|", "\\|")
+            .replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
+
+
 def process_version(root: Path) -> str | None:
     """The runbook's frozen `process-version:` line, verbatim (None when
     absent — never a hardcoded version)."""
@@ -333,11 +342,15 @@ def render(events: list[dict], root: Path, header: str,
         pl, il = loop_breakdown(s)
         state = s.get("state") or ("MERGED*" if o.get("merged_sha")
                                    else "no transitions (events only)")
+        # round 32 AG3: owner (and every other ledger-sourced free-text
+        # cell) is escaped before insertion — a pipe/newline in a
+        # free-form owner must not corrupt the row
         out.append(
-            f"| {sid} | {s.get('owner') or '—'} | `{state}` "
+            f"| {_cell(sid)} | {_cell(s.get('owner') or '—')} "
+            f"| `{_cell(state)}` "
             f"| {pl}/{il} | {external_rounds(s)} | {correction_rounds(s)} "
-            f"| {o.get('merged_sha') or '—'} "
-            f"| {o.get('live_proof_status') or '—'} |")
+            f"| {_cell(o.get('merged_sha') or '—')} "
+            f"| {_cell(o.get('live_proof_status') or '—')} |")
     out += ["", "_MERGED* = merged outcome recorded without controller "
             "transitions (backfilled history)._", ""]
 

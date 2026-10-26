@@ -1763,5 +1763,256 @@ class AnchorTypedInitializerDeclaredNameTests(unittest.TestCase):
                           "['subtotal']", errors)
 
 
+ANNOTATED_DECL_SRC = (
+    "// app\n"
+    "Existing: int = 1\n"
+    "Missing: int = 1\n"
+    "const Existing: Widget = makeWidget()\n"
+    "const Missing: Widget = makeWidget()\n"
+    "items[0]: int = 1\n"
+    "x: Map<K,V> = build()\n")
+
+
+class AnchorAnnotatedDeclarationTests(unittest.TestCase):
+    """Round 32 AG1: an annotated declaration `TARGET: TYPE = init`
+    checks the TARGET — `Missing: int = 1` used to select the TYPE
+    `int` (last identifier before the `=`) and PASS against a line
+    declaring `Existing: int = 1`; TS `const Missing: Widget =
+    makeWidget()` likewise passed on the shared annotation type."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=ANNOTATED_DECL_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_annotated_mismatch_flagged_on_target(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-940",
+                              "- `src/app.py:2` — Missing: int = 1\n")
+            errors = CD.run_gate(root, "STORY-940", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_annotated_match_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-941",
+                              "- `src/app.py:2` — Existing: int = 1\n")
+            self.assertEqual(CD.run_gate(root, "STORY-941", "HEAD"), [])
+
+    def test_ts_annotated_mismatch_flagged_on_target(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-942",
+                              "- `src/app.py:4` — const Missing: Widget "
+                              "= makeWidget()\n")
+            errors = CD.run_gate(root, "STORY-942", "HEAD")
+            self.assertIn("anchor symbol not on line 4 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_ts_annotated_match_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-943",
+                              "- `src/app.py:4` — const Existing: Widget "
+                              "= makeWidget()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-943", "HEAD"), [])
+
+    def test_non_plain_annotated_target_refused(self):
+        """`items[0]: int = 1` — the annotated TARGET is not a plain
+        identifier; refuse by name instead of guessing."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-944",
+                              "- `src/app.py:6` — items[0]: int = 1\n")
+            errors = CD.run_gate(root, "STORY-944", "HEAD")
+            self.assertTrue(
+                any(e.startswith("ambiguous anchor symbol for annotated "
+                                 "declaration") and
+                    "name the declared symbol explicitly" in e
+                    for e in errors), errors)
+
+    def test_generic_annotation_type_refused(self):
+        """`x: Map<K,V> = build()` — a non-plain annotation TYPE falls
+        to the initializer-form refusal (gap between the last
+        identifier and the `=` is not whitespace)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-945",
+                              "- `src/app.py:7` — x: Map<K,V> = build()\n")
+            errors = CD.run_gate(root, "STORY-945", "HEAD")
+            self.assertTrue(
+                any(e.startswith("ambiguous anchor symbol for initializer "
+                                 "form") for e in errors), errors)
+
+
+GENERIC_SIG_SRC = (
+    "// app\n"
+    "public static Widget Existing<T>()\n"
+    "public static Widget Missing<T>()\n"
+    "public static Widget Lookup<Map<K,V>>()\n")
+
+
+class AnchorGenericSignatureTests(unittest.TestCase):
+    """Round 32 AG2: a generic member signature `NAME<T>()` used to
+    miss the signature regex (the fallback checked only the shared
+    return type `Widget`), so `public static Widget Missing<T>()`
+    PASSED against a line declaring `Existing<T>()`."""
+
+    def _repo(self, td: str, sid: str, anchors: str) -> Path:
+        return _r8_repo(Path(td), sid, src_lines=GENERIC_SIG_SRC,
+                        story_text="# s\n\n- AC-1: one.\n",
+                        anchors=anchors)
+
+    def test_generic_mismatch_flagged_on_member(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-946",
+                              "- `src/app.py:2` — public static Widget "
+                              "Missing<T>()\n")
+            errors = CD.run_gate(root, "STORY-946", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_generic_match_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-947",
+                              "- `src/app.py:2` — public static Widget "
+                              "Existing<T>()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-947", "HEAD"), [])
+
+    def test_generic_match_on_own_line_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-948",
+                              "- `src/app.py:3` — public static Widget "
+                              "Missing<T>()\n")
+            self.assertEqual(CD.run_gate(root, "STORY-948", "HEAD"), [])
+
+    def test_nested_generic_signature_supported(self):
+        """`NAME<Map<K,V>>()` — nested generic parameter lists peel
+        correctly; a ghost nested-generic member flags."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-949",
+                              "- `src/app.py:2` — public static Widget "
+                              "Missing<Map<K,V>>()\n")
+            errors = CD.run_gate(root, "STORY-949", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+            root2 = self._repo(td + "b", "STORY-950",
+                               "- `src/app.py:4` — public static Widget "
+                               "Lookup<Map<K,V>>()\n")
+            self.assertEqual(CD.run_gate(root2, "STORY-950", "HEAD"), [])
+
+    def test_non_generic_signature_unchanged(self):
+        """R24-Y1/R30-AE1 behavior: plain signatures still check the
+        member identifier."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-951", src_lines=R8_SRC,
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:6` — public static Foo "
+                                    "Missing()\n")
+            errors = CD.run_gate(root, "STORY-951", "HEAD")
+            self.assertIn("anchor symbol not on line 6 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_non_plain_signature_head_refused(self):
+        """A trailing call signature whose head is not a plain
+        (optionally generic) identifier refuses by name."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td, "STORY-952",
+                              "- `src/app.py:2` — items[0](x)\n")
+            errors = CD.run_gate(root, "STORY-952", "HEAD")
+            self.assertTrue(
+                any(e.startswith("ambiguous anchor symbol for signature "
+                                 "form") for e in errors), errors)
+
+
+class AnchorGrammarSweepTests(unittest.TestCase):
+    """Round 32 S1: the anchor_symbols() ACCEPTED grammar is a closed
+    set — every plausible description shape either checks the RIGHT
+    symbol or refuses BY NAME. Table-driven: (desc, expected groups or
+    refusal prefix)."""
+
+    def test_accepted_forms_table(self):
+        cases = [
+            # plain NAME
+            ("compute_total", [["compute_total"]]),
+            # keyword-prefixed NAME
+            ("async def existing", [["existing"]]),
+            ("export interface ExistingShape", [["ExistingShape"]]),
+            # TYPE NAME — two ordered groups (first + declared name)
+            ("public static Foo Bar", [["Foo"], ["Bar"]]),
+            # signatures
+            ("compute_total(items)", [["compute_total"]]),
+            ("async def missing():", [["missing"]]),
+            ("public static Widget Existing<T>()", [["Existing"]]),
+            ("public static Widget Lookup<Map<K,V>>()", [["Lookup"]]),
+            # NAME = init / TYPE NAME = init
+            ("subtotal = 0", [["subtotal"]]),
+            ("export const Existing = makeWidget()", [["Existing"]]),
+            ("public static Widget Missing = makeWidget()", [["Missing"]]),
+            # annotated declarations (round 32 AG1)
+            ("Existing: int = 1", [["Existing"]]),
+            ("const Missing: Widget = makeWidget()", [["Missing"]]),
+            # parameter defaults are not assignments (round 30 AE1)
+            ("public static Widget Missing(int n = 0)", [["Missing"]]),
+            ("def missing(self, n=0)", [["missing"]]),
+            # comparison operators are not assignments (round 29 AD3)
+            ("total == checkSum()", [["checkSum"]]),
+            # all-keyword description degrades to first-two tokens
+            ("class def", [["class", "def"]]),
+        ]
+        for desc, expected in cases:
+            groups, refusal = CD.anchor_symbols(desc)
+            self.assertIsNone(refusal, desc)
+            self.assertEqual(groups, expected, desc)
+
+    def test_refused_forms_table(self):
+        cases = [
+            # multiple declarators (round 32 S1)
+            ("a = 1, b = 2", "ambiguous anchor symbol for "
+                             "multiple-declarator form"),
+            # destructuring / subscript targets
+            ("[a, b] = pair()", "ambiguous anchor symbol for initializer "
+                                "form"),
+            ("items[0] = compute()", "ambiguous anchor symbol for "
+                                     "initializer form"),
+            # non-plain annotated target (round 32 AG1)
+            ("items[0]: int = 1", "ambiguous anchor symbol for annotated "
+                                  "declaration"),
+            # non-plain annotation TYPE
+            ("x: Map<K,V> = build()", "ambiguous anchor symbol for "
+                                      "initializer form"),
+            # non-plain signature head (round 32 AG2)
+            ("items[0](x)", "ambiguous anchor symbol for signature form"),
+        ]
+        for desc, prefix in cases:
+            groups, refusal = CD.anchor_symbols(desc)
+            self.assertIsNone(groups, desc)
+            self.assertIsNotNone(refusal, desc)
+            self.assertTrue(refusal.startswith(prefix),
+                            f"{desc!r}: {refusal!r} !~ {prefix!r}")
+            self.assertIn("name ", refusal)
+            self.assertIn(repr(desc), refusal)
+
+    def test_ghost_type_name_flagged_end_to_end(self):
+        """A bare `TYPE NAME` ghost must not pass on the shared TYPE
+        token alone — the declared-name group flags."""
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-953", src_lines=GENERIC_SIG_SRC,
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:2` — public static "
+                                    "Widget Missing\n")
+            errors = CD.run_gate(root, "STORY-953", "HEAD")
+            self.assertIn("anchor symbol not on line 2 of src/app.py: "
+                          "['Missing']", errors)
+
+    def test_multiple_declarator_anchor_refused_end_to_end(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _r8_repo(Path(td), "STORY-958",
+                            src_lines="x\na = 1, b = 2\n",
+                            story_text="# s\n\n- AC-1: one.\n",
+                            anchors="- `src/app.py:2` — a = 1, b = 2\n")
+            errors = CD.run_gate(root, "STORY-958", "HEAD")
+            self.assertTrue(
+                any(e.startswith("ambiguous anchor symbol for "
+                                 "multiple-declarator form")
+                    for e in errors), errors)
+
+
 if __name__ == "__main__":
     unittest.main()

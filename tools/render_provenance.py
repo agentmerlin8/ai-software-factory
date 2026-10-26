@@ -107,8 +107,12 @@ def dispatch_rows(events: list[dict], sid: str) -> dict[str, dict]:
 
 
 def _cell(s) -> str:
-    """Escape a value for a markdown table cell."""
-    return str(s).replace("|", "\\|").replace("\n", " ")
+    """Escape a value for a markdown table cell — round 32 S2: made
+    IDENTICAL to render_state._cell (CR/CRLF flattened too, not just
+    LF — a lone CR value would otherwise split the row and violate the
+    LF byte contract)."""
+    return (str(s).replace("|", "\\|")
+            .replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
 
 
 def _tally_table(counter: Counter, header: str) -> list[str]:
@@ -166,11 +170,14 @@ def render(events: list[dict], sid: str, header: str) -> str:
             # approved_by_reason cannot corrupt the timeline row
             gate = _cell(ap) if ap else \
                 _cell(f"_{fmt_null(None, 'approved_by_reason', t)}_")
-            checks = ", ".join(t.get("checks_run", []))
-            out.append(f"| {t['recorded_at']} | {t['from_state']} → "
-                       f"**{t['to_state']}** | {_cell(t.get('repo') or '—')} "
+            checks = ", ".join(_cell(c) for c in t.get("checks_run", []))
+            # round 32 S2: recorded_at/from_state/to_state escaped too
+            out.append(f"| {_cell(t['recorded_at'])} "
+                       f"| {_cell(t['from_state'])} → "
+                       f"**{_cell(t['to_state'])}** "
+                       f"| {_cell(t.get('repo') or '—')} "
                        f"| {_cell(t.get('requested_by'))} "
-                       f"| {gate} | {_cell(checks)} |")
+                       f"| {gate} | {checks} |")
         gated = [t for t in trans if t.get("approved_by")]
         out += ["", f"_{len(trans)} transition(s); {len(gated)} human-gated "
                 "(approved_by present)._", ""]
@@ -186,9 +193,12 @@ def render(events: list[dict], sid: str, header: str) -> str:
         out += ["| Date | Stage | Loop | Class | Root cause (one line) |",
                 "|---|---|---|---|---|"]
         for lp in loops:
-            co = f" (+{','.join(lp['co_classes'])})" if lp.get("co_classes") else ""
-            out.append(f"| {lp.get('occurred_on', lp['recorded_at'][:10])} "
-                       f"| {lp['stage']} | {lp['loop_n']} | {lp['class']}{co} "
+            co = f" (+{','.join(_cell(c) for c in lp['co_classes'])})" \
+                if lp.get("co_classes") else ""
+            # round 32 S2: date/stage/loop_n/class escaped too
+            out.append(f"| {_cell(lp.get('occurred_on', lp['recorded_at'][:10]))} "
+                       f"| {_cell(lp['stage'])} | {_cell(lp['loop_n'])} "
+                       f"| {_cell(lp['class'])}{co} "
                        f"| {_cell(lp['root_cause_one_line'])} |")
         out.append("")
 
@@ -236,8 +246,9 @@ def render(events: list[dict], sid: str, header: str) -> str:
                                      "decision_reason", g))
                 aby = _cell(fmt_null(g.get("answered_by"),
                                      "answered_by_reason", g))
-            out.append(f"| {g['gate']} | {_cell(g['question'])} "
-                       f"| {g['asked_at']} | {_cell(ans)} "
+            # round 32 S2: gate/asked_at escaped too
+            out.append(f"| {_cell(g['gate'])} | {_cell(g['question'])} "
+                       f"| {_cell(g['asked_at'])} | {_cell(ans)} "
                        f"| {dec} | {aby} |")
         out.append("")
 

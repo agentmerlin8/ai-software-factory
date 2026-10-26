@@ -188,15 +188,20 @@ def render(events: list[dict], sid: str, header: str,
                 "| Recorded at (UTC) | From | To | Repo | Requested by | Checks | Approved by |",
                 "|---|---|---|---|---|---|---|"]
         for t in trans:
-            checks = ", ".join(t.get("checks_run", []))
+            # round 32 AG4: requested_by and every checks_run entry are
+            # free-form ledger text — escape each before the row is
+            # joined (a pipe/newline used to corrupt the ledger row)
+            checks = ", ".join(_cell(c) for c in t.get("checks_run", []))
             # round 26 AA3: the approval cell carries either the approver
             # or the formatted null reason — both untrusted text
             ap = _cell(t.get("approved_by")
                        or fmt_null(None, "approved_by_reason", t))
-            out.append(f"| {t['recorded_at']} | {t['from_state']} | "
-                       f"**{t['to_state']}** | {t.get('repo') or '—'} | "
-                       f"{t.get('requested_by')} | "
-                       f"{checks} | {ap} |")
+            out.append(f"| {_cell(t['recorded_at'])} "
+                       f"| {_cell(t['from_state'])} "
+                       f"| **{_cell(t['to_state'])}** "
+                       f"| {_cell(t.get('repo') or '—')} "
+                       f"| {_cell(t.get('requested_by'))} "
+                       f"| {checks} | {ap} |")
         out.append("")
 
     # ---- stages
@@ -206,8 +211,9 @@ def render(events: list[dict], sid: str, header: str,
                 "| Stage | Passed | Failed | Skipped | Excluded | Commit | Evidence |",
                 "|---|---|---|---|---|---|---|"]
         for s in stages:
+            # round 32 S2: the stage name is free-form ledger text too
             out.append(
-                f"| {s.get('stage')} "
+                f"| {_cell(s.get('stage'))} "
                 f"| {_cell(fmt_null(s.get('tests_passed'), 'tests_passed_reason', s))} "
                 f"| {_cell(fmt_null(s.get('tests_failed'), 'tests_failed_reason', s))} "
                 f"| {_cell(fmt_null(s.get('tests_skipped'), 'tests_skipped_reason', s))} "
@@ -226,10 +232,12 @@ def render(events: list[dict], sid: str, header: str,
         out += ["| Date | Stage | Loop | Class | Root cause (one line) |",
                 "|---|---|---|---|---|"]
         for lp in loops:
-            co = f" (+{','.join(lp['co_classes'])})" if lp.get("co_classes") else ""
-            out.append(f"| {lp.get('occurred_on', lp['recorded_at'][:10])} "
-                       f"| {lp['stage']} | {lp['loop_n']} "
-                       f"| {lp['class']}{co} "
+            co = f" (+{','.join(_cell(c) for c in lp['co_classes'])})" \
+                if lp.get("co_classes") else ""
+            # round 32 S2: stage/class are free-form ledger text
+            out.append(f"| {_cell(lp.get('occurred_on', lp['recorded_at'][:10]))} "
+                       f"| {_cell(lp['stage'])} | {_cell(lp['loop_n'])} "
+                       f"| {_cell(lp['class'])}{co} "
                        f"| {_cell(lp['root_cause_one_line'])} |")
     else:
         out.append("(none)")
@@ -242,11 +250,14 @@ def render(events: list[dict], sid: str, header: str,
                 "| Event | Role | Reviewed SHA | Base SHA | Prompt | Manifest |",
                 "|---|---|---|---|---|---|"]
         for ctx in contexts:
-            out.append(f"| {ctx['event_id']} | {ctx['review_role']} "
-                       f"| `{ctx['reviewed_sha']}` | `{ctx['base_sha']}` "
-                       f"| {ctx['prompt_version']} "
-                       f"| `{ctx['context_manifest_path']}` "
-                       f"(`{ctx['context_manifest_digest'][:12]}…`) |")
+            # round 32 S2: prompt_version is free-form ledger text
+            out.append(f"| {_cell(ctx['event_id'])} "
+                       f"| {_cell(ctx['review_role'])} "
+                       f"| `{_cell(ctx['reviewed_sha'])}` "
+                       f"| `{_cell(ctx['base_sha'])}` "
+                       f"| {_cell(ctx['prompt_version'])} "
+                       f"| `{_cell(ctx['context_manifest_path'])}` "
+                       f"(`{_cell(ctx['context_manifest_digest'][:12])}…`) |")
         out.append("")
 
     # ---- findings (latest lifecycle row only)
@@ -260,12 +271,14 @@ def render(events: list[dict], sid: str, header: str,
             # reasons — escape before insertion
             fix = _cell(f.get("fix_sha")
                         or fmt_null(None, "fix_sha_reason", f))
-            ov = f.get("overlap_id") or "—"
+            ov = _cell(f.get("overlap_id") or "—")
+            # round 32 S2: finding_id/logic_touched are free-form text
             out.append(
-                f"| {f.get('finding_id') or '—'} "
-                f"| {f.get('source')} | {f.get('class')} "
+                f"| {_cell(f.get('finding_id') or '—')} "
+                f"| {_cell(f.get('source'))} | {_cell(f.get('class'))} "
                 f"| {_cell(f.get('severity') or fmt_null(None, 'severity_reason', f))} "
-                f"| {f.get('logic_touched')} | {f.get('disposition')} "
+                f"| {_cell(f.get('logic_touched'))} "
+                f"| {_cell(f.get('disposition'))} "
                 f"| {fix} | {ov} |")
         out.append("")
 
@@ -276,10 +289,12 @@ def render(events: list[dict], sid: str, header: str,
                 "| Finding | Classification | Internal context | External context | Evidence |",
                 "|---|---|---|---|---|"]
         for a in attrs:
-            out.append(f"| {a['finding_id']} | {a['classification']} "
-                       f"| {a['internal_context_event_id']} "
-                       f"| {a['external_context_event_id']} "
-                       f"| {a['evidence_path']} |")
+            # round 32 S2: attribution join cells are ledger text
+            out.append(f"| {_cell(a['finding_id'])} "
+                       f"| {_cell(a['classification'])} "
+                       f"| {_cell(a['internal_context_event_id'])} "
+                       f"| {_cell(a['external_context_event_id'])} "
+                       f"| {_cell(a['evidence_path'])} |")
         out.append("")
 
     # ---- human gates
@@ -311,9 +326,10 @@ def render(events: list[dict], sid: str, header: str,
                 aby = fmt_null(g.get("answered_by"), "answered_by_reason", g)
             # round 26 AA3: decision/respondent cells (incl. the pending
             # null-reason form) are untrusted text — escape at insertion
-            out.append(f"| {g['gate']} | {_cell(g['question'])} "
-                       f"| {g['asked_at']} "
-                       f"| {answered} | {_cell(dec)} | {_cell(aby)} |")
+            # round 32 S2: gate/asked_at/answered are escaped too
+            out.append(f"| {_cell(g['gate'])} | {_cell(g['question'])} "
+                       f"| {_cell(g['asked_at'])} "
+                       f"| {_cell(answered)} | {_cell(dec)} | {_cell(aby)} |")
         out.append("")
 
     # ---- outcome

@@ -413,5 +413,64 @@ class MetricsReportTests(unittest.TestCase):
                       out3)
 
 
+class MetricsCellSweepTests(unittest.TestCase):
+    """Round 32 S2: ledger-sourced free-text cells (story ids, roles,
+    models, loop classes, token reasons) are escaped before insertion
+    into every metrics table — a pipe/newline must not add columns or
+    split rows."""
+
+    def test_cell_helper_identical_to_render_state(self):
+        for v in ("a|b", "a\r\nb", "a\rb", "a\nb", "plain"):
+            self.assertEqual(MT._cell(v), RS._cell(v), v)
+
+    def test_token_reason_pipe_escaped_in_totals_row(self):
+        usage = {
+            "event": "usage", "event_id": "usage-STORY-219-coder-1",
+            "dispatch_id": "STORY-219-coder-1-1789009000",
+            "input_tokens": None,
+            "input_tokens_reason": "executor said a|b\nc",
+            "output_tokens": None,
+            "output_tokens_reason": "executor said a|b\nc",
+            "cached_input_tokens": None,
+            "cached_input_tokens_reason": "n/a",
+            "thinking_tokens": None, "thinking_tokens_reason": "n/a",
+            "token_semantics": "tokens", "usage_source": "executor-report",
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        dispatch = {
+            "event": "dispatch", "event_id": "STORY-219-coder-1-1789009000",
+            "story_id": "STORY-219", "role": "co|der",
+            "requested_model": "mod|el-a\nv1", "reported_model": "mod|el-a\nv1",
+            "thinking_setting": "on", "session_id": "s",
+            "parent_session_id": "p", "attempt": 1,
+            "started_at": "2026-09-01T01:00:00Z",
+            "ended_at": "2026-09-01T02:00:00Z", "outcome": "done",
+            "prompt_version": "v1", "worktree": "w",
+            "model_unverified": False,
+            "recorded_at": "2026-09-01T02:00:00Z", "provenance": "live"}
+        c = MT.collect([dispatch, usage])
+        md = MT.render_md(c, "t", "H", 2)
+        trow = next(l for l in md.splitlines()
+                    if l.startswith("| input_tokens |"))
+        self.assertIn("unknown (executor said a\\|b c)", trow)
+        self.assertEqual(trow.replace("\\|", "").count("|"), 3)
+        # per-role row: role and model cells escaped (5 declared columns)
+        rrow = next(l for l in md.splitlines() if l.startswith("| co\\|der |"))
+        self.assertIn("mod\\|el-a v1×1", rrow)
+        self.assertEqual(rrow.replace("\\|", "").count("|"), 6)
+        # per-story row keeps its 9 declared columns
+        srow = next(l for l in md.splitlines()
+                    if l.startswith("| STORY-219 |"))
+        self.assertEqual(srow.replace("\\|", "").count("|"), 10)
+        # per-lane header cell for the role's lane is escaped
+        self.assertIn("other", md)
+        # the rows were never split by the embedded newlines
+        self.assertNotIn("v1 |", md.replace("mod\\|el-a v1×1", ""))
+
+    def test_plain_metrics_rows_unchanged(self):
+        c = MT.collect(json.loads(json.dumps([])))
+        md = MT.render_md(c, "t", "H", 0)
+        self.assertNotIn("\\|", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

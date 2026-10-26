@@ -858,5 +858,63 @@ class CellCRTests(unittest.TestCase):
         self.assertEqual(row.replace("\\|", "").count("|"), 8)
 
 
+class TransitionFreeTextCellEscapeTests(unittest.TestCase):
+    """Round 32 AG4: `requested_by` and the `checks_run` entries are
+    free-form ledger text that used to render UNESCAPED in the
+    transitions table — `ops|review` added a column and a newline in a
+    check name split the row."""
+
+    header = RS.generated_header("factory/ledger/events.jsonl")
+
+    def _trans(self, **overrides) -> dict:
+        t = {"event": "transition", "event_id": "transition-STORY-217-1",
+             "story_id": "STORY-217", "repo": None,
+             "repo_reason": "single-repo",
+             "from_state": "CODING", "to_state": "BUILD_GREEN",
+             "requested_by": "orchestrator", "checks_run": [],
+             "check_results": {}, "approved_by": None,
+             "approved_by_reason": "no gate required",
+             "recorded_at": "2026-09-01T07:00:00Z", "provenance": "live"}
+        t.update(overrides)
+        return t
+
+    def _row(self, **overrides) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            text = RS.render([self._trans(**overrides)], "STORY-217",
+                             self.header, Path(td))
+        return next(l for l in text.splitlines()
+                    if l.startswith("| 2026-09-01T07:00:00Z |"))
+
+    def test_requested_by_pipe_escaped_columns_intact(self):
+        row = self._row(requested_by="ops|review")
+        self.assertIn("ops\\|review", row)
+        # exactly the 7 declared columns: 8 unescaped pipe delimiters
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_requested_by_newline_flattened(self):
+        row = self._row(requested_by="ops\nreview")
+        self.assertIn("ops review", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_requested_by_crlf_and_cr_flattened(self):
+        for who in ("ops\r\nreview", "ops\rreview"):
+            row = self._row(requested_by=who)
+            self.assertNotIn("\r", row)
+            self.assertIn("ops review", row)
+            self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_checks_run_entries_escaped(self):
+        row = self._row(checks_run=["order", "gate a|b", "claim\nc"])
+        self.assertIn("order, gate a\\|b, claim c", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+    def test_plain_transition_row_unchanged(self):
+        row = self._row(requested_by="orchestrator",
+                        checks_run=["order", "claim"])
+        self.assertIn("| orchestrator | order, claim |", row)
+        self.assertNotIn("\\|", row)
+        self.assertEqual(row.replace("\\|", "").count("|"), 8)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

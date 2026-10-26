@@ -83,6 +83,16 @@ def lane_of(role: str) -> str:
 TOKEN_FIELDS = ("input_tokens", "output_tokens", "cached_input_tokens")
 
 
+def _cell(s) -> str:
+    """Escape a value for a markdown table cell — round 32 S2: the
+    identical helper render_state/render_dashboard/render_provenance
+    use (pipe → `\\|`, CR/CRLF/newline → space). Ledger-sourced
+    free-text cells (story ids, models, roles, loop classes, token
+    reasons) must not be able to add columns or split rows."""
+    return (str(s).replace("|", "\\|")
+            .replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
+
+
 class TokSum:
     """Aggregated token count that preserves unknown measurements.
 
@@ -289,36 +299,38 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
         if k.endswith("_unknown") or k.endswith("_reasons"):
             continue  # folded into the token field's cell below
         v = t[k]
+        # round 32 S2: tok_cell embeds ledger-recorded reasons
+        # (free text) — escape at insertion
         if k in TOKEN_FIELDS:
-            out.append(f"| {k} | {tok_cell(t, k)} |")
+            out.append(f"| {_cell(k)} | {_cell(tok_cell(t, k))} |")
         elif isinstance(v, int):
-            out.append(f"| {k} | {v:,} |")
+            out.append(f"| {_cell(k)} | {v:,} |")
         else:
-            out.append(f"| {k} | {v} |")
+            out.append(f"| {_cell(k)} | {_cell(v)} |")
     out += ["", "## Per story", "",
             "| Story | Dispatches | Input tok | Output tok | Routed | "
             "Usage rows | Served model known | Loops | Merged |",
             "|---|---|---|---|---|---|---|---|---|"]
     for sid, st in sorted(c["per_story"].items()):
-        loops = ",".join(f"{k}:{v}" for k, v in sorted(st["loops"].items())) \
-            or "0"
-        out.append(f"| {sid} | {st['dispatches']} | "
-                   f"{tok_cell(st, 'input_tokens')} | "
-                   f"{tok_cell(st, 'output_tokens')} | "
+        loops = ",".join(f"{_cell(k)}:{_cell(v)}"
+                         for k, v in sorted(st["loops"].items())) or "0"
+        out.append(f"| {_cell(sid)} | {st['dispatches']} | "
+                   f"{_cell(tok_cell(st, 'input_tokens'))} | "
+                   f"{_cell(tok_cell(st, 'output_tokens'))} | "
                    f"{st['routed']}/{st['dispatches']} | "
                    f"{st['usage_recorded']}/{st['dispatches']} | "
                    f"{st['served_model_known']}/{st['dispatches']} | "
-                   f"{loops} | {st['merged'] or '—'} |")
+                   f"{loops} | {_cell(st['merged'] or '—')} |")
     out += ["", "## Per story × lane (input tokens)", ""]
     lanes = sorted({ln for st in c["per_story"].values()
                     for ln in st["per_lane"]})
     if lanes:
-        out += ["| Story | " + " | ".join(lanes) + " |",
+        out += ["| Story | " + " | ".join(_cell(ln) for ln in lanes) + " |",
                 "|---|" + "---|" * len(lanes)]
         for sid, st in sorted(c["per_story"].items()):
-            cells = [tok_cell(st["per_lane"][ln], "input_tokens")
+            cells = [_cell(tok_cell(st["per_lane"][ln], "input_tokens"))
                      if ln in st["per_lane"] else "—" for ln in lanes]
-            out.append(f"| {sid} | " + " | ".join(cells) + " |")
+            out.append(f"| {_cell(sid)} | " + " | ".join(cells) + " |")
     else:
         out.append("(no dispatch rows recorded)")
     out += ["", "## Unrouted-dispatch census", ""]
@@ -334,10 +346,11 @@ def render_md(c: dict, title: str, header: str, n_events: int) -> str:
             "| Role | Dispatches | Input tok | Output tok | Models served |",
             "|---|---|---|---|---|"]
     for r, d in sorted(c["per_role"].items()):
-        models = ", ".join(f"{m}×{n}" for m, n in sorted(d["models"].items()))
-        out.append(f"| {r} | {d['dispatches']} | "
-                   f"{tok_cell(d, 'input_tokens')} | "
-                   f"{tok_cell(d, 'output_tokens')} | {models} |")
+        models = ", ".join(f"{_cell(m)}×{n}"
+                           for m, n in sorted(d["models"].items()))
+        out.append(f"| {_cell(r)} | {d['dispatches']} | "
+                   f"{_cell(tok_cell(d, 'input_tokens'))} | "
+                   f"{_cell(tok_cell(d, 'output_tokens'))} | {models} |")
     out += ["", "_Regenerate: `python3 factory/tools/metrics_report.py`_", ""]
     return "\n".join(out)
 
@@ -417,15 +430,18 @@ def diff(base: dict, cur: dict, story: str | None) -> str:
             else:
                 status = None
             if status:
-                out.append(f"| {label} {name} | "
-                           f"{fmt(scope_base, name, sb['value'])} | "
-                           f"{fmt(scope_cur, name, sc['value'])} | "
+                # round 32 S2: label (story id / TOTAL) and tok_cell
+                # reasons are free text — escape at insertion
+                out.append(f"| {_cell(label)} {_cell(name)} | "
+                           f"{_cell(fmt(scope_base, name, sb['value']))} | "
+                           f"{_cell(fmt(scope_cur, name, sc['value']))} | "
                            f"{status} |")
                 continue
             b, c = sb["value"], sc["value"]
             d = c - b
             pct = f" ({d / b * 100:+.0f}%)" if b else ""
-            out.append(f"| {label} {name} | {b:,} | {c:,} | {d:+,}{pct} |")
+            out.append(f"| {_cell(label)} {_cell(name)} "
+                       f"| {b:,} | {c:,} | {d:+,}{pct} |")
 
     if story:
         rows(base.get("per_story", {}).get(story, {}),

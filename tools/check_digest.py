@@ -83,6 +83,168 @@ DECL_KEYWORDS = frozenset({
 SHA_RE = r"[0-9a-f]{7,40}"
 
 
+def _trailing_signature(desc: str) -> tuple[str | None, bool]:
+    """Round 32 AG2: the member name of a trailing call signature.
+
+    Returns (name, ambiguous). `name` is the member identifier of a
+    trailing `NAME(…)`, `NAME<T>(…)`, or `NAME<Map<K,V>>(…)` form
+    (nested generic parameter lists supported; optional trailing `:`),
+    None when the description does not end in a call signature.
+    `ambiguous` is True when the description DOES end in parens but the
+    shape before them is not a plain (optionally generic) identifier —
+    an unsupported signature shape refuses by name instead of falling
+    through to a weaker token check.
+    """
+    m = re.search(r"\([^()]*\):?\s*$", desc)
+    if not m:
+        return None, False
+    head = desc[:m.start()].rstrip()
+    if head.endswith(">"):
+        # strip a BALANCED generic parameter list `<…>` (scan backwards,
+        # so nesting like `<Map<K,V>>` peels correctly)
+        depth = 0
+        cut = None
+        for i in range(len(head) - 1, -1, -1):
+            ch = head[i]
+            if ch == ">":
+                depth += 1
+            elif ch == "<":
+                depth -= 1
+                if depth == 0:
+                    cut = i
+                    break
+        if cut is None:
+            return None, True  # unbalanced `>` — unsupported shape
+        head = head[:cut].rstrip()
+    nm = re.search(r"([A-Za-z_]\w*)\s*$", head)
+    if nm is None:
+        # ends in parens but the head is not a plain identifier (e.g.
+        # `operator[](int)`, `items[0](x)`) — refuse, never guess
+        return None, True
+    return nm.group(1), False
+
+
+def anchor_symbols(desc: str) -> tuple[list[list[str]] | None, str | None]:
+    """Resolve a §4 anchor description to the symbol token(s) to check.
+
+    Round 32 S1 — the ACCEPTED description grammar (closed set; each
+    form checks the RIGHT symbol, every unsupported shape with a
+    declaration/assignment refuses BY NAME — never a silent weaker
+    check):
+
+    1. `NAME`                             → [NAME]
+    2. keyword-prefixed `NAME`            → [NAME] (leading
+       DECL_KEYWORDS skipped, R8-I4)
+    3. `TYPE NAME` (no parens, no `=`)    → two ordered groups:
+       [FIRST non-keyword symbol] (the frozen R8-I4 check), then
+       [LAST non-keyword symbol] (the declared-name position) — a
+       ghost in EITHER position flags, naming the offending symbol;
+       an all-keyword description degrades to the first two tokens
+       (one group, R8-I4)
+    4. `NAME(…)` / `NAME<T>(…)` /         → [NAME] (member identifier
+       `NAME<Map<K,V>>(…)`, optional       before the parens; generic
+       trailing `:`                        parameter lists stripped,
+       (R24-Y1, round 32 AG2)              nesting supported)
+    5. `[TYPE] NAME(…)` with keywords     → [NAME]
+    6. `NAME = init…`                     → [NAME] (declared name =
+       LAST identifier before the depth-0 `=`; R29 AD3/R30 AE1/R31 AF1)
+    7. `[TYPE] NAME = init…`              → [NAME]
+    8. `NAME: TYPE = init…`               → [NAME] (annotated
+       declaration, TYPE a plain identifier — the annotation is
+       stripped; round 32 AG1)
+
+    REFUSED BY NAME (named `ambiguous anchor symbol …` errors):
+    * multiple declarators — more than one depth-0 `=` (`a = 1, b = 2`)
+    * destructuring / subscript targets (`[a, b] = …`, `{a} = …`,
+      `items[0] = …`) — initializer-form refusal
+    * a non-plain annotated target (`items[0]: int = …`) —
+      annotated-declaration refusal
+    * a non-plain annotation TYPE (`x: Map<K,V> = …`) — falls to the
+      initializer-form refusal (gap between the last identifier and
+      the `=` is not whitespace)
+    * a trailing call signature whose head is not a plain (optionally
+      generic) identifier — signature-form refusal
+
+    Returns (check_groups, None) on resolution — an ordered list of
+    token groups, each ALL-of which must appear on the anchored line;
+    the FIRST failing group is the one reported — or (None, message) on
+    refusal. Callers only invoke this when the description has word
+    tokens.
+    """
+    # depth-0 `=` scan (R30 AE1: a `=` inside a parameter list is a
+    # default, not an assignment; R29 AD3 operator lookarounds keep
+    # `==`/`<=`/`+=`/… out). ALL depth-0 assignments are collected:
+    # more than one is a multiple-declarator form (S1) and refuses.
+    asg_positions: list[int] = []
+    depth = 0
+    for i, ch in enumerate(desc):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(depth - 1, 0)
+        elif (ch == "=" and depth == 0
+              and desc[i + 1:i + 2] != "="
+              and not re.match(r"[<>=!+\-*/&|^%]", desc[i - 1:i])):
+            asg_positions.append(i)
+    if len(asg_positions) > 1:
+        return None, ("ambiguous anchor symbol for multiple-declarator "
+                      f"form: {desc!r} — name one declared symbol per "
+                      "anchor")
+    if asg_positions:
+        asg = asg_positions[0]
+        head = desc[:asg]
+        # Round 32 AG1: an annotated declaration `TARGET : TYPE = init`
+        # (TYPE a plain identifier) checks the TARGET — the old last-
+        # identifier-before-`=` rule selected the TYPE (`Missing: int
+        # = 1` checked `int` and passed against `Existing: int = 1`).
+        ann = re.fullmatch(r"(.*?)\s*:\s*([A-Za-z_]\w*)\s*", head)
+        if ann:
+            pre = ann.group(1)
+            tgt = None
+            for tid in re.finditer(r"[A-Za-z_]\w*", pre):
+                tgt = tid
+            if tgt is not None and re.fullmatch(r"\s*", pre[tgt.end():]):
+                return [[tgt.group(0)]], None
+            # non-plain annotated target (`items[0]: int = …`) — refuse
+            return None, ("ambiguous anchor symbol for annotated "
+                          f"declaration: {desc!r} — name the declared "
+                          "symbol explicitly")
+        # R31 AF1: plain/typed initializer — declared name is the LAST
+        # identifier before the `=`, with ONLY whitespace in between;
+        # anything else (brackets, parens, operators) is ambiguous.
+        last_id = None
+        for mid in re.finditer(r"[A-Za-z_]\w*", head):
+            last_id = mid
+        if last_id is not None and \
+                re.fullmatch(r"\s*", head[last_id.end():asg]):
+            return [[last_id.group(0)]], None
+        return None, ("ambiguous anchor symbol for initializer "
+                      f"form: {desc!r} — name the declared symbol "
+                      "explicitly")
+    name, ambiguous = _trailing_signature(desc)
+    if ambiguous:
+        return None, ("ambiguous anchor symbol for signature "
+                      f"form: {desc!r} — name the declared symbol "
+                      "explicitly")
+    if name is not None:
+        return [[name]], None
+    # No signature, no assignment: two ordered groups (S1 form 3) —
+    # the FIRST non-keyword symbol (frozen R8-I4 check) and the LAST
+    # non-keyword symbol (the declared-name position). A ghost in
+    # either position flags and the first failing group is reported,
+    # so `public static Missing Bar` still reports ['Missing'] while
+    # a matching `public static Foo Bar` passes on both groups.
+    # All-keyword descriptions degrade to one group of the first two
+    # tokens (R8-I4).
+    tokens = re.findall(r"\w+", desc)
+    symbols = [t for t in tokens if t not in DECL_KEYWORDS]
+    if not symbols:
+        return [tokens[:2]], None
+    if symbols[0] == symbols[-1]:
+        return [[symbols[0]]], None
+    return [[symbols[0]], [symbols[-1]]], None
+
+
 def declared_base_sha(text: str) -> str | None:
     """The base sha the digest DECLARES, parsed with the digest-side
     rules of plan_checks.resolve_base_sha() (same ladder, digest rungs
@@ -274,97 +436,39 @@ def run_gate(root: Path, story: str, sha: str) -> list[str]:
                 continue
             tokens = re.findall(r"\w+", desc)
             if tokens:
-                # R24-Y1: a CALL-SIGNATURE description (`name(...)`,
-                # optionally with a trailing `:`) checks the MEMBER
-                # IDENTIFIER immediately before the `(` — an anchor
-                # `public static Widget MissingMethod()` must NOT pass
-                # against `public static Widget ExistingMethod()` on the
-                # strength of the shared return type alone.
-                # Round 29 AD3: an ASSIGNMENT / declaration-with-
-                # initializer form (`NAME = …`) is recognized FIRST —
-                # the checked symbol is the DECLARED NAME (first non-
-                # keyword token before the `=`), not the trailing
-                # initializer call. `export const Missing = makeWidget()`
-                # must NOT pass against `export const Existing =
-                # makeWidget()` on the shared initializer alone. The
-                # lookarounds keep comparison/compound operators
-                # (`==`, `<=`, `+=`, …) out of the assignment match.
-                # Round 30 AE1: the `=` must be a TOP-LEVEL initializer —
-                # one INSIDE a parameter list is a parameter DEFAULT, not
-                # an assignment. `public static Widget Missing(int n = 0)`
-                # used to select the return type `Widget` (first non-
-                # keyword token before the parameter-default `=`) and pass
-                # against a line declaring `Existing` with the same return
-                # type. Track paren depth across the description and
-                # consider only `=` at depth 0 (same R29 operator
-                # lookarounds); with no depth-0 `=`, fall through to the
-                # signature/member-name branch so `… Missing(int n = 0)`
-                # checks `Missing`.
-                asg = None
-                depth = 0
-                for i, ch in enumerate(desc):
-                    if ch == "(":
-                        depth += 1
-                    elif ch == ")":
-                        depth = max(depth - 1, 0)
-                    elif (ch == "=" and depth == 0
-                          and desc[i + 1:i + 2] != "="
-                          and not re.match(r"[<>=!+\-*/&|^%]",
-                                           desc[i - 1:i])):
-                        asg = i
-                        break
-                declared = None
-                ambiguous_init = False
-                if asg is not None:
-                    # Round 31 AF1: the declared name is the LAST
-                    # identifier token before the depth-0 `=`, not the
-                    # first non-keyword token — `public static Widget
-                    # Missing = makeWidget()` used to select the TYPE
-                    # `Widget` (lsyms[0]) and pass against a line
-                    # declaring `Existing = makeWidget()` of the same
-                    # type. Require ONLY whitespace between that last
-                    # identifier's end and the `=`; anything else in
-                    # between (brackets, parens, operators — e.g.
-                    # `items[0] = x`) makes the initializer form
-                    # AMBIGUOUS: refuse the anchor by name instead of
-                    # guessing a symbol.
-                    last_id = None
-                    for mid in re.finditer(r"[A-Za-z_]\w*", desc[:asg]):
-                        last_id = mid
-                    if last_id is None:
-                        ambiguous_init = True
-                    elif re.fullmatch(r"\s*", desc[last_id.end():asg]):
-                        declared = last_id.group(0)
-                    else:
-                        ambiguous_init = True
-                sig = re.search(r"(\w+)\s*\([^()]*\):?\s*$", desc)
-                if declared is not None:
-                    check = [declared]
-                elif ambiguous_init:
-                    errors.append("ambiguous anchor symbol for initializer "
-                                  f"form: {desc!r} — name the declared "
-                                  "symbol explicitly")
+                # Round 32 S1: the description→symbol resolution moved
+                # to anchor_symbols() — the closed ACCEPTED grammar
+                # (plain NAME; keyword-prefixed NAME; TYPE NAME;
+                # NAME(...)/NAME<T>(...) signatures; NAME = init;
+                # TYPE NAME = init; NAME: TYPE = init annotated
+                # declarations) with named refusals for every
+                # unsupported declaration/assignment shape (multiple
+                # declarators, destructuring/subscript targets,
+                # non-plain annotated targets, non-plain signature
+                # heads). History: R24-Y1 call signatures check the
+                # member identifier before the `(`; R29 AD3 the
+                # declared name wins over the trailing initializer;
+                # R30 AE1 a parameter default is not an assignment;
+                # R31 AF1 the declared name is the LAST identifier
+                # before the depth-0 `=`; round 32 AG1 an annotated
+                # declaration checks the TARGET (annotation stripped);
+                # round 32 AG2 generic parameter lists (`NAME<T>(...)`,
+                # nested `NAME<Map<K,V>>(...)`) are supported in the
+                # signature form.
+                check_groups, refusal = anchor_symbols(desc)
+                if refusal is not None or check_groups is None:
+                    errors.append(refusal or "ambiguous anchor symbol")
                     continue
-                elif sig:
-                    check = [sig.group(1)]
-                else:
-                    # R8-I4: skip leading declaration keywords/modifiers —
-                    # `async def missing_symbol` must NOT pass against
-                    # `async def existing():` because only the keyword
-                    # tokens were checked. The first remaining SYMBOL
-                    # token must appear on the line; when every token is
-                    # a keyword the check degrades to the old
-                    # first-two-tokens behavior.
-                    symbols = [t for t in tokens if t not in DECL_KEYWORDS]
-                    check = symbols[:1] if symbols else tokens[:2]
                 # R9-J2: COMPLETE token match, not substring — anchor
                 # `def total` must NOT pass against
                 # `def compute_total(items):` (a substring pass on an
                 # incorrect anchor would authorize planner dispatch).
                 line_tokens = set(re.findall(r"\w+", src_lines[lineno - 1]))
-                if not all(t in line_tokens for t in check):
-                    errors.append(f"anchor symbol not on line {lineno} of "
-                                  f"{path}: {check}")
+                for check in check_groups:
+                    if not all(t in line_tokens for t in check):
+                        errors.append(f"anchor symbol not on line {lineno} "
+                                      f"of {path}: {check}")
+                        break
 
     # 5. risk markers valid
     rk = re.search(r"## 7\. Risk list[ \t]*\n(.*?)(?=\n## 8\.)", text, re.S)

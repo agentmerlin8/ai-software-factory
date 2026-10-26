@@ -13,6 +13,30 @@
   "ruleset": {
     "error": "probe failed: ruleset — HTTP 403: upgrade required for ruleset reads"
   },
+  "ruleset@fixture-org/app": {
+    "rulesets": [
+      {
+        "id": 24744013,
+        "name": "protect-main-target",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "bypass_actors": [
+          {
+            "actor_type": "Integration",
+            "actor_id": 5239072,
+            "mode": "always"
+          }
+        ]
+      }
+    ]
+  },
   "labels": {
     "labels": [
       {

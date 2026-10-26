@@ -344,10 +344,13 @@ class VerifyBadHome(unittest.TestCase):
             # D2 missing scope read:org
             self.assertEqual(st["C-2"], ["FAIL"])
             self.assertIn("missing: read:org", detail_of(data, "C-2"))
-            # D3 ruleset read refused
+            # D3 ruleset read refused ON THE HOME + the target variant
+            # violation (Integration bypass on the bound target repo)
             self.assertEqual(st["C-3"], ["FAIL"])
             self.assertIn("enforcement unverified", detail_of(data, "C-3"))
             self.assertIn("never claimed as protection",
+                          detail_of(data, "C-3"))
+            self.assertIn("target app: carries a factory bypass",
                           detail_of(data, "C-3"))
             self.assertEqual(st["W-7"], ["FAIL"])
             # D4 Stage field removed from the board
@@ -405,10 +408,11 @@ class FailPathPerCheck(unittest.TestCase):
 
     def test_c1_fail_no_origin(self):
         self.assert_defect(["no-origin"], "C-1",
-                           ["no origin remote in the control home"])
+                           ["no origin remote on the control home"])
 
-    def test_c1_fail_binding_unreachable(self):
-        # dataset without the repo_view entry → cannot probe (fail closed)
+    def test_c1_fail_home_unreachable(self):
+        # dataset without the repo_view entry → the HOME probe cannot
+        # run (fail closed); C-1 probes the origin slug, never a binding
         with tempfile.TemporaryDirectory() as td:
             ds = Path(td) / "ds" / "ds.json"
             ds.parent.mkdir()
@@ -489,6 +493,110 @@ class FailPathPerCheck(unittest.TestCase):
         self.assertEqual(
             detail,
             "multiple integration bypasses — expected the factory bot only")
+
+    # -- C-3 Mode-2 target variant (tmp-mutated copies of DS_GOOD) ----------
+
+    def mutated_dataset(self, td, mutate):
+        """Write a tmp copy of DS_GOOD with `mutate(data)` applied."""
+        ds = Path(td) / "ds.json"
+        data = json.loads(DS_GOOD.read_text(encoding="utf-8"))
+        mutate(data)
+        with ds.open("w", encoding="utf-8", newline="\n") as fh:
+            json.dump(data, fh)
+        return ds
+
+    def test_c3_target_factory_bypass_fails(self):
+        def mutate(data):
+            data["ruleset@fixture-org/app"]["rulesets"][0][
+                "bypass_actors"] = [
+                {"actor_type": "Integration", "actor_id": 5239072,
+                 "mode": "always"}]
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn("target app: carries a factory bypass", detail)
+            self.assertIn("the bypass lives on the workspace repo only",
+                          detail)
+
+    def test_c3_target_no_ruleset_fails(self):
+        def mutate(data):
+            data["ruleset@fixture-org/app"] = {"rulesets": []}
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn("target app: no ruleset targeting main", detail)
+
+    def test_c3_target_not_enforcing_fails(self):
+        def mutate(data):
+            data["ruleset@fixture-org/app"]["rulesets"][0][
+                "enforcement"] = "disabled"
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn("target app: ruleset not enforcing", detail)
+            self.assertIn("enforcement='disabled'", detail)
+
+    def test_c3_home_ruleset_disabled_fails(self):
+        def mutate(data):
+            data["ruleset"]["rulesets"][0]["enforcement"] = "disabled"
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn("staged, not enforcing", detail)
+
+    def test_c3_good_home_pass_names_target_protection(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            rc, _out, jdata = verify_home(home)
+            self.assertEqual(rc, 0)
+            detail = detail_of(jdata, "C-3")
+            self.assertIn("active ruleset on main", detail)
+            self.assertIn("bypass = the factory bot only (1 Integration)",
+                          detail)
+            self.assertIn("targets: app standard protection ok", detail)
+
+    def test_home_scoped_probes_name_the_home_slug(self):
+        # C-1/C-4/C-5 probe the HOME slug (fixture-org/workspace), never
+        # the primary binding — the detail lines name the probed repo
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            rc, _out, jdata = verify_home(home)
+            self.assertEqual(rc, 0)
+            self.assertIn("repo_view(fixture-org/workspace) reachable",
+                          detail_of(jdata, "C-1"))
+            self.assertIn("fixture-org/workspace", detail_of(jdata, "C-4"))
+            self.assertIn("idea label on fixture-org/workspace",
+                          detail_of(jdata, "C-5"))
+
+    def test_no_binding_defect_is_w4_not_c1(self):
+        # binding reachability is W-4's job: when repo_view resolves ONLY
+        # the home slug (per-repo override), C-1 stays PASS (home-scoped)
+        # and W-4 FAILs naming the unreachable binding
+        def mutate(data):
+            data["repo_view@fixture-org/workspace"] = data.pop("repo_view")
+        with tempfile.TemporaryDirectory() as td:
+            ds = self.mutated_dataset(td, mutate)
+            home = make_home(Path(td) / "home")
+            rc, _out, jdata = verify_home(home, dataset=ds)
+            self.assertEqual(rc, 1)
+            c1 = next(r for r in jdata["checks"] if r["id"] == "C-1")
+            self.assertEqual(c1["status"], "PASS")
+            self.assertIn("repo_view(fixture-org/workspace)", c1["detail"])
+            w4 = next(r for r in jdata["checks"]
+                      if r["id"] == "W-4" and r["status"] == "FAIL")
+            self.assertIn("binding app unreachable", w4["detail"])
 
     def test_c4_fail_missing_labels(self):
         with tempfile.TemporaryDirectory() as td:

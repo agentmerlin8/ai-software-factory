@@ -524,15 +524,15 @@ def attest_status(ctx: Context, check_id: str) -> tuple[str, str]:
 # MUST appear here — validate_implementations() enforces the bijection.
 
 def check_c1(ctx: Context, row: dict) -> tuple[str, str]:
-    if not ctx.origin_url:
-        return FAIL, "no origin remote in the control home"
-    if not ctx.primary_url:
-        return FAIL, "no repo binding declared in workspace.toml"
+    # C-1 is a CONTROL-HOME check: the home repo (origin remote), not
+    # the primary binding (binding reachability is W-4's job).
+    if not ctx.origin_slug:
+        return FAIL, "no origin remote on the control home"
     try:
-        ctx.forge.repo_view(ctx.primary_url)
+        ctx.forge.repo_view(ctx.origin_slug)
     except FP.ProbeError as exc:
         return FAIL, cannot_probe(exc)
-    return PASS, f"origin {ctx.origin_slug}; repo_view({ctx.primary_url}) reachable"
+    return PASS, f"origin {ctx.origin_slug}; repo_view({ctx.origin_slug}) reachable"
 
 
 def check_c2(ctx: Context, row: dict) -> tuple[str, str]:
@@ -547,37 +547,92 @@ def check_c2(ctx: Context, row: dict) -> tuple[str, str]:
     return PASS, f"authenticated as {login} with scopes {', '.join(auth.get('scopes') or [])}"
 
 
+def target_ruleset_problem(ctx: Context, rid: str,
+                           url: str) -> Optional[str]:
+    """The C-3 Mode-2 target variant for ONE binding: require found +
+    enforcement == active + NO Integration bypass actor (the factory
+    bypass lives on the workspace repo only). Returns the named
+    violation, or None when the target is clean."""
+    try:
+        rs = ctx.forge.ruleset(url, ctx.default_branch)
+    except FP.ProbeError as exc:
+        return f"target {rid}: {cannot_probe(exc)}"
+    if rs.get("read") == "refused":
+        return (f"target {rid}: cannot probe: ruleset read refused "
+                f"({rs.get('error')})")
+    if not rs.get("found"):
+        return f"target {rid}: no ruleset targeting {ctx.default_branch}"
+    if rs.get("enforcement") != "active":
+        return (f"target {rid}: ruleset not enforcing "
+                f"(enforcement={rs.get('enforcement')!r})")
+    if any(b.get("actor_type") == "Integration"
+           for b in rs.get("bypass") or []):
+        return (f"target {rid}: carries a factory bypass — the bypass "
+                "lives on the workspace repo only")
+    return None
+
+
 def check_c3(ctx: Context, row: dict) -> tuple[str, str]:
-    return evaluate_ruleset(ctx, ctx.primary_url, "the primary binding")
+    """C-3 is a CONTROL-HOME check: the home repo's ruleset (frozen
+    wording kept) PLUS the Mode-2 target variant — when control_home is
+    dedicated, every bound target repo keeps standard protection with
+    NO factory bypass. ONE line; ALL problems joined `; ` (home first)."""
+    problems: list[str] = []
+    home_detail = ""
+    if not ctx.origin_slug:
+        problems.append("no origin remote on the control home")
+    else:
+        home_status, home_detail = evaluate_ruleset(
+            ctx, ctx.origin_slug, "the control home")
+        if home_status != PASS:
+            problems.append(home_detail)
+    evaluated: list[str] = []
+    if ctx.control_home == "dedicated":
+        for rid, url in ctx.repo_bindings:
+            problem = target_ruleset_problem(ctx, rid, url)
+            if problem:
+                problems.append(problem)
+            else:
+                evaluated.append(rid)
+    if problems:
+        return FAIL, "; ".join(problems)
+    if ctx.control_home == "dedicated" and evaluated:
+        home_detail += (f"; targets: {', '.join(evaluated)} "
+                        "standard protection ok")
+    return PASS, home_detail
 
 
 def check_c4(ctx: Context, row: dict) -> tuple[str, str]:
-    if not ctx.primary_url:
-        return FAIL, "no repo binding declared in workspace.toml"
+    # C-4 is a CONTROL-HOME check: labels on the home repo.
+    if not ctx.origin_slug:
+        return FAIL, "no origin remote on the control home"
     required = base_label_names(ctx.registry)
     try:
-        probe = ctx.forge.labels(ctx.primary_url, required)
+        probe = ctx.forge.labels(ctx.origin_slug, required)
     except FP.ProbeError as exc:
         return FAIL, cannot_probe(exc)
     missing = probe.get("missing") or []
     if missing:
         return FAIL, f"missing: {', '.join(missing)}"
-    return PASS, f"all {len(required)} base labels present"
+    return PASS, f"all {len(required)} base labels present on {ctx.origin_slug}"
 
 
 def check_c5(ctx: Context, row: dict) -> tuple[str, str]:
+    # C-5 is a CONTROL-HOME check: form file + the idea label on the
+    # home repo.
     form = ctx.home / ".github" / "ISSUE_TEMPLATE" / ctx.registry["issue_form"]
     if not form.is_file():
         return FAIL, f"missing .github/ISSUE_TEMPLATE/{ctx.registry['issue_form']}"
-    if not ctx.primary_url:
-        return FAIL, "no repo binding declared in workspace.toml"
+    if not ctx.origin_slug:
+        return FAIL, "no origin remote on the control home"
     try:
-        probe = ctx.forge.labels(ctx.primary_url, ["idea"])
+        probe = ctx.forge.labels(ctx.origin_slug, ["idea"])
     except FP.ProbeError as exc:
         return FAIL, cannot_probe(exc)
     if probe.get("missing"):
         return FAIL, "missing: idea label on the forge"
-    return PASS, f"{ctx.registry['issue_form']} present; idea label on the forge"
+    return PASS, (f"{ctx.registry['issue_form']} present; idea label on "
+                  f"{ctx.origin_slug}")
 
 
 def check_c6(ctx: Context, row: dict) -> tuple[str, str]:
@@ -760,8 +815,11 @@ def check_w6(ctx: Context, row: dict) -> tuple[str, str]:
 
 
 def check_w7(ctx: Context, row: dict) -> tuple[str, str]:
-    repo = ctx.origin_slug or ctx.primary_url
-    return evaluate_ruleset(ctx, repo, "the control-home repo")
+    # W-7 probes the control-home repo ONLY (origin remote; no primary
+    # fallback — the home repo is the surface).
+    if not ctx.origin_slug:
+        return FAIL, "no origin remote on the control home"
+    return evaluate_ruleset(ctx, ctx.origin_slug, "the control-home repo")
 
 
 def check_w8(ctx: Context, row: dict) -> tuple[str, str]:

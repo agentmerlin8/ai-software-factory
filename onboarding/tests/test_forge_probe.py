@@ -407,6 +407,70 @@ class TestFixtureDatasets(unittest.TestCase):
         self.assertTrue(issubclass(FP.ProbeError, ValueError))
 
 
+class TestFixturePerRepoOverrides(unittest.TestCase):
+    """Per-repo override keys "<op>@<slug>" in fixture datasets."""
+
+    DATASET = {
+        "ruleset": {"rulesets": [{
+            "id": 1, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "bypass_actors": [{"actor_type": "Integration",
+                               "actor_id": 9, "mode": "always"}]}]},
+        "ruleset@fixture-org/app": {"rulesets": [{
+            "id": 2, "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+            "bypass_actors": []}]},
+    }
+
+    def _forge(self, data, tmp):
+        ds = Path(tmp) / "ds.json"
+        ds.write_text(json.dumps(data), encoding="utf-8")
+        return FP.Forge.from_fixture(ds)
+
+    def test_override_wins_for_matching_repo_host_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            forge = self._forge(self.DATASET, tmp)
+            result = forge.ruleset("github.com/fixture-org/app", "main")
+        self.assertEqual(result["bypass"], [])  # override (no bypass)
+
+    def test_override_wins_for_matching_repo_slug_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            forge = self._forge(self.DATASET, tmp)
+            result = forge.ruleset("fixture-org/app", "main")
+        self.assertEqual(result["bypass"], [])
+
+    def test_default_used_when_no_override_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            forge = self._forge(self.DATASET, tmp)
+            result = forge.ruleset("fixture-org/workspace", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["bypass"][0]["actor_type"], "Integration")
+
+    def test_override_with_git_suffix_stripped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            forge = self._forge(self.DATASET, tmp)
+            result = forge.ruleset(
+                "https://github.com/fixture-org/app.git", "main")
+        self.assertEqual(result["bypass"], [])
+
+    def test_unknown_base_op_in_override_refused_at_load(self):
+        data = {"bogus_op@fixture-org/app": {"rulesets": []}}
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(FP.FixtureError) as ctx:
+                self._forge(data, tmp)
+            self.assertIn("unknown base op", str(ctx.exception))
+
+    def test_existing_datasets_behavior_unchanged(self):
+        # no @-keys in the pre-existing datasets → same lookups as before
+        for name in ("complete.json", "partial.json", "refused.json"):
+            data = json.loads(
+                (FIXTURES / name).read_text(encoding="utf-8"))
+            self.assertFalse(any("@" in k for k in data), name)
+        forge = FP.Forge.from_fixture(FIXTURES / "complete.json")
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertEqual(result["enforcement"], "active")
+
+
 class TestHouseLaws(unittest.TestCase):
     def test_module_imports_stdlib_only(self):
         for name, value in vars(FP).items():

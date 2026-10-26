@@ -61,6 +61,17 @@ Fixture dataset schema (frozen; used by Forge.from_fixture):
   ProbeError("fixture has no entry for op: <op>"). Malformed JSON or a
   non-object dataset raises FixtureError at load time.
 
+  Per-repo override keys: an op entry may also appear as
+  "<op>@<slug>" where <slug> is the last two path segments of the
+  call's params["repo"], normalized from BOTH accepted shapes
+  (`github.com/fixture-org/app` -> `fixture-org/app`;
+  `fixture-org/workspace` -> `fixture-org/workspace`; an https URL's
+  scheme/host and a trailing `.git` are stripped first). Lookup order
+  at call time: "<op>@<slug>" -> "<op>" -> the existing missing-entry
+  refusal. An override key whose base (the part before `@`) is not a
+  known op is a FixtureError at load time (a malformed dataset is
+  never silently ignored).
+
 Stdlib only. Python >= 3.11. Deterministic: no wall-clock, no randomness.
 """
 from __future__ import annotations
@@ -262,11 +273,30 @@ _FIXTURE_KEYS = ("auth_scopes", "repo_view", "ruleset", "labels",
                  "issue_form", "project", "label_ensure")
 
 
+def fixture_repo_slug(repo: Any) -> Optional[str]:
+    """Normalize a params['repo'] value to the override `<slug>`:
+    the last two non-empty path segments (`github.com/fixture-org/app`
+    -> `fixture-org/app`; `fixture-org/workspace` -> itself; a trailing
+    `.git` suffix is stripped). No two segments -> None (no override)."""
+    if not isinstance(repo, str) or not repo:
+        return None
+    parts = [p for p in repo.split("/") if p]
+    if len(parts) < 2:
+        return None
+    slug = "/".join(parts[-2:])
+    if slug.endswith(".git"):
+        slug = slug[: -len(".git")]
+    return slug or None
+
+
 def build_fixture_transport(path: str | Path) -> Callable[[str, dict], dict]:
     """Load a fixture dataset (§ docstring schema) and return a transport
     backed by it. Malformed JSON / non-object dataset / non-object entry
-    -> FixtureError; missing op entry -> ProbeError at call time; an
-    {"error": ...} entry raises ProbeError with that named detail."""
+    -> FixtureError; an override key ("<op>@<slug>") with an unknown
+    base op -> FixtureError at load time; missing op entry -> ProbeError
+    at call time; an {"error": ...} entry raises ProbeError with that
+    named detail. Lookup order: "<op>@<slug>" (slug from params['repo'],
+    § fixture_repo_slug) -> "<op>" -> the missing-entry refusal."""
     p = Path(path)
     try:
         raw = p.read_text(encoding="utf-8")
@@ -284,13 +314,23 @@ def build_fixture_transport(path: str | Path) -> Callable[[str, dict], dict]:
             raise FixtureError(
                 f"fixture dataset malformed: {p} — entry for '{key}' "
                 "must be an object")
+        if isinstance(key, str) and "@" in key:
+            base_op = key.split("@", 1)[0]
+            if base_op not in _FIXTURE_KEYS:
+                raise FixtureError(
+                    f"fixture dataset malformed: {p} — override key "
+                    f"'{key}' has unknown base op '{base_op}'")
 
     def transport(op: str, params: dict) -> dict:
         if op not in _FIXTURE_KEYS:
             raise ProbeError(f"fixture has no entry for op: {op}")
-        if op not in data:
+        key = op
+        slug = fixture_repo_slug(params.get("repo"))
+        if slug and f"{op}@{slug}" in data:
+            key = f"{op}@{slug}"
+        elif op not in data:
             raise ProbeError(f"fixture has no entry for op: {op}")
-        entry = data[op]
+        entry = data[key]
         if "error" in entry:
             raise ProbeError(str(entry["error"]))
         return entry

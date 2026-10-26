@@ -34,6 +34,24 @@
       }
     ]
   },
+  "ruleset@fixture-org/app": {
+    "rulesets": [
+      {
+        "id": 24744013,
+        "name": "protect-main-target",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "bypass_actors": []
+      }
+    ]
+  },
   "labels": {
     "labels": [
       {

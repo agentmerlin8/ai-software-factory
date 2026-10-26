@@ -22,3 +22,5 @@ jobs:
           templates/workspace/workspace.toml
           templates/workspace/environments/local.toml
           templates/workspace/environments/github.toml
+      - name: Genericization tripwire (banned-token sweep)
+        run: python3 tools/check_genericization.py

@@ -85,19 +85,45 @@ class ContractParseError(ValueError):
 # ------------------------------------------------------------ yaml subset ---
 
 def _strip_comment(line: str) -> str:
-    out, in_s, quote = [], False, ""
-    for ch in line:
+    """Strip a trailing `#` comment, YAML quote rules applied:
+
+    * `#` starts a comment only OUTSIDE a quoted scalar AND only at
+      start-of-token (beginning of line or preceded by whitespace), so
+      embedded hashes in plain scalars survive (`test_x[case#1]`, `x#y`).
+    * Inside a DOUBLE-quoted scalar a backslash escapes the next
+      character (the R17 decoder set), so `\"` does not close the
+      scalar and a `#` after it is still quoted text. Escape
+      VALIDATION stays in _decode_double_quoted — the scanner only
+      pairs characters, so an unsupported escape is still refused by
+      name at decode time, never silently mis-scanned here.
+    * Inside a SINGLE-quoted scalar only `''` doubling applies; the
+      open/close toggle handles it symmetrically (backslashes are
+      literal there, per YAML).
+    """
+    out: list[str] = []
+    in_s, quote, prev_ws = False, "", True
+    i = 0
+    while i < len(line):
+        ch = line[i]
         if in_s:
             out.append(ch)
+            if quote == '"' and ch == "\\" and i + 1 < len(line):
+                out.append(line[i + 1])
+                i += 2
+                prev_ws = False
+                continue
             if ch == quote:
                 in_s = False
-        elif ch in "\"'":
-            in_s, quote = True, ch
-            out.append(ch)
-        elif ch == "#":
+            i += 1
+            prev_ws = False
+            continue
+        if ch == "#" and prev_ws:
             break
-        else:
-            out.append(ch)
+        out.append(ch)
+        if ch in "\"'":
+            in_s, quote = True, ch
+        prev_ws = ch.isspace()
+        i += 1
     return "".join(out).rstrip()
 
 
@@ -159,12 +185,26 @@ def _scalar(tok: str) -> Any:
 
 
 def _split_flow(s: str) -> list[str]:
+    """Split a flow-sequence body on top-level commas. Quote rules match
+    _strip_comment: inside a DOUBLE-quoted scalar a backslash escapes the
+    next character (`\"` does not close the scalar, so commas and
+    brackets inside it never split); SINGLE-quoted scalars close on the
+    quote (`''` doubling toggles symmetrically); nested `[ ]`/`{ }`
+    raise the depth so their commas do not split. Each element survives
+    verbatim to _scalar for decoding."""
     parts, depth, in_s, quote, cur = [], 0, False, "", []
-    for ch in s:
+    i = 0
+    while i < len(s):
+        ch = s[i]
         if in_s:
             cur.append(ch)
+            if quote == '"' and ch == "\\" and i + 1 < len(s):
+                cur.append(s[i + 1])
+                i += 2
+                continue
             if ch == quote:
                 in_s = False
+            i += 1
             continue
         if ch in "\"'":
             in_s, quote = True, ch
@@ -180,23 +220,43 @@ def _split_flow(s: str) -> list[str]:
             cur = []
         else:
             cur.append(ch)
+        i += 1
     if cur:
         parts.append("".join(cur))
     return [p.strip() for p in parts]
 
 
-_MAP_KV_RE = re.compile(r"([^:]+):(?:\s+(.*))?$")
-
-
 def _mapping_split(content: str) -> tuple[str, str] | None:
-    """(key, rest) when `content` is a YAML key/value line — a colon counts
-    as a mapping separator only when followed by whitespace or
-    end-of-item, so colons INSIDE scalars (e.g. `pytest a.py::test_x`)
-    never split. None when it is not a mapping line."""
-    m = _MAP_KV_RE.match(content)
-    if not m:
-        return None
-    return m.group(1).strip(), (m.group(2) or "").strip()
+    """(key, rest) when `content` is a YAML key/value line — a colon
+    counts as a mapping separator only when it sits OUTSIDE a quoted
+    scalar (quote/escape rules match _strip_comment: `\"` does not close
+    a double-quoted scalar; `''` doubling toggles a single-quoted one)
+    AND is followed by whitespace or end-of-line, so colons INSIDE
+    scalars (e.g. `pytest a.py::test_x`, `text: "a: b"`, or a quoted
+    key containing `": "`) never split at the wrong point. None when
+    it is not a mapping line. Keys in this subset are plain scalars;
+    a quoted key is returned verbatim (quotes kept) — the scanner only
+    guarantees the split point is outside quotes."""
+    in_s, quote = False, ""
+    i = 0
+    while i < len(content):
+        ch = content[i]
+        if in_s:
+            if quote == '"' and ch == "\\" and i + 1 < len(content):
+                i += 2
+                continue
+            if ch == quote:
+                in_s = False
+        elif ch in "\"'":
+            in_s, quote = True, ch
+        elif ch == ":" and (i + 1 >= len(content)
+                            or content[i + 1].isspace()):
+            key = content[:i].strip()
+            if not key:
+                return None
+            return key, content[i + 1:].strip()
+        i += 1
+    return None
 
 
 def parse_yaml_subset(text: str) -> Any:

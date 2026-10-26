@@ -166,6 +166,85 @@ class TestYamlSubset(unittest.TestCase):
         c = extract()
         self.assertEqual(C.validate_contract(c), [])
 
+    # ---- round-33 AH1: escaped quotes vs comment stripping
+    def test_escaped_quote_keeps_hash_in_double_quoted_scalar(self):
+        val = C.parse_yaml_subset(
+            'cmd: "python3 -c \\"print(1) # comment\\"" # trailing\n')
+        self.assertEqual(val["cmd"], 'python3 -c "print(1) # comment"')
+
+    def test_hash_outside_quotes_still_strips(self):
+        val = C.parse_yaml_subset("a: plain # comment\nb: 2  #c\n")
+        self.assertEqual(val, {"a": "plain", "b": 2})
+
+    def test_hash_in_single_quotes_survives(self):
+        val = C.parse_yaml_subset("a: 'a # b'\n")
+        self.assertEqual(val["a"], "a # b")
+
+    def test_full_comment_only_line_stripped(self):
+        self.assertEqual(
+            C.parse_yaml_subset("a: 1\n# whole-line comment\nb: 2\n"),
+            {"a": 1, "b": 2})
+
+    # ---- round-33 AH2: embedded `#` in plain scalars
+    def test_embedded_hash_in_plain_scalar_preserved(self):
+        val = C.parse_yaml_subset(
+            "verify_commands:\n"
+            "  - python3 -m pytest tests/t.py::test_refusal[case#1]\n")
+        self.assertEqual(
+            val["verify_commands"],
+            ["python3 -m pytest tests/t.py::test_refusal[case#1]"])
+
+    def test_start_of_token_hash_still_strips(self):
+        val = C.parse_yaml_subset("a: value # comment\n")
+        self.assertEqual(val["a"], "value")
+
+    def test_mid_token_hash_preserved(self):
+        val = C.parse_yaml_subset("a: x#y\n")
+        self.assertEqual(val["a"], "x#y")
+
+    # ---- round-33 AH3: flow-sequence element splitting
+    def test_flow_element_with_escaped_quote_and_comma_survives(self):
+        val = C.parse_yaml_subset(
+            'verify_commands: ["python3 -c \\"print(1, 2)\\""]\n')
+        self.assertEqual(val["verify_commands"],
+                         ['python3 -c "print(1, 2)"'])
+
+    def test_flow_comma_inside_single_quotes_never_splits(self):
+        val = C.parse_yaml_subset("f: ['a, b', c]\n")
+        self.assertEqual(val["f"], ["a, b", "c"])
+
+    def test_flow_multiple_plain_elements_still_split(self):
+        val = C.parse_yaml_subset("f: [a, b, 3]\n")
+        self.assertEqual(val["f"], ["a", "b", 3])
+
+    def test_flow_nested_brackets_respected(self):
+        val = C.parse_yaml_subset("f: [[1, 2], 3]\n")
+        self.assertEqual(val["f"], [[1, 2], 3])
+
+    # ---- round-33 sweep: _mapping_split quote awareness
+    def test_colon_inside_double_quoted_value_not_a_split_point(self):
+        # the value itself holds `: ` — the split must happen at the
+        # FIRST outside-quote colon, leaving the value intact
+        val = C.parse_yaml_subset('text: "a: b"\n')
+        self.assertEqual(val["text"], "a: b")
+
+    def test_escaped_quote_then_colon_in_value(self):
+        val = C.parse_yaml_subset('cmd: "say \\"x\\": y"\n')
+        self.assertEqual(val["cmd"], 'say "x": y')
+
+    def test_quoted_key_colon_inside_quotes_not_split(self):
+        # quoted key containing ': ' — split lands on the key's closing
+        # quote + real colon, key returned verbatim (quotes kept: this
+        # subset has no quoted-key decoding; the guarantee is the split
+        # point is outside quotes)
+        val = C.parse_yaml_subset('"a: b": 1\n')
+        self.assertEqual(val['"a: b"'], 1)
+
+    def test_dash_line_quoted_item_never_mapping(self):
+        val = C.parse_yaml_subset(
+            'items:\n  - "key: value"\n  - plain: real\n')
+        self.assertEqual(val["items"], ["key: value", {"plain": "real"}])
+
 
 class TestValidate(unittest.TestCase):
     def test_valid_minimal(self):

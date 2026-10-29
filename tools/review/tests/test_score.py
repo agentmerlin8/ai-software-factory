@@ -72,6 +72,11 @@ def case_file(path: Path, case_id: str, title: str, artifact: str, expected: lis
     return path
 
 
+def strict(metrics: dict) -> dict:
+    """Strict metrics only; the additive location block is asserted separately."""
+    return {key: value for key, value in metrics.items() if key != "location"}
+
+
 class SyntheticBench:
     """A 3-case bench: one expected major found, one missed, one clean."""
 
@@ -134,7 +139,7 @@ class ScoringTests(unittest.TestCase):
 
     def test_lens_adversary_metrics_exact(self):
         self.assertEqual(
-            self._report()["lenses"]["review-adversary"],
+            strict(self._report()["lenses"]["review-adversary"]),
             {
                 "produced": 2,
                 "matched": 1,
@@ -154,7 +159,7 @@ class ScoringTests(unittest.TestCase):
 
     def test_lens_security_metrics_exact(self):
         self.assertEqual(
-            self._report()["lenses"]["review-security"],
+            strict(self._report()["lenses"]["review-security"]),
             {
                 "produced": 1,
                 "matched": 1,
@@ -175,7 +180,7 @@ class ScoringTests(unittest.TestCase):
     def test_combined_union_metrics_exact(self):
         report = self._report()
         self.assertEqual(
-            report["combined"],
+            strict(report["combined"]),
             {
                 "produced": 3,
                 "matched": 2,
@@ -277,7 +282,7 @@ class ScoringTests(unittest.TestCase):
             "review-security"
         ]
         self.assertEqual(
-            metrics,
+            strict(metrics),
             {
                 "produced": 0,
                 "matched": 0,
@@ -552,6 +557,36 @@ class RealBenchTests(unittest.TestCase):
                 lines = text.splitlines()
                 self.assertGreaterEqual(len(lines), 15, path)
                 self.assertLessEqual(len(lines), 45, path)
+
+
+class LocationMetricsTests(unittest.TestCase):
+    """Detection at (case, file) granularity, independent of tag choice."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.bench = SyntheticBench(Path(self._tmp.name) / "synth")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_location_block_adversary(self) -> None:
+        loc = self.bench.evaluate()["lenses"]["review-adversary"]["location"]
+        self.assertEqual(loc["produced"], 2)
+        self.assertEqual(loc["expected"], 2)
+        self.assertEqual(loc["detected"], 1)          # s1 found at the right file
+        self.assertEqual(loc["detection_recall"], 0.5)
+        self.assertEqual(loc["detection_precision"], 0.5)  # the s3 finding is noise
+        self.assertEqual(loc["critical_major_detected"], 1)
+        self.assertEqual(loc["critical_major_detection_recall"], 0.5)
+        self.assertEqual(loc["dimension_agreement"], 1.0)
+        self.assertEqual(loc["severity_agreement"], 1.0)
+
+    def test_location_combined_covers_both_defects(self) -> None:
+        loc = self.bench.evaluate()["combined"]["location"]
+        self.assertEqual(loc["detected"], 2)
+        self.assertEqual(loc["detection_recall"], 1.0)
+        self.assertEqual(loc["critical_major_detection_recall"], 1.0)
+        self.assertEqual(loc["detection_precision"], 0.6667)
 
 
 class MinorOnlyCaseTests(unittest.TestCase):

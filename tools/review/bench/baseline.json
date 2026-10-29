@@ -1,0 +1,136 @@
+{
+  "bench": {
+    "base_sha": "f4e140f4965a7e5ea13a4a1fe879fe604878d353",
+    "cases": 17,
+    "fixture": "bench artifacts only, materialized in a scratch git repo; case JSON with expected findings excluded from the package",
+    "head_sha": "ac4b7619e554c339cd95964a9d3293d3849dd6f3",
+    "package_sha256": "20cbd558789e41372395ef4cefc8589a880589cadc48344072a09a5cee816e1c"
+  },
+  "frozen": "2026-10-28",
+  "metric_note": "strict = case+file+dimension match; location = case+file detection with dimension/severity agreement reported separately",
+  "models": {
+    "review-adversary": "qwen3.8-max",
+    "review-contract": "qwen3.8-max",
+    "review-security": "qwen3.8-max"
+  },
+  "report": {
+    "cases": 17,
+    "combined": {
+      "approval_escape_rate": 0.0,
+      "approval_escapes": 0,
+      "clean_cases": 2,
+      "critical_major_expected": 14,
+      "critical_major_matched": 13,
+      "critical_major_recall": 0.9286,
+      "defective_cases": 13,
+      "location": {
+        "critical_major_detected": 14,
+        "critical_major_detection_recall": 1.0,
+        "critical_major_expected": 14,
+        "detected": 15,
+        "detection_precision": 0.3125,
+        "detection_recall": 0.9375,
+        "dimension_agreement": 0.9333,
+        "expected": 16,
+        "produced": 48,
+        "severity_agreement": 1.0
+      },
+      "matched": 14,
+      "precision": 0.2917,
+      "produced": 48,
+      "recall": 0.875,
+      "unnecessary_revision_rate": 0.0,
+      "unnecessary_revisions": 0
+    },
+    "lenses": {
+      "review-adversary": {
+        "approval_escape_rate": 0.0,
+        "approval_escapes": 0,
+        "clean_cases": 2,
+        "critical_major_expected": 14,
+        "critical_major_matched": 10,
+        "critical_major_recall": 0.7143,
+        "defective_cases": 13,
+        "location": {
+          "critical_major_detected": 14,
+          "critical_major_detection_recall": 1.0,
+          "critical_major_expected": 14,
+          "detected": 15,
+          "detection_precision": 0.6364,
+          "detection_recall": 0.9375,
+          "dimension_agreement": 0.6667,
+          "expected": 16,
+          "produced": 22,
+          "severity_agreement": 1.0
+        },
+        "matched": 10,
+        "precision": 0.4545,
+        "produced": 22,
+        "recall": 0.625,
+        "unnecessary_revision_rate": 0.0,
+        "unnecessary_revisions": 0
+      },
+      "review-contract": {
+        "approval_escape_rate": 0.2308,
+        "approval_escapes": 3,
+        "clean_cases": 2,
+        "critical_major_expected": 14,
+        "critical_major_matched": 2,
+        "critical_major_recall": 0.1429,
+        "defective_cases": 13,
+        "location": {
+          "critical_major_detected": 11,
+          "critical_major_detection_recall": 0.7857,
+          "critical_major_expected": 14,
+          "detected": 14,
+          "detection_precision": 1.0,
+          "detection_recall": 0.875,
+          "dimension_agreement": 0.2143,
+          "expected": 16,
+          "produced": 13,
+          "severity_agreement": 0.9286
+        },
+        "matched": 3,
+        "precision": 0.2308,
+        "produced": 13,
+        "recall": 0.1875,
+        "unnecessary_revision_rate": 0.0,
+        "unnecessary_revisions": 0
+      },
+      "review-security": {
+        "approval_escape_rate": 0.3077,
+        "approval_escapes": 4,
+        "clean_cases": 2,
+        "critical_major_expected": 14,
+        "critical_major_matched": 6,
+        "critical_major_recall": 0.4286,
+        "defective_cases": 13,
+        "location": {
+          "critical_major_detected": 9,
+          "critical_major_detection_recall": 0.6429,
+          "critical_major_expected": 14,
+          "detected": 10,
+          "detection_precision": 0.7692,
+          "detection_recall": 0.625,
+          "dimension_agreement": 0.6,
+          "expected": 16,
+          "produced": 13,
+          "severity_agreement": 1.0
+        },
+        "matched": 6,
+        "precision": 0.4615,
+        "produced": 13,
+        "recall": 0.375,
+        "unnecessary_revision_rate": 0.0,
+        "unnecessary_revisions": 0
+      }
+    },
+    "schema": "review.bench.v1"
+  },
+  "rubric_versions": {
+    "review-adversary": "review-adversary-v1",
+    "review-contract": "review-contract-v1",
+    "review-security": "review-security-v1"
+  },
+  "schema": "review.bench.baseline.v1"
+}

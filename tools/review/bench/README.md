@@ -129,6 +129,30 @@ printed (metrics are data — zero matches is still exit 0), `1`
 unreadable/invalid input, `2` usage errors. A findings document whose
 author (`review.reviewer`) disagrees with the `ROLE=` label is refused.
 
+## Frozen baseline (2026-10-28)
+
+All three lenses ran on `qwen3.8-max` against the bench package `20cbd558…` (17 cases: 13 defective, 2 minor-only,
+2 clean). The machine copy is `baseline.json`.
+
+| lens | produced | strict precision | strict CM recall | detection recall | detection precision | CM detection recall | dimension agreement | unnecessary revision | escape rate |
+|---|---|---|---|---|---|---|---|---|---|
+| review-contract | 13 | 0.2308 | 0.1429 | 0.8750 | 1.0000 | 0.7857 | 0.2143 | 0.0 | 0.2308 |
+| review-adversary | 22 | 0.4545 | 0.7143 | 0.9375 | 0.6364 | 1.0000 | 0.6667 | 0.0 | 0.0 |
+| review-security | 13 | 0.4615 | 0.4286 | 0.6250 | 0.7692 | 0.6429 | 0.6000 | 0.0 | 0.3077 |
+| combined | 48 | 0.2917 | 0.9286 | 0.9375 | 0.3125 | 1.0000 | 0.9333 | 0.0 | 0.0 |
+
+Reading it honestly:
+
+- **Combined critical/major detection recall is 1.0** — every blocker/major defect in the seed set was raised by at
+  least one lens at the correct artifact. That is the property the lane exists to hold.
+- **Combined detection precision is 0.31** — 48 produced findings for 16 expected. The panel is voluminous; the lane
+  must not be sold as low-noise. Volume is the cost of the three-lens union.
+- **Strict recall understates detection** because dimensions are lens-dependent: the contract lens reports the true
+  defect at the right file but tags it `contract_fidelity` (dimension agreement 0.21). Strict metrics measure tag
+  choice; promote changes against the detection block first and treat dimension agreement as a separate target.
+- No lens produced an unnecessary revision on the clean controls; each lens individually escapes on some defective
+  case, and the union closes all of them — that is why the panel is three lenses and not one.
+
 ## Refreshing the baseline
 
 `baseline.json` is not written by the scorer — the orchestrator stores

@@ -371,6 +371,7 @@ def evaluate(
         lens_metrics[role] = _metrics(
             cases, expected_index, produced, matched, _critical_ids(produced)
         )
+        lens_metrics[role]["location"] = _location_metrics(cases, produced)
         lens_matched[role] = matched
         lens_critical[role] = _critical_ids(produced)
         all_produced.extend(produced)
@@ -380,6 +381,7 @@ def evaluate(
         matched_union |= lens_matched[role]
         critical_union |= lens_critical[role]
     combined = _metrics(cases, expected_index, all_produced, matched_union, critical_union)
+    combined["location"] = _location_metrics(cases, all_produced)
     decisions = {
         case_id: ("CHANGES_REQUESTED" if case_id in critical_union else "APPROVED")
         for case_id in sorted(cases)
@@ -394,6 +396,72 @@ def evaluate(
         "defective_cases_map": {case_id: case.defective for case_id, case in cases.items()},
     }
 
+
+_SEVERITY_ORDER = ("info", "minor", "major", "blocker")
+
+
+def _location_metrics(cases: dict[str, BenchCase],
+                      produced: list[Produced]) -> dict:
+    """Detection metrics at (case, artifact-file) granularity.
+
+    The strict metrics above require the rubric dimension to agree, which
+    measures tag choice as much as detection: the same defect reported under
+    a neighbouring lens's dimension counts as a miss there. This block asks
+    the narrower question the lane actually owes — did some lens raise a
+    finding at the right artifact? — and reports dimension/severity
+    agreement separately.
+    """
+    expected_at: dict[tuple[str, str], list] = {}
+    for case in cases.values():
+        for item in case.expected:
+            expected_at.setdefault((case.id, item.tail), []).append(item)
+    produced_at: dict[tuple[str, str], list] = {}
+    for finding in produced:
+        if finding.case_id is None or finding.tail is None:
+            continue
+        produced_at.setdefault((finding.case_id, finding.tail), []).append(finding)
+
+    expected_total = sum(len(items) for items in expected_at.values())
+    cm_expected = sum(
+        1 for items in expected_at.values() for item in items
+        if item.severity in CRITICAL_MAJOR
+    )
+    true_positive = 0
+    for key, items in produced_at.items():
+        true_positive += min(len(items), len(expected_at.get(key, [])))
+    detected = cm_detected = dim_ok = sev_ok = 0
+    for key, items in expected_at.items():
+        here = produced_at.get(key, [])
+        if not here:
+            continue
+        for expected in items:
+            detected += 1
+            if expected.severity in CRITICAL_MAJOR and any(
+                finding.severity in CRITICAL_MAJOR for finding in here
+            ):
+                cm_detected += 1
+            if any(finding.rubric_dimension == expected.rubric_dimension
+                   for finding in here):
+                dim_ok += 1
+            idx = _SEVERITY_ORDER.index(expected.severity)
+            adjacent = {_SEVERITY_ORDER[i] for i in (idx - 1, idx, idx + 1)
+                        if 0 <= i < len(_SEVERITY_ORDER)}
+            if any(finding.severity in adjacent for finding in here):
+                sev_ok += 1
+    return {
+        "produced": len(produced),
+        "expected": expected_total,
+        "detected": detected,
+        "detection_recall": round(detected / expected_total, 4) if expected_total else 0.0,
+        "detection_precision": (round(true_positive / len(produced), 4)
+                                if produced else 0.0),
+        "critical_major_expected": cm_expected,
+        "critical_major_detected": cm_detected,
+        "critical_major_detection_recall": (round(cm_detected / cm_expected, 4)
+                                            if cm_expected else 0.0),
+        "dimension_agreement": round(dim_ok / detected, 4) if detected else 0.0,
+        "severity_agreement": round(sev_ok / detected, 4) if detected else 0.0,
+    }
 
 # -- rendering -------------------------------------------------------------
 

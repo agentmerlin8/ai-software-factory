@@ -100,6 +100,10 @@ Packaging note: package `cases/artifacts/**` for the lenses; never ship
 | `approval_escapes` | defective cases with no produced blocker/major |
 | `approval_escape_rate` | approval_escapes / defective_cases |
 
+Minor-only cases are approvable under the verdict policy: they count toward neither
+`defective_cases` (escape denominator) nor `clean_cases` (unnecessary-revision
+denominator). They still count in `recall` and in severity discipline.
+
 Rates are rounded to 4 decimals in both output modes. The combined block
 is the union of lenses for matching and critical coverage; a case
 escapes only when no lens raised blocker/major for it.

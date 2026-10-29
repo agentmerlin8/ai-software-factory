@@ -313,7 +313,10 @@ def _metrics(
         1 for key in matched if expected_index[key].severity in CRITICAL_MAJOR
     )
     clean_cases = sum(1 for case in cases.values() if not case.expected)
-    defective_cases = len(cases) - clean_cases
+    # Only cases holding an expected blocker/major are "defective": a
+    # minor-only artifact is approvable under the verdict policy, so it may
+    # not inflate the approval-escape denominator.
+    defective_cases = sum(1 for case in cases.values() if case.defective)
     unnecessary = sum(
         1 for case in cases.values() if not case.expected and case.id in critical
     )

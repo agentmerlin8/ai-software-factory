@@ -554,5 +554,36 @@ class RealBenchTests(unittest.TestCase):
                 self.assertLessEqual(len(lines), 45, path)
 
 
+class MinorOnlyCaseTests(unittest.TestCase):
+    """A minor-only case is approvable and must not count as defective."""
+
+    def test_minor_only_case_excluded_from_escape_denominator(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            for cid, severity in (("maj", "major"), ("min", "minor")):
+                (arts / cid).mkdir(parents=True, exist_ok=True)
+                (arts / cid / "f.md").write_text("# x\ndefect\n",
+                                                 encoding="utf-8")
+                case_file(cases / f"{cid}.json", cid, cid,
+                          f"artifacts/{cid}/f.md",
+                          [{"id": "E01", "severity": severity,
+                            "rubric_dimension": "behavior",
+                            "artifact_reference": f"artifacts/{cid}/f.md:2"}])
+            out = lens_file(
+                base / "lens.json", "review-adversary",
+                [finding("review-adversary", 1, "minor", "behavior",
+                         "artifacts/min/f.md:2")])
+            report = bench_score.evaluate(
+                bench_score.load_bench(base),
+                {"review-adversary": bench_score.load_lens_output(
+                    "review-adversary", out)})
+            lens = report["lenses"]["review-adversary"]
+            self.assertEqual(lens["defective_cases"], 1)
+            self.assertEqual(lens["approval_escapes"], 1)
+            self.assertEqual(lens["approval_escape_rate"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

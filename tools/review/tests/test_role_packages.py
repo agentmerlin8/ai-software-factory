@@ -12,6 +12,10 @@ with a simple line parser (no YAML library) and check:
 - Output contract: the fenced YAML blocks extract cleanly and validate as
   review.findings.v1 documents (findings shape A and stop-block shape B) for
   the lens's own reviewer id and id prefix;
+- stop rules: numbered and strictly increasing, and covering unreviewable
+  evidence — Scope omitted_files and binary_files entries and truncated
+  contract/gate inputs must block a verdict (rules omitted-diff,
+  truncated-input, binary-unavailable);
 - runtime neutrality: no banned runtime-specific keys anywhere, no absolute
   paths, and each file names only its own finding-id prefix.
 """
@@ -235,6 +239,7 @@ class RolePackageTest(unittest.TestCase):
             self.assertIn(review["stop"]["rule"], (
                 "package-hash-mismatch", "missing-package-section",
                 "head-sha-mismatch", "truncated-diff", "withheld-artifact",
+                "omitted-diff", "truncated-input", "binary-unavailable",
             ))
 
     def test_example_finding_carries_all_seven_keys(self):
@@ -257,6 +262,39 @@ class RolePackageTest(unittest.TestCase):
             numbered = re.findall(r"^\d+\.", body, re.M)
             self.assertGreaterEqual(len(numbered), 5)
             self.assertIn("stop block", body)
+
+    # -- unreviewable evidence (S3.5a external fixes EX-001/002/003/006/007) --
+
+    def test_unreviewable_evidence_rules_present_by_name(self):
+        for filename in self.for_each():
+            body = self.scan[filename]["bodies"]["## Stop rules"]
+            for rule in ("omitted-diff", "truncated-input",
+                         "binary-unavailable"):
+                self.assertIn(f"rule {rule}", body)
+
+    def test_stop_rule_list_strictly_increasing(self):
+        for filename in self.for_each():
+            body = self.scan[filename]["bodies"]["## Stop rules"]
+            numbers = [int(m.group(1)) for m in
+                       re.finditer(r"^\s*(\d+)\.", body, re.M)]
+            self.assertGreaterEqual(len(numbers), 8)
+            self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
+
+    def test_procedure_reads_omitted_and_binary_files(self):
+        for filename in self.for_each():
+            body = self.scan[filename]["bodies"]["## Procedure"]
+            self.assertIn("omitted_files", body)
+            self.assertIn("binary_files", body)
+            self.assertIn("truncation marker", body)
+            self.assertIn("zero unreviewable evidence", body)
+
+    def test_scope_reviewability_fields_block_a_verdict(self):
+        for filename in self.for_each():
+            body = self.scan[filename]["bodies"]["## Stop rules"]
+            self.assertIn("blocks a verdict", body)
+            self.assertIn("omitted_files", body)
+            self.assertIn("binary_files", body)
+            self.assertIn("truncation marker", body)
 
     def test_procedure_has_mutation_pass_and_incremental_write(self):
         for filename in self.for_each():

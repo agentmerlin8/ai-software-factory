@@ -1,0 +1,16 @@
+{
+  "id": "fn24a",
+  "title": "Config presence test matches a commented-out line",
+  "provenance": "field note 24 \u2014 contract config presence test note (a)",
+  "artifact": "artifacts/fn24a/contract_test.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "test_quality",
+        "artifact_reference": "artifacts/fn24a/contract_test.py:21"
+      }
+    ]
+  }
+}

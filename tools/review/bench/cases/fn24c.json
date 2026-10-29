@@ -1,0 +1,16 @@
+{
+  "id": "fn24c",
+  "title": "Drain helper burns the timeout on empty polls",
+  "provenance": "field note 24 \u2014 queue drain helper note (c)",
+  "artifact": "artifacts/fn24c/drain.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "operational",
+        "artifact_reference": "artifacts/fn24c/drain.py:16"
+      }
+    ]
+  }
+}

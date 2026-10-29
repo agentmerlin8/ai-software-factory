@@ -1,0 +1,16 @@
+{
+  "id": "fn23",
+  "title": "Draft-mention external review scheduling",
+  "provenance": "field note 23 \u2014 review lane process note",
+  "artifact": "artifacts/fn23/process.md",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "minor",
+        "rubric_dimension": "docs_process",
+        "artifact_reference": "artifacts/fn23/process.md:9"
+      }
+    ]
+  }
+}

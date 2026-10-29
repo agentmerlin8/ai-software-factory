@@ -1,0 +1,9 @@
+{
+  "id": "clean-01",
+  "title": "Containment guard with normalized boundary",
+  "provenance": "control \u2014 authored clean fixture (guard change)",
+  "artifact": "artifacts/clean-01/guard_change.py",
+  "expected": {
+    "findings": []
+  }
+}

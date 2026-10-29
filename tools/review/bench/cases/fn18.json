@@ -1,0 +1,22 @@
+{
+  "id": "fn18",
+  "title": "EXTEND manifest and test filed on the wrong page",
+  "provenance": "field note 18 \u2014 UI slice manifest EXTEND review note",
+  "artifact": "artifacts/fn18/impl-plan.md",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "contract_fidelity",
+        "artifact_reference": "artifacts/fn18/impl-plan.md:14"
+      },
+      {
+        "id": "E02",
+        "severity": "major",
+        "rubric_dimension": "test_quality",
+        "artifact_reference": "artifacts/fn18/impl-plan.md:18"
+      }
+    ]
+  }
+}

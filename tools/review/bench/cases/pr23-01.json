@@ -1,0 +1,16 @@
+{
+  "id": "pr23-01",
+  "title": "Ruleset selector ignores GitHub ref patterns",
+  "provenance": "onboarding PR review note \u2014 forge probe ruleset selector",
+  "artifact": "artifacts/pr23-01/selector.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "behavior",
+        "artifact_reference": "artifacts/pr23-01/selector.py:11"
+      }
+    ]
+  }
+}

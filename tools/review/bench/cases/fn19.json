@@ -1,0 +1,16 @@
+{
+  "id": "fn19",
+  "title": "Destructive-confirmation dialog keeps stale state",
+  "provenance": "field note 19 \u2014 confirmation dialog review note",
+  "artifact": "artifacts/fn19/dialog.tsx",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "behavior",
+        "artifact_reference": "artifacts/fn19/dialog.tsx:12"
+      }
+    ]
+  }
+}

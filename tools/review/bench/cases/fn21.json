@@ -1,0 +1,16 @@
+{
+  "id": "fn21",
+  "title": "Contract types lagging the updated DTO",
+  "provenance": "field note 21 \u2014 contract types refresh review note",
+  "artifact": "artifacts/fn21/contract-drift.md",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "contract_fidelity",
+        "artifact_reference": "artifacts/fn21/contract-drift.md:11"
+      }
+    ]
+  }
+}

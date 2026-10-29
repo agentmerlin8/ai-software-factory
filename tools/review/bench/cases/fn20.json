@@ -1,0 +1,16 @@
+{
+  "id": "fn20",
+  "title": "Cross-story CREATE collision scan flags handoff echo",
+  "provenance": "field note 20 \u2014 gate script collision scan review note",
+  "artifact": "artifacts/fn20/gate_collision.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "operational",
+        "artifact_reference": "artifacts/fn20/gate_collision.py:24"
+      }
+    ]
+  }
+}

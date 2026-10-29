@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: 27cbfea787a79eb3215b6b432ce40ecf43e897984242ab0203872f1845328f60
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: b3b2a6f8faa991cddf2c6f580accf49e36fb4473
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/bench/score.py:202
+      evidence: "load_bench validates a case's artifact_reference path with a string prefix check only — 'if not ref_path.startswith(f\"artifacts/{case_id}/\")' at line 197 — then joins it unnormalized at line 202, 'target = cases_dir / ref_path', and reads the joined path's contents at line 205, 'len(target.read_text(encoding=\"utf-8\").splitlines())'. A case JSON whose artifact_reference is 'artifacts/<id>/../../../../etc/passwd:1' passes every check in the hunk and causes a read of a file outside cases/; the 'artifact' key has the same exposure (segment check at line 155, existence probe '(cases_dir / artifact).is_file()' at line 217). Removing or widening the prefix check leaves no other confinement standing."
+      required_change: "confine both 'artifact' and each expected 'artifact_reference' path: reject any path containing a '..' segment, and after joining under cases_dir resolve the result and verify it is cases_dir itself or beneath it (trailing-separator boundary comparison) before is_file()/read_text() is called; refuse the case with a named BenchError otherwise"
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/bench/README.md:22
+      evidence: "the blind-review separation of the answer key from the review input is an unenforced convention: 'Packaging note: package `cases/artifacts/**` for the lenses; never ship `cases/*.json` with the review input (it is the answer key).' No shipped code in the diff checks this — score.py validates lens outputs (author label, schema) but never verifies the packaged input excluded cases/*.json. Concrete production change that leaves every check green: package cases/*.json alongside the artifacts; a lens can then read each expected.findings answer key, echo the ground truth, and the frozen baseline metrics (combined critical/major detection recall 1.0 in baseline.json) inflate silently while the scorer still exits 0."
+      required_change: "make the answer-key containment checkable rather than conventional: have the packaging path record which files were packaged (or hash the packaged input set) and have score.py refuse, with a named error, to score a run whose packaged input included any cases/*.json answer key"
+      actionable: true

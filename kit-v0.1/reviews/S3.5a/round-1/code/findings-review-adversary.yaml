@@ -1,0 +1,58 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 133698dd1f5fb12bddb68b8382b98659a0000ca0234e59d61765a765693baec0
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: b3b2a6f8faa991cddf2c6f580accf49e36fb4473
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: blocker
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/package.py:310
+      evidence: "compose_package reads the withheld list (`withheld = read_list_file(args.withheld, \"--withheld\")`) and passes it only to render_scope; the ## Diff block loop iterates every entry of `statuses`, filtered solely by matches_include, so a withheld path's full diff bytes are emitted in the package while ## Scope declares `withheld_files:` — the T2 acceptance invariant 'allowed/withheld honored' is asserted but not delivered. test_scope_allowed_and_withheld_lists asserts only the Scope-section text and never the absence of the withheld file's diff block, so it stays green with the contents exposed."
+      required_change: "exclude withheld paths from the Diff section in compose_package (drop the block or emit a '[withheld]' placeholder) and add a test that fails when a withheld file's diff content appears anywhere in the built package"
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:781
+      evidence: "the undispositioned-refusal guard lives only in render (match_dispositions); cmd_check re-verifies hashes and markdown but never re-runs match_dispositions or validate_disposition_content, and compose_record hardcodes `\"undispositioned\": []` (line 597) while render_markdown prints the literal `undispositioned findings: 0` (line 639) — deleting dispositions entries (or whole findings plus their entries) from a committed review.json and re-checking stays green, so the acceptance invariant 'zero undispositioned findings' is unenforced on the check path the merge decision reads"
+      required_change: "in cmd_check, re-run the disposition-coverage and disposition-content rules (unknown/duplicate/undispositioned, rejected reason+evidence, deferred issue URL) against data['dispositions'] and data['findings'], and render the undispositioned count from the record instead of a literal"
+      actionable: true
+    - id: RA-003
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:745
+      evidence: "the verdict guard ('any blocker/major forces CHANGES_REQUESTED') is computed in compose_record but validate_record only checks that `verdict` is a mapping; cmd_check re-renders the markdown from the tampered JSON itself, so editing verdict.decision to APPROVED (and zeroing blockers/majors, or downgrading a finding's severity in data['findings']) in a committed review.json passes `record.py check` with the markdown regenerated to match — no test tampers with the verdict or a finding severity and re-checks"
+      required_change: "in cmd_check, recompute the decision from the severities in data['findings'] and refuse on mismatch, and add a check-path test that flips verdict.decision (or downgrades a blocker to minor) and asserts exit 1"
+      actionable: true
+    - id: RA-004
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:808
+      evidence: "cmd_check re-hashes each reviewer's findings document against document_sha256 but never re-parses it or compares its findings to data['findings']; the record's findings list can be shortened (a blocker silently dropped) or its severity/evidence fields rewritten after render while the hashed lens documents stay untouched, and check still prints OK — the content-hash guard proves only that the source documents did not change, not that the record reflects them"
+      required_change: "in cmd_check, load each hashed findings document and refuse when the record's findings are not exactly the union of the lens documents' findings (id, severity, dimension, reference, evidence, required_change, actionable); add a tamper test that drops one finding from review.json"
+      actionable: true
+    - id: RA-005
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:426
+      evidence: "the fixed-sha touch rule ('fixed requires a commit touching the artifact', T3 acceptance) is widened by _paths_in_text: any repo path named anywhere in the finding's required_change text and existing in the working tree at render time becomes an accepted touch target, so a disposition can cite a commit that touches only an unrelated frequently-changed file (e.g. a test file named in the prose) and never touches the cited artifact; test_fixed_accepted_when_commit_touches_a_named_path codifies this escape as expected behavior, and the exists() probe against the live working tree means a file created after the fix commit retroactively legitimizes it"
+      required_change: "restrict the touch rule to the cited artifact plus paths named in a structured field (not free-text regex over required_change), check existence at the fix commit instead of the working tree, and narrow the test that currently blesses prose-named paths"
+      actionable: true
+    - id: RA-006
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/package.py:78
+      evidence: "git() claims 'output is config-immune' by pinning LC_ALL=C and nulling GIT_CONFIG_SYSTEM/GIT_CONFIG_GLOBAL, but every package test already runs the CLI with env=self.env setting those same variables (test_package.py fixture), so deleting the three pins from git() leaves the whole suite green — the config-immunity guard is untested; an ambient GIT_DIR/GIT_WORKTREE/GIT_CONFIG_GLOBAL in a dispatcher's environment silently changes which repository state is packaged or breaks build/check byte-equality across machines"
+      required_change: "add a test that builds the same repo range twice under a hostile ambient environment (e.g. HOME pointing at a gitconfig that sets diff.external/diff.algorithm and a stray GIT_DIR) and asserts the package bytes equal the clean-environment build, so removing the sanitisation pins fails a test"
+      actionable: true
+    - id: RA-007
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/review/record.py:726
+      evidence: "cmd_render writes review.json first and REVIEW-<pr>.md second inside one try: an OSError on the second write (or an interrupt between the two) leaves a half-written record directory while the refusal says only 'out dir not writable'; a re-render with a different --pr into the same out-dir also leaves a stale REVIEW-<old-pr>.md that cmd_check never reads or rejects, so a duplicated run can leave inconsistent committable artifacts"
+      required_change: "render both documents to temporary files and rename atomically (or write markdown first and review.json last as the commit marker), and refuse or clean stale REVIEW-*.md files in out-dir that do not match the current pr"
+      actionable: true

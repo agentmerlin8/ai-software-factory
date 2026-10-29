@@ -1,0 +1,58 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 27cbfea787a79eb3215b6b432ce40ecf43e897984242ab0203872f1845328f60
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: b3b2a6f8faa991cddf2c6f580accf49e36fb4473
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: "package:diff@tools/review/bench/score.py:323"
+      evidence: "approval-escape protection is satisfiable without detecting anything: 'escapes = sum(1 for case in cases.values() if case.defective and case.id not in critical)' where _critical_ids (line 288) collects 'finding.case_id' from any produced blocker/major, and per the README match rule 'a produced finding's case id is the path component immediately after artifacts/ in its artifact_reference'; _case_of never checks the cited file exists or is the case's artifact, so a lens emitting one blocker per case at 'artifacts/<case>/anything:1' drives approval_escape_rate to 0.0 (the baseline's headline protection) while detecting zero planted defects, and no test fails"
+      required_change: "attribute case-level criticality only when the produced finding's artifact tail matches the case's declared artifact (or an expected finding key), and add a scorer test that a per-case blocker spray citing a non-artifact file leaves approval_escape_rate at 1.0"
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: "package:diff@tools/review/bench/score.py:438"
+      evidence: "every detection metric is inflatable by file-level spray: '_location_metrics' does 'if not here: continue' then 'for expected in items: detected += 1', so one produced finding at a (case, file) key marks ALL expected findings at that file detected; cm_detected needs only 'any(finding.severity in CRITICAL_MAJOR for finding in here)' and dim_ok/sev_ok only 'any(...)' across findings at the key - so one major per artifact file plus one finding per dimension achieves detection_recall, critical_major_detection_recall (the gate evidence's 'combined CM detection recall 1.0'), dimension_agreement and severity_agreement near 1.0 with no defect-specific content; only precision drops, which the README already concedes ('The panel is voluminous; the lane must not be sold as low-noise')"
+      required_change: "credit detection per expected finding only when a produced finding at the key plausibly corresponds to it (at minimum require dimension or a distinct match per expected finding rather than any-finding-at-file), and add a scorer test proving one unrelated finding at the right file does not yield detection_recall 1.0"
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: "package:diff@tools/review/bench/score.py:312"
+      evidence: "strict critical/major recall ignores the produced severity: 'cm_matched = sum(1 for key in matched if expected_index[key].severity in CRITICAL_MAJOR)' credits an expected major matched by an info-severity produced finding (README: 'a produced finding that matches an expected major with severity info counts as matched'), so a lens that downgrades every blocker/major to info still reports critical_major_recall up to 1.0 while every per-case decision stays APPROVED because _critical_ids filters on produced severity"
+      required_change: "count a critical/major expected finding as matched only when the matching produced finding itself carries severity blocker or major, or report severity-deflated matches as a separate metric, with a scorer test for the info-tagged-major case"
+      actionable: true
+    - id: RA-004
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: "package:diff@tools/review/bench/score.py:320"
+      evidence: "false blockers on minor-only cases are invisible to the unnecessary-revision metric and the text render contradicts it: 'unnecessary = sum(1 for case in cases.values() if not case.expected and case.id in critical)' counts only empty-expected cases, while render_text labels minor-only cases as clean ('kind = \"defective\" if report[\"defective_cases_map\"][case_id] else \"clean\"', line 498) and prints '(unnecessary)' when they are CHANGES_REQUESTED - so a produced blocker on fn23 or pr23-05 renders as '(unnecessary)' in the decision list while unnecessary_revisions stays 0 and the frozen rate reads 0.0"
+      required_change: "include minor-only cases in the false-positive denominator (count any produced blocker/major on a non-defective case as an unnecessary revision), align render_text's '(unnecessary)' label with the metric, and add a scorer test for a blocker produced on a minor-only case"
+      actionable: true
+    - id: RA-005
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: "package:diff@agents/review-adversary.agent.md:44"
+      evidence: "a vacuous review fully satisfies the role package: step 9 says 'set the decision - APPROVED only when the findings list is empty', and the output contract requires only the seven finding keys per finding plus the identity fields - a reviewer that skips steps 4-7 entirely and writes the skeleton document with 'findings: []' produces a byte-shape-valid APPROVED document indistinguishable from a genuine clean review; no artifact (per-hunk coverage, enumerated assertions/guards with dispositions, quoted diff evidence of the walk) asserts that the diff was read or that any analysis happened, and the record layer enforces dispositions only, so the failure mode of a never-performed review is unhandled down the lane's own evidence path"
+      required_change: "require a positive review artifact in each lens output contract - e.g. a per-file coverage list or the step-5 assertion/guard enumeration with a one-line disposition each - that the findings loader refuses when absent, so an empty findings list must be earned and is machine-checkable"
+      actionable: true
+    - id: RA-006
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: "package:diff@tools/review/bench/README.md:158"
+      evidence: "the frozen baseline that gates lane promotion is hand-stored and unverifiable: 'baseline.json is not written by the scorer - the orchestrator stores it after a lens run', and baseline.json's own bench block cites a package (package_sha256 20cbd558..., base f4e140f4, head ac4b7619) whose lens outputs are nowhere in the package, so the headline numbers (combined CM detection recall 1.0, escape rate 0.0) could be typed by hand and nothing in the diff recomputes or refuses them; the promotion guard architecture.md asserts ('a lane change is promoted only against it') rests on a file no deterministic step produces"
+      required_change: "make the scorer (or a wrapper) the only writer of baseline.json - emit it from --json with the bench identity attached - and add a verify mode that recomputes the stored baseline from committed lens outputs and refuses on drift, with a test that a hand-edited baseline.json fails verification"
+      actionable: true
+    - id: RA-007
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: "package:diff@tools/review/bench/score.py:538"
+      evidence: "the combined block silently accepts a partial panel: main() requires only 'at least one --outputs ROLE=FILE is required' (line 538-539) and evaluate() unions matches and critical ids over whatever lenses were passed, so a run with one or two lenses - or with a lens that emitted a stop block instead of findings, whose handling lives in the un-shipped tools.review.findings.load this file imports (line 47-48) - still prints a 'combined' row and a combined approval_escape_rate with no incomplete-panel signal; the frozen baseline's combined 1.0/0.0 cannot be distinguished from a full three-lens result"
+      required_change: "refuse (or loudly flag in both output modes) a combined report computed from fewer than all three ROLES or from a lens document carrying a stop block, and add a scorer test that a two-lens run cannot present itself as combined"
+      actionable: true

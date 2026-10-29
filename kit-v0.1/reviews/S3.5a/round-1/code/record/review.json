@@ -1,0 +1,484 @@
+{
+  "base_sha": "152b205b48937a3a12020c02c8378022d088d86e",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RC-002: withheld files never reach the diff.",
+      "fix_sha": "f2fc448",
+      "id": "RA-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "check re-parses every reviewer document and compares findings field-by-field with the record.",
+      "fix_sha": "f2fc448",
+      "id": "RA-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "check recomputes the verdict (decision and counts) from the findings and refuses a mismatch.",
+      "fix_sha": "f2fc448",
+      "id": "RA-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "check re-runs the disposition rules (match, content, fixed-sha) rather than trusting stored dispositions.",
+      "fix_sha": "f2fc448",
+      "id": "RA-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same tightening as RC-003.",
+      "fix_sha": "f2fc448",
+      "id": "RA-005",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Independent proof of git config immunity (tests set the same env).",
+      "fix_sha": null,
+      "id": "RA-006",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Half-written record directory on an OSError between the two writes.",
+      "fix_sha": null,
+      "id": "RA-007",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "The touch rule now applies to package:diff@ references too: the prefix and line suffix are stripped and the underlying repo path must be touched by the fix commit.",
+      "fix_sha": "eaa65c4",
+      "id": "RC-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "The builder excludes withheld paths from the stat and diff (and restricts to --allowed when given); empty result refuses by name.",
+      "fix_sha": "f2fc448",
+      "id": "RC-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Named-path acceptance tightened: it applies only when the cited artifact does not exist in the repo.",
+      "fix_sha": "f2fc448",
+      "id": "RC-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Records now carry the reviewer model per role (--model ROLE=MODEL), rendered in review.json and the Reviewers table.",
+      "fix_sha": "eaa65c4",
+      "id": "RC-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "baseline.json: bench.package_sha256 20cbd558..., models qwen3.8-max, report.lenses/combined numbers matching README's frozen table.",
+      "fix_sha": null,
+      "id": "RC-005",
+      "issue": null,
+      "reason": "The baseline is shipped and evidenced: tools/review/bench/baseline.json is in the content package (and committed), carries the bench package hash and models, and the README table matches it. The gate-evidence line names the command, not the output, which is the convention for deterministic gates."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Docs corrected to the shipped path tools/review/bench/score.py (build plan and architecture).",
+      "fix_sha": "eaa65c4",
+      "id": "RC-006",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "prior-round paths now stored through record_path (repo-relative).",
+      "fix_sha": "f2fc448",
+      "id": "RC-007",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Determinism claim narrowed to a fixed repository state with the same remote; the Identity line is named as an input.",
+      "fix_sha": "eaa65c4",
+      "id": "RC-008",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Fences are sized to the longest backtick run in the content + 1, so content cannot close its fence.",
+      "fix_sha": "f2fc448",
+      "id": "RS-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Origin userinfo (user:token@) is stripped before the Identity line is written.",
+      "fix_sha": "f2fc448",
+      "id": "RS-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Stored record paths are confined to the repo; absolute or escaping paths are refused by name.",
+      "fix_sha": "f2fc448",
+      "id": "RS-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RA-003 (verdict recomputation).",
+      "fix_sha": "f2fc448",
+      "id": "RS-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RC-007.",
+      "fix_sha": "f2fc448",
+      "id": "RS-005",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RC-002 (withheld).",
+      "fix_sha": "f2fc448",
+      "id": "RS-006",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same tightening as RC-003.",
+      "fix_sha": "f2fc448",
+      "id": "RS-007",
+      "issue": null,
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:310",
+      "evidence": "compose_package reads the withheld list (`withheld = read_list_file(args.withheld, \"--withheld\")`) and passes it only to render_scope; the ## Diff block loop iterates every entry of `statuses`, filtered solely by matches_include, so a withheld path's full diff bytes are emitted in the package while ## Scope declares `withheld_files:` \u2014 the T2 acceptance invariant 'allowed/withheld honored' is asserted but not delivered. test_scope_allowed_and_withheld_lists asserts only the Scope-section text and never the absence of the withheld file's diff block, so it stays green with the contents exposed.",
+      "id": "RA-001",
+      "lens": "review-adversary",
+      "required_change": "exclude withheld paths from the Diff section in compose_package (drop the block or emit a '[withheld]' placeholder) and add a test that fails when a withheld file's diff content appears anywhere in the built package",
+      "rubric_dimension": "behavior",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:781",
+      "evidence": "the undispositioned-refusal guard lives only in render (match_dispositions); cmd_check re-verifies hashes and markdown but never re-runs match_dispositions or validate_disposition_content, and compose_record hardcodes `\"undispositioned\": []` (line 597) while render_markdown prints the literal `undispositioned findings: 0` (line 639) \u2014 deleting dispositions entries (or whole findings plus their entries) from a committed review.json and re-checking stays green, so the acceptance invariant 'zero undispositioned findings' is unenforced on the check path the merge decision reads",
+      "id": "RA-002",
+      "lens": "review-adversary",
+      "required_change": "in cmd_check, re-run the disposition-coverage and disposition-content rules (unknown/duplicate/undispositioned, rejected reason+evidence, deferred issue URL) against data['dispositions'] and data['findings'], and render the undispositioned count from the record instead of a literal",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:745",
+      "evidence": "the verdict guard ('any blocker/major forces CHANGES_REQUESTED') is computed in compose_record but validate_record only checks that `verdict` is a mapping; cmd_check re-renders the markdown from the tampered JSON itself, so editing verdict.decision to APPROVED (and zeroing blockers/majors, or downgrading a finding's severity in data['findings']) in a committed review.json passes `record.py check` with the markdown regenerated to match \u2014 no test tampers with the verdict or a finding severity and re-checks",
+      "id": "RA-003",
+      "lens": "review-adversary",
+      "required_change": "in cmd_check, recompute the decision from the severities in data['findings'] and refuse on mismatch, and add a check-path test that flips verdict.decision (or downgrades a blocker to minor) and asserts exit 1",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:808",
+      "evidence": "cmd_check re-hashes each reviewer's findings document against document_sha256 but never re-parses it or compares its findings to data['findings']; the record's findings list can be shortened (a blocker silently dropped) or its severity/evidence fields rewritten after render while the hashed lens documents stay untouched, and check still prints OK \u2014 the content-hash guard proves only that the source documents did not change, not that the record reflects them",
+      "id": "RA-004",
+      "lens": "review-adversary",
+      "required_change": "in cmd_check, load each hashed findings document and refuse when the record's findings are not exactly the union of the lens documents' findings (id, severity, dimension, reference, evidence, required_change, actionable); add a tamper test that drops one finding from review.json",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:426",
+      "evidence": "the fixed-sha touch rule ('fixed requires a commit touching the artifact', T3 acceptance) is widened by _paths_in_text: any repo path named anywhere in the finding's required_change text and existing in the working tree at render time becomes an accepted touch target, so a disposition can cite a commit that touches only an unrelated frequently-changed file (e.g. a test file named in the prose) and never touches the cited artifact; test_fixed_accepted_when_commit_touches_a_named_path codifies this escape as expected behavior, and the exists() probe against the live working tree means a file created after the fix commit retroactively legitimizes it",
+      "id": "RA-005",
+      "lens": "review-adversary",
+      "required_change": "restrict the touch rule to the cited artifact plus paths named in a structured field (not free-text regex over required_change), check existence at the fix commit instead of the working tree, and narrow the test that currently blesses prose-named paths",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:78",
+      "evidence": "git() claims 'output is config-immune' by pinning LC_ALL=C and nulling GIT_CONFIG_SYSTEM/GIT_CONFIG_GLOBAL, but every package test already runs the CLI with env=self.env setting those same variables (test_package.py fixture), so deleting the three pins from git() leaves the whole suite green \u2014 the config-immunity guard is untested; an ambient GIT_DIR/GIT_WORKTREE/GIT_CONFIG_GLOBAL in a dispatcher's environment silently changes which repository state is packaged or breaks build/check byte-equality across machines",
+      "id": "RA-006",
+      "lens": "review-adversary",
+      "required_change": "add a test that builds the same repo range twice under a hostile ambient environment (e.g. HOME pointing at a gitconfig that sets diff.external/diff.algorithm and a stray GIT_DIR) and asserts the package bytes equal the clean-environment build, so removing the sanitisation pins fails a test",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:726",
+      "evidence": "cmd_render writes review.json first and REVIEW-<pr>.md second inside one try: an OSError on the second write (or an interrupt between the two) leaves a half-written record directory while the refusal says only 'out dir not writable'; a re-render with a different --pr into the same out-dir also leaves a stale REVIEW-<old-pr>.md that cmd_check never reads or rejects, so a duplicated run can leave inconsistent committable artifacts",
+      "id": "RA-007",
+      "lens": "review-adversary",
+      "required_change": "render both documents to temporary files and rename atomically (or write markdown first and review.json last as the commit marker), and refuse or clean stale REVIEW-*.md files in out-dir that do not match the current pr",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:221",
+      "evidence": "Frozen plan T3 acceptance: \"`fixed` requires a commit touching the artifact\". record.py exempts the lane's own canonical reference form from that rule: \"if reference.startswith(PACKAGE_REF_PREFIX):\\n        return None\" (repo_artifact_path, 'None for ``package:diff@`` references, which are exempt'), and test_record.py encodes it: \"def test_package_diff_reference_exempt_from_withheld_and_touch\" renders exit 0 with fix_sha=self.fix_other, a commit that touches only extra/notes.md. The role packages' output contract mandates \"artifact_reference: package:diff@src/example.py:41\" and \"every artifact_reference resolves inside the package's Diff section\", so every internal-lens finding uses the exempt form and no `fixed` disposition is ever verified against an artifact.",
+      "id": "RC-001",
+      "lens": "review-contract",
+      "required_change": "Enforce the touch requirement for package:diff@ references: strip the \"package:diff@\" prefix and line suffix to the repo-relative path (the package's Diff headings carry it) and require the fix commit to touch that path; update or remove the exemption test. Any retained exemption must be recorded as a deviation from frozen plan T3.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:308",
+      "evidence": "Frozen plan T2 acceptance: \"allowed/withheld honored\". In package.py compose_package, \"withheld = read_list_file(args.withheld, '--withheld')\" feeds only render_scope: the Diff section is filtered solely by \"if includes:\" / matches_include, so a file listed in --withheld is still embedded in full under ## Diff while ## Scope labels it withheld. record.py confirms the intended semantics (\"review record: withheld artifact: \" refusal for findings citing withheld paths), and test_package.py only asserts the label: test_scope_allowed_and_withheld_lists checks \"withheld_files:\\n- bin.dat\\n\" while bin.dat's block is never asserted absent. Mutation: any builder change that keeps labeling but exposes more withheld content stays green.",
+      "id": "RC-002",
+      "lens": "review-contract",
+      "required_change": "Make the builder honor the lists: exclude withheld files' content from the ## Diff section (and from ## Diff stat or mark them withheld there), decide and implement the analogous semantics for allowed_files, and add a test asserting a withheld changed file's diff bytes do not appear in the package.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:408",
+      "evidence": "Frozen plan T3 acceptance: \"`fixed` requires a commit touching the artifact\". fix_sha_violations accepts alternate targets scraped from prose: \"for named in _paths_in_text(finding.get('required_change', '')): if (Path(repo) / named).exists(): targets.append(named)\" and then \"if not any(commit_touches_path(repo, full, target) for target in targets)\". A fix commit that touches only an unrelated path mentioned anywhere in required_change passes while the cited artifact is untouched; existence is checked in the working tree at render time, not at the fix commit. test_fixed_accepted_when_commit_touches_a_named_path encodes this (artifact docs/missing.md:3, acceptance via a.txt named in prose).",
+      "id": "RC-003",
+      "lens": "review-contract",
+      "required_change": "Restrict the touch check to the cited artifact (with the RC-001 prefix stripping), or require the alternate path to be named in a structured field rather than scraped from free text, and record any relaxation of T3 as a deviation.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:263",
+      "evidence": "Slice issue deliverable: \"Render `stories/<id>/review/review.json` + `REVIEW-<pr>.md` at the pinned SHA: reviewers (role + model), package hash, findings, dispositions, gate results, verdict.\" collect_reviewers records only \"reviewers.append({'role': role, 'rubric_version': lens['rubric_version'], 'document': record_path(path, repo), 'document_sha256': lens['document_sha256']})\" \u2014 no model. The findings schema cannot carry it either: _REVIEW_KEYS_BASE = (\"reviewer\", \"rubric_version\", \"package_sha256\", \"base_sha\", \"head_sha\") and a reviewer model appears in no hunk. No hunk implements the model half of the frozen record content.",
+      "id": "RC-004",
+      "lens": "review-contract",
+      "required_change": "Capture the reviewer model: add an identity field for it to the review.findings.v1 review block (and role-package output contracts) or a --findings ROLE=FILE model input, and render it in review.json reviewers entries and REVIEW-<pr>.md's Reviewers table.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/tests/test_score.py:500",
+      "evidence": "Slice issue acceptance: \"Calibration baseline committed with per-lens and combined numbers.\" Gate evidence claims it: \"command: python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\" and \"result: baseline frozen in tools/review/bench/baseline.json (17 cases; combined CM detection recall 1.0)\" \u2014 the command is elided mid-line and baseline.json is not reproducible from it. No hunk in the Diff creates tools/review/bench/, the scorer, or baseline.json (Diff stat lists 12 files, none under bench/), and RealBenchTests validates the 17 cases but never references baseline.json, so the claim has no corresponding artifact inside the package and the acceptance criterion is not shown satisfied.",
+      "id": "RC-005",
+      "lens": "review-contract",
+      "required_change": "Evidence the baseline inside the review surface: include the bench/scorer/baseline.json changes in the package (or a named sibling package), record the full unelided scorer command in the gate evidence, and add a test that loads baseline.json and asserts its per-lens and combined metric keys against a recomputed score.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/tests/test_score.py:23",
+      "evidence": "Frozen plan T4 deliverable: \"`tools/review/bench/` (field notes 18-25, the held slice's external findings, clean controls) + `tools/review/score.py`\". The package shows the scorer at a different path: test_score.py \"SCORE = ROOT / 'tools' / 'review' / 'bench' / 'score.py'\" and \"from tools.review.bench import score as bench_score\"; gate evidence runs \"python3 tools/review/bench/score.py\". No deviation from the frozen deliverable path is recorded anywhere in the package.",
+      "id": "RC-006",
+      "lens": "review-contract",
+      "required_change": "Either move the scorer to the frozen path tools/review/score.py, or record the relocation to tools/review/bench/score.py as an explicit deviation (with the install-mapping/doc consequences for T6) in the story record.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:517",
+      "evidence": "record.py states its own invariant: record_path exists because \"Records are committed artifacts, so a local absolute path may not leak into them\", and RecordPathTests asserts \"Committed records must not leak local absolute paths.\" load_prior_rounds contradicts it: \"rounds.append({'loop': loop, 'path': os.path.abspath(directory), ...})\" stores a machine-specific absolute path in the committed review.json, and test_prior_rounds_in_json_and_markdown pins that behavior (\"'path': str(first_dir)\").",
+      "id": "RC-007",
+      "lens": "review-contract",
+      "required_change": "Store prior-round paths through record_path(directory, repo) like every other record path, and update the prior-rounds test to the repo-relative form.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:349",
+      "evidence": "package.py's docstring claims \"The package is fully determined by its inputs: two builds over the same repository state with the same flags produce byte-identical output. Nothing derived from wall-clock time, terminal width, or working-tree state enters the package\", but the Identity repo line is environment-derived: \"origin = remote_origin_url(args.repo)\" (local git config) and fallback \"identity_repo = os.path.abspath(args.repo)\" \u2014 the build machine's path enters the hashed body, and test_identity_section_matches_numstat asserts \"repo: {os.path.abspath(self.repo)}\". Rebuilds of the same SHAs in a different clone or directory are not byte-identical.",
+      "id": "RC-008",
+      "lens": "review-contract",
+      "required_change": "Either narrow the docstring and T2 determinism claim to same-environment rebuilds, or make Identity repo-independent (e.g. an explicit --repo-label input, defaulting to a documented derivation) so byte-identity holds across clones at the same SHAs.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:237",
+      "evidence": "diff_section_block wraps diff bytes as heading + \"```diff\\n\" + text + \"```\" and render_input_block wraps contract/gate file bytes in a ``` fence, with no escaping or refusal of fence-terminating or heading-looking lines inside the embedded content; a hostile commit or hostile contract/gate input whose bytes contain a ``` line or a '## <section>' line breaks out of its block and forges package structure (fake sections, fake verdict or stop text) inside the reviewers' sole evidence surface",
+      "id": "RS-001",
+      "lens": "review-security",
+      "required_change": "make embedded content unable to escape its block: emit a fence longer than any fence run present in the payload (or refuse by name any payload containing a line starting with ``` or '## '), in both diff_section_block and render_input_block",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:351",
+      "evidence": "compose_package sets identity_repo = origin from remote_origin_url, which returns git remote get-url origin verbatim, and embeds it as the 'repo:' Identity line; an origin URL with embedded credentials (https://user:token@host/... \u2014 common for CI and automated clones) is copied byte-for-byte into the package, a committed, distributed artifact",
+      "id": "RS-002",
+      "lens": "review-security",
+      "required_change": "strip any userinfo component (scheme://user:pass@) from the origin URL before embedding it in the Identity section, or refuse by name when the remote URL carries credentials",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:169",
+      "evidence": "resolve_record_path is 'return path if os.path.isabs(path) else os.path.join(repo, path)' with no normalization or confinement, and cmd_check feeds it the package path, every reviewer document path, and every gate evidence_path taken from the on-disk review.json; a tampered or hostile record whose stored paths contain ../ segments makes check read arbitrary files outside the repository, and because each read is compared against a recorded sha256 (pass = exit 0, mismatch = named refusal) the attacker also gets a content-confirmation oracle for the traversed file",
+      "id": "RS-003",
+      "lens": "review-security",
+      "required_change": "confine record-stored paths at check time: resolve the joined path and refuse by name when it escapes the repository root, and validate the shape of every path field in review.json (no .. segments, no absolute paths unless record_path explicitly produced one) before reading",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:781",
+      "evidence": "cmd_check re-verifies hashes, withheld artifacts, fix shas, and re-renders the markdown with render_markdown(data), but never recomputes the verdict: render derives decision as CHANGES_REQUESTED when counts[blocker] or counts[majors], yet check accepts whatever verdict.decision the file carries and only validates it is in DECISIONS via validate_record; editing review.json to decision APPROVED (with blockers still listed) plus the matching markdown line passes check with exit 0, so the lane's core verdict policy is silently unenforced on the verification path",
+      "id": "RS-004",
+      "lens": "review-security",
+      "required_change": "in cmd_check, recompute the decision from the record's finding severities exactly as compose_record does and fail with a named refusal when the recorded verdict disagrees",
+      "rubric_dimension": "operational",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:517",
+      "evidence": "load_prior_rounds stores 'path': os.path.abspath(directory) into prior_rounds, which is written into the committed review.json and rendered into REVIEW-<pr>.md, while record_path's own docstring states 'Records are committed artifacts, so a local absolute path may not leak into them'; local filesystem layout (usernames, home directories, temp paths) leaks into committed records through this field",
+      "id": "RS-005",
+      "lens": "review-security",
+      "required_change": "pass prior-round directories through record_path(directory, repo) like every other stored path, so paths inside the repository are recorded repo-relative",
+      "rubric_dimension": "security",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/package.py:310",
+      "evidence": "compose_package reads the --withheld list only to render it into the Scope section ('withheld = read_list_file(args.withheld, ...)' feeds render_scope and nothing else); the ## Diff blocks loop over every changed status and embed each file's full diff text, so a file declared withheld \u2014 the mechanism for keeping secrets and sensitive artifacts out of the distributed evidence surface \u2014 still appears byte-for-byte in the package's Diff section, and the withholding protection claim is false (removing the withheld handling entirely would leave every test green: test_scope_allowed_and_withheld_lists asserts only the Scope listing)",
+      "id": "RS-006",
+      "lens": "review-security",
+      "required_change": "exclude withheld paths from the Diff and Diff stat sections when composing the package (emit at most a named placeholder such as '[withheld]'), and add a test that a withheld file's diff bytes do not appear anywhere in the built package",
+      "rubric_dimension": "security",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/record.py:430",
+      "evidence": "fix_sha_violations accepts a 'fixed' disposition when the commit touches any target in 'targets', and targets is extended by _paths_in_text over the finding's own required_change string ('for named in _paths_in_text(finding.get(\"required_change\", \"\")): if (Path(repo) / named).exists(): targets.append(named)'); whoever authors the findings document controls that text, so citing any repo file the chosen commit happens to touch (e.g. naming README.md in required_change) satisfies the guard without touching the cited artifact, making the 'fixed requires a commit touching the artifact' evidence check bypassable",
+      "id": "RS-007",
+      "lens": "review-security",
+      "required_change": "accept only paths that the fix commit actually changed and that are plausibly the cited artifact: require the commit to touch the finding's artifact_reference path, or confine named-path fallbacks to paths inside the same directory as the artifact, and record which target satisfied the check",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5a/round-1/gate-evidence.md",
+      "evidence_sha256": "0d0c18608d880cb2cc0da61e992035e91dc308bc4cabf0b46c5c36606891bed1",
+      "exit": 0,
+      "gate": "deterministic-gates"
+    }
+  ],
+  "head_sha": "b3b2a6f8faa991cddf2c6f580accf49e36fb4473",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 1
+  },
+  "open_findings": [
+    "RA-006",
+    "RA-007",
+    "RC-005"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3.5a/round-1/pkg-code.md",
+    "sha256": "133698dd1f5fb12bddb68b8382b98659a0000ca0234e59d61765a765693baec0"
+  },
+  "pr": 28,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3.5a/round-1/code/findings-review-adversary.yaml",
+      "document_sha256": "363dd11ae08f3219e7414160c80e5de06607a66a63bfd09baea667e302addc54",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5a/round-1/code/findings-review-contract.yaml",
+      "document_sha256": "02311a004a42c52615f5edd1323ac64e7c639c398274323d10020584f693150f",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5a/round-1/code/findings-review-security.yaml",
+      "document_sha256": "96eeefb8f9f13724c1413eed43878481071bee16f29150b45e2d37fa6c299c60",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v1",
+  "story": "S3.5a",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 3,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 0,
+    "loop": 1,
+    "loop_cap": 2,
+    "majors": 15,
+    "minors": 4
+  }
+}

@@ -1,0 +1,136 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "The touch rule now applies to package:diff@ references too: the prefix and line suffix are stripped and the underlying repo path must be touched by the fix commit."
+    },
+    {
+      "id": "RC-002",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "The builder excludes withheld paths from the stat and diff (and restricts to --allowed when given); empty result refuses by name."
+    },
+    {
+      "id": "RC-003",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Named-path acceptance tightened: it applies only when the cited artifact does not exist in the repo."
+    },
+    {
+      "id": "RC-004",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Records now carry the reviewer model per role (--model ROLE=MODEL), rendered in review.json and the Reviewers table."
+    },
+    {
+      "id": "RC-005",
+      "disposition": "rejected",
+      "reason": "The baseline is shipped and evidenced: tools/review/bench/baseline.json is in the content package (and committed), carries the bench package hash and models, and the README table matches it. The gate-evidence line names the command, not the output, which is the convention for deterministic gates.",
+      "evidence": "baseline.json: bench.package_sha256 20cbd558..., models qwen3.8-max, report.lenses/combined numbers matching README's frozen table."
+    },
+    {
+      "id": "RC-006",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Docs corrected to the shipped path tools/review/bench/score.py (build plan and architecture)."
+    },
+    {
+      "id": "RC-007",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "prior-round paths now stored through record_path (repo-relative)."
+    },
+    {
+      "id": "RC-008",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Determinism claim narrowed to a fixed repository state with the same remote; the Identity line is named as an input."
+    },
+    {
+      "id": "RA-001",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Same fix as RC-002: withheld files never reach the diff."
+    },
+    {
+      "id": "RA-002",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "check re-parses every reviewer document and compares findings field-by-field with the record."
+    },
+    {
+      "id": "RA-003",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "check recomputes the verdict (decision and counts) from the findings and refuses a mismatch."
+    },
+    {
+      "id": "RA-004",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "check re-runs the disposition rules (match, content, fixed-sha) rather than trusting stored dispositions."
+    },
+    {
+      "id": "RA-005",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Same tightening as RC-003."
+    },
+    {
+      "id": "RA-006",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "evidence": "Independent proof of git config immunity (tests set the same env)."
+    },
+    {
+      "id": "RA-007",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "evidence": "Half-written record directory on an OSError between the two writes."
+    },
+    {
+      "id": "RS-001",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Fences are sized to the longest backtick run in the content + 1, so content cannot close its fence."
+    },
+    {
+      "id": "RS-002",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Origin userinfo (user:token@) is stripped before the Identity line is written."
+    },
+    {
+      "id": "RS-003",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Stored record paths are confined to the repo; absolute or escaping paths are refused by name."
+    },
+    {
+      "id": "RS-004",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Same fix as RA-003 (verdict recomputation)."
+    },
+    {
+      "id": "RS-005",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Same fix as RC-007."
+    },
+    {
+      "id": "RS-006",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Same fix as RC-002 (withheld)."
+    },
+    {
+      "id": "RS-007",
+      "disposition": "fixed",
+      "fix_sha": "f2fc448",
+      "evidence": "Same tightening as RC-003."
+    }
+  ]
+}

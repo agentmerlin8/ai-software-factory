@@ -18,12 +18,12 @@ range: 152b205b48937a3a12020c02c8378022d088d86e → 2bd431cd82e0938b42309ed3d1ff
 
 ## Reviewers
 
-| role | rubric | document |
-| --- | --- | --- |
-| external | external-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-external.yaml |
-| review-adversary | review-adversary-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-review-adversary.yaml |
-| review-contract | review-contract-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-review-contract.yaml |
-| review-security | review-security-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-review-security.yaml |
+| role | model | rubric | document |
+| --- | --- | --- | --- |
+| external | qwen3.8-max | external-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-external.yaml |
+| review-adversary | qwen3.8-max | review-adversary-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-review-adversary.yaml |
+| review-contract | qwen3.8-max | review-contract-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-review-contract.yaml |
+| review-security | qwen3.8-max | review-security-v1 | kit-v0.1/reviews/S3/round-1/pipeline/findings-review-security.yaml |
 
 ## Gate results
 

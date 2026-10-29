@@ -440,18 +440,21 @@
     {
       "document": "kit-v0.1/reviews/S3/round-1/readiness/findings-review-adversary.yaml",
       "document_sha256": "f74e0040078bd221156857a69bc287ed55d66a35ca7be1d07a6831ba037c5e71",
+      "model": "qwen3.8-max",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/readiness/findings-review-contract.yaml",
       "document_sha256": "cd49b9da787a77df7666a9f4b9709e6260d719fdf9232f9c87969e7b6801b081",
+      "model": "qwen3.8-max",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/readiness/findings-review-security.yaml",
       "document_sha256": "aa9d35ddaa572e6be981384178215faee010abe28b5fa4936bc19c8c5cd6649d",
+      "model": "qwen3.8-max",
       "role": "review-security",
       "rubric_version": "review-security-v1"
     }

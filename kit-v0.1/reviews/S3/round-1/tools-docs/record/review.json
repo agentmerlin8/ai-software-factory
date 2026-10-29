@@ -384,24 +384,28 @@
     {
       "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-external.yaml",
       "document_sha256": "aac62af686328957c8e632cf26cfe0e70ede1caacc159f56c98bddf5c258c97b",
+      "model": "qwen3.8-max",
       "role": "external",
       "rubric_version": "external-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-review-adversary.yaml",
       "document_sha256": "2b40386257f3671f4365e0dcfd9c31b7ddc08dce8a536d0422ef6c9a964207c8",
+      "model": "qwen3.8-max",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-review-contract.yaml",
       "document_sha256": "2148d7e4374248f9b7bb4ae0f02b44925ce6804d7d5ff575e1d6a97b23a07ae1",
+      "model": "qwen3.8-max",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-review-security.yaml",
       "document_sha256": "6c6fbf0ae1a3521a2e4ff2e8c99b2d340d6d196dbe524343f4c09c68f6e15bee",
+      "model": "qwen3.8-max",
       "role": "review-security",
       "rubric_version": "review-security-v1"
     }

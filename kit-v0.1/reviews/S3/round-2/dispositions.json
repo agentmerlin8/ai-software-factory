@@ -15,8 +15,8 @@
     {
       "id": "RC-003",
       "disposition": "fixed",
-      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
-      "evidence": "ONBOARDING.md choices table now states the --control-home default (dedicated) and when in-repo applies."
+      "fix_sha": "62867b7cadb7da31ef7314052ec652a71ec2f6f5",
+      "evidence": "README quickstart half fixed in 62867b7 (control-home flag + reason); the ONBOARDING.md choices row added in 20044a7."
     },
     {
       "id": "RC-004",
@@ -69,8 +69,8 @@
     {
       "id": "RA-007",
       "disposition": "fixed",
-      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
-      "evidence": "EXCLUDED_TREES boundary pinned by two temp-tree tests (inside the reviews subtree skipped; a sibling path reported)."
+      "fix_sha": "52a7d81344333b2337c7dc601b0a5b6bedcc3cd1",
+      "evidence": "EXCLUDED_TREES introduced in 52a7d81 (the carve-out this finding targets); its boundary tests added in 20044a7. Both are on this branch; the cited line is the carve-out's definition."
     },
     {
       "id": "RA-008",

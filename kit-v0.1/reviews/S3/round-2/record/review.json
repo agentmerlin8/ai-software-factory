@@ -51,8 +51,8 @@
     },
     {
       "disposition": "fixed",
-      "evidence": "EXCLUDED_TREES boundary pinned by two temp-tree tests (inside the reviews subtree skipped; a sibling path reported).",
-      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "EXCLUDED_TREES introduced in 52a7d81 (the carve-out this finding targets); its boundary tests added in 20044a7. Both are on this branch; the cited line is the carve-out's definition.",
+      "fix_sha": "52a7d81344333b2337c7dc601b0a5b6bedcc3cd1",
       "id": "RA-007",
       "issue": null,
       "reason": null
@@ -83,8 +83,8 @@
     },
     {
       "disposition": "fixed",
-      "evidence": "ONBOARDING.md choices table now states the --control-home default (dedicated) and when in-repo applies.",
-      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "README quickstart half fixed in 62867b7 (control-home flag + reason); the ONBOARDING.md choices row added in 20044a7.",
+      "fix_sha": "62867b7cadb7da31ef7314052ec652a71ec2f6f5",
       "id": "RC-003",
       "issue": null,
       "reason": null
@@ -319,39 +319,42 @@
       "dispositioned": 15,
       "findings": 18,
       "loop": 1,
-      "path": "/home/merlin/.hermes/cache/scratch/s35a/wt-s3/kit-v0.1/reviews/S3/round-1/pipeline/record"
+      "path": "kit-v0.1/reviews/S3/round-1/pipeline/record"
     },
     {
       "decision": "CHANGES_REQUESTED",
       "dispositioned": 9,
       "findings": 21,
       "loop": 1,
-      "path": "/home/merlin/.hermes/cache/scratch/s35a/wt-s3/kit-v0.1/reviews/S3/round-1/readiness/record"
+      "path": "kit-v0.1/reviews/S3/round-1/readiness/record"
     },
     {
       "decision": "CHANGES_REQUESTED",
       "dispositioned": 5,
       "findings": 18,
       "loop": 1,
-      "path": "/home/merlin/.hermes/cache/scratch/s35a/wt-s3/kit-v0.1/reviews/S3/round-1/tools-docs/record"
+      "path": "kit-v0.1/reviews/S3/round-1/tools-docs/record"
     }
   ],
   "reviewers": [
     {
       "document": "kit-v0.1/reviews/S3/round-2/findings-review-adversary.yaml",
       "document_sha256": "17b99aa77462975817458c9a0fa7a4548077dc84b055469225abbed8c12d8f5e",
+      "model": "qwen3.8-max",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-2/findings-review-contract.yaml",
       "document_sha256": "50adccc0c9eea4cac08d67795f3df79ac13be621e202fb68a690186a832e7c63",
+      "model": "qwen3.8-max",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-2/findings-review-security.yaml",
       "document_sha256": "ce7719eb972edbd78baa567089fed11607efb3cfe8a8e2e37a8bf582c0fe7f87",
+      "model": "qwen3.8-max",
       "role": "review-security",
       "rubric_version": "review-security-v1"
     }

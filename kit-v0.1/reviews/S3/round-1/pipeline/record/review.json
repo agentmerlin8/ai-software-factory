@@ -374,24 +374,28 @@
     {
       "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-external.yaml",
       "document_sha256": "19d3f83897ad34bc4b481ed8d30aa178125e510a221f69c244dc8a225e316051",
+      "model": "qwen3.8-max",
       "role": "external",
       "rubric_version": "external-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-review-adversary.yaml",
       "document_sha256": "5eb752f021c2cbca7ad6abfa5e77f7311a5a78e3c124fd9903e536ced0d4974f",
+      "model": "qwen3.8-max",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-review-contract.yaml",
       "document_sha256": "be1f081fb1f9dd8d0673c562dfb6fe8e55d7e8ef7099081bcae34b4ad8dad4db",
+      "model": "qwen3.8-max",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
       "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-review-security.yaml",
       "document_sha256": "6eaa2b74d3c0a486c314529b60c18fe202a45ea206a886e563cff0ee7211b54d",
+      "model": "qwen3.8-max",
       "role": "review-security",
       "rubric_version": "review-security-v1"
     }

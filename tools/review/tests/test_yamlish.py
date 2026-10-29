@@ -386,6 +386,14 @@ class TestNumericScalars(unittest.TestCase):
         value = {"a": "6032430", "b": "0123456"}
         self.assertEqual(yamlish.loads(yamlish.dumps(value)), value)
 
+    def test_unicode_escape(self) -> None:
+        self.assertEqual(yamlish.loads('a: "x\\u2014y"')["a"], "x\u2014y")
+
+    def test_malformed_unicode_escape_refused(self) -> None:
+        with self.assertRaises(YamlishError) as caught:
+            yamlish.loads('a: "x\\u12y"')
+        self.assertIn("invalid \\u escape", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

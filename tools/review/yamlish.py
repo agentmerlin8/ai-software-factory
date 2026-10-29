@@ -41,8 +41,9 @@ Named refusals (each raised as YamlishError)
 - inconsistent indentation (message names the line)
 - a sequence item with a mapping key on a following line at the wrong indent
   (message names the line)
-- unterminated quoted scalar
-- invalid escape in a double-quoted scalar
+- unterminated quoted  scalar
+- invalid escape in a double-quoted scalar (double-quoted scalars accept
+  \\n, \\t, \\\\, \\" and \\uXXXX; anything else is refused)
 - floats (``1.5``, ``.5``, ``1e3`` — refused by name)
 - additional strictness refusals, all named: multi-line plain scalars,
   mixing mapping keys and sequence items at one indentation, malformed
@@ -499,6 +500,18 @@ class _Parser:
                         out.append('"')
                     elif nxt == "\\":
                         out.append("\\")
+                    elif nxt == "u":
+                        # JSON/YAML unicode escape: reviewers and generators
+                        # emit these routinely; refuse only malformed ones.
+                        hexdigits = s[i + 2:i + 6]
+                        if len(hexdigits) != 4 or any(
+                                ch not in "0123456789abcdefABCDEF"
+                                for ch in hexdigits):
+                            raise YamlishError(
+                                "invalid \\u escape in a double-quoted scalar",
+                                lineno)
+                        out.append(chr(int(hexdigits, 16)))
+                        i += 4
                     else:
                         raise YamlishError(
                             f"invalid escape '\\{nxt}' in a double-quoted scalar", lineno

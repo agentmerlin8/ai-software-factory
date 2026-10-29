@@ -6,8 +6,8 @@
     "head_sha": "ac4b7619e554c339cd95964a9d3293d3849dd6f3",
     "package_sha256": "20cbd558789e41372395ef4cefc8589a880589cadc48344072a09a5cee816e1c"
   },
-  "frozen": "2026-10-28",
-  "metric_note": "strict = case+file+dimension match; location = case+file detection with dimension/severity agreement reported separately",
+  "frozen": "2026-10-29",
+  "metric_note": "strict = case+file+dimension match (CM recall requires a blocker/major produced finding); location = case+file detection with one-to-one consumption; escape per expected location; unnecessary-revision denominator = cases without an expected blocker/major",
   "models": {
     "review-adversary": "qwen3.8-max",
     "review-contract": "qwen3.8-max",
@@ -24,8 +24,8 @@
       "critical_major_recall": 0.9286,
       "defective_cases": 13,
       "location": {
-        "critical_major_detected": 14,
-        "critical_major_detection_recall": 1.0,
+        "critical_major_detected": 13,
+        "critical_major_detection_recall": 0.9286,
         "critical_major_expected": 14,
         "detected": 15,
         "detection_precision": 0.3125,
@@ -39,8 +39,8 @@
       "precision": 0.2917,
       "produced": 48,
       "recall": 0.875,
-      "unnecessary_revision_rate": 0.0,
-      "unnecessary_revisions": 0
+      "unnecessary_revision_rate": 0.25,
+      "unnecessary_revisions": 1
     },
     "lenses": {
       "review-adversary": {
@@ -48,17 +48,17 @@
         "approval_escapes": 0,
         "clean_cases": 2,
         "critical_major_expected": 14,
-        "critical_major_matched": 10,
-        "critical_major_recall": 0.7143,
+        "critical_major_matched": 9,
+        "critical_major_recall": 0.6429,
         "defective_cases": 13,
         "location": {
-          "critical_major_detected": 14,
-          "critical_major_detection_recall": 1.0,
+          "critical_major_detected": 12,
+          "critical_major_detection_recall": 0.8571,
           "critical_major_expected": 14,
-          "detected": 15,
+          "detected": 14,
           "detection_precision": 0.6364,
-          "detection_recall": 0.9375,
-          "dimension_agreement": 0.6667,
+          "detection_recall": 0.875,
+          "dimension_agreement": 0.6429,
           "expected": 16,
           "produced": 22,
           "severity_agreement": 1.0
@@ -67,8 +67,8 @@
         "precision": 0.4545,
         "produced": 22,
         "recall": 0.625,
-        "unnecessary_revision_rate": 0.0,
-        "unnecessary_revisions": 0
+        "unnecessary_revision_rate": 0.25,
+        "unnecessary_revisions": 1
       },
       "review-contract": {
         "approval_escape_rate": 0.2308,
@@ -79,23 +79,23 @@
         "critical_major_recall": 0.1429,
         "defective_cases": 13,
         "location": {
-          "critical_major_detected": 11,
-          "critical_major_detection_recall": 0.7857,
+          "critical_major_detected": 10,
+          "critical_major_detection_recall": 0.7143,
           "critical_major_expected": 14,
-          "detected": 14,
+          "detected": 13,
           "detection_precision": 1.0,
-          "detection_recall": 0.875,
-          "dimension_agreement": 0.2143,
+          "detection_recall": 0.8125,
+          "dimension_agreement": 0.2308,
           "expected": 16,
           "produced": 13,
-          "severity_agreement": 0.9286
+          "severity_agreement": 0.9231
         },
         "matched": 3,
         "precision": 0.2308,
         "produced": 13,
         "recall": 0.1875,
-        "unnecessary_revision_rate": 0.0,
-        "unnecessary_revisions": 0
+        "unnecessary_revision_rate": 0.25,
+        "unnecessary_revisions": 1
       },
       "review-security": {
         "approval_escape_rate": 0.3077,

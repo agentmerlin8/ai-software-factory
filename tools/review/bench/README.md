@@ -149,29 +149,32 @@ printed (metrics are data — zero matches is still exit 0), `1`
 unreadable/invalid input, `2` usage errors. A findings document whose
 author (`review.reviewer`) disagrees with the `ROLE=` label is refused.
 
-## Frozen baseline (2026-10-28)
+## Frozen baseline (2026-10-29, metric definitions v1.1)
 
-All three lenses ran on `qwen3.8-max` against the bench package `20cbd558…` (17 cases: 13 defective, 2 minor-only,
-2 clean). The machine copy is `baseline.json`.
+All three lenses ran on `qwen3.8-max` against the bench package `20cbd558…` (17 cases: 13 blocker/major-defective,
+2 minor-only, 2 clean). The machine copy is `baseline.json`. The first table published here (2026-10-28) used the
+pre-correction scorer; these numbers come from the corrected definitions — escapes are per expected location,
+detection consumes distinct produced findings one-to-one, strict critical/major recall requires the produced finding
+itself to be blocker/major, and the unnecessary-revision denominator includes minor-only cases.
 
 | lens | produced | strict precision | strict CM recall | detection recall | detection precision | CM detection recall | dimension agreement | unnecessary revision | escape rate |
 |---|---|---|---|---|---|---|---|---|---|
-| review-contract | 13 | 0.2308 | 0.1429 | 0.8750 | 1.0000 | 0.7857 | 0.2143 | 0.0 | 0.2308 |
-| review-adversary | 22 | 0.4545 | 0.7143 | 0.9375 | 0.6364 | 1.0000 | 0.6667 | 0.0 | 0.0 |
-| review-security | 13 | 0.4615 | 0.4286 | 0.6250 | 0.7692 | 0.6429 | 0.6000 | 0.0 | 0.3077 |
-| combined | 48 | 0.2917 | 0.9286 | 0.9375 | 0.3125 | 1.0000 | 0.9333 | 0.0 | 0.0 |
+| review-contract | 13 | 0.2308 | 0.1429 | 0.8125 | 1.0000 | 0.7143 | 0.2308 | 0.25 | 0.2308 |
+| review-adversary | 22 | 0.4545 | 0.6429 | 0.8750 | 0.6364 | 0.8571 | 0.6429 | 0.25 | 0.0000 |
+| review-security | 13 | 0.4615 | 0.4286 | 0.6250 | 0.7692 | 0.6429 | 0.6000 | 0.00 | 0.3077 |
+| combined | 48 | 0.2917 | 0.9286 | 0.9375 | 0.3125 | 0.9286 | 0.9333 | 0.25 | 0.0000 |
 
 Reading it honestly:
 
-- **Combined critical/major detection recall is 1.0** — every blocker/major defect in the seed set was raised by at
-  least one lens at the correct artifact. That is the property the lane exists to hold.
+- **Combined critical/major detection recall is 0.93** — 13 of 14 blocker/major defects were raised at the correct
+  artifact by at least one lens. That is the property the lane exists to hold; it is not perfect.
 - **Combined detection precision is 0.31** — 48 produced findings for 16 expected. The panel is voluminous; the lane
   must not be sold as low-noise. Volume is the cost of the three-lens union.
-- **Strict recall understates detection** because dimensions are lens-dependent: the contract lens reports the true
-  defect at the right file but tags it `contract_fidelity` (dimension agreement 0.21). Strict metrics measure tag
+- **Strict recall understates detection** because dimensions are lens-dependent: the contract lens reports true
+  defects at the right file but tags them `contract_fidelity` (dimension agreement 0.23). Strict metrics measure tag
   choice; promote changes against the detection block first and treat dimension agreement as a separate target.
-- No lens produced an unnecessary revision on the clean controls; each lens individually escapes on some defective
-  case, and the union closes all of them — that is why the panel is three lenses and not one.
+- One false blocker landed on a minor-only case (combined unnecessary-revision 0.25); each lens individually escapes
+  on some defective case, and the union closes all of them — that is why the panel is three lenses and not one.
 
 ## Refreshing the baseline
 

@@ -1,0 +1,79 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: de145807307d37da509d48552638156a2669ba07b9ff3cc40cc0a6eeae87dd06
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: onboarding/readiness.py:872
+      evidence: "W-1's core guard `if Path(toplevel) != ctx.home.resolve(): return FAIL, f\"git toplevel {toplevel} is not the control home\"` is never exercised: the only W-1 defect test (`test_w1_fail_in_repo`, defect `not-git-root`) moves `.git` into `nested/` so `rev-parse` fails outright and the FIRST branch fires (\"not inside a git repo\"); deleting the toplevel comparison leaves every test in the package green."
+      required_change: "Add a FAIL-path test where `git rev-parse --show-toplevel` succeeds but returns a directory other than the home (e.g. home is a plain subdirectory of an initialized repo), asserting the `git toplevel ... is not the control home` detail — removing the comparison must make that test fail."
+      actionable: true
+    - id: RA-002
+      severity: blocker
+      rubric_dimension: behavior
+      artifact_reference: onboarding/readiness.py:773
+      evidence: "The module Laws claim \"malformed input never produces a raw traceback\", but check_c12 does `secrets.read_text(encoding=\"utf-8\")` and `gitignore.read_text(...)` with no UnicodeDecodeError handling; run_verify catches only `(EngineError, FP.FixtureError)` and `OSError`, and UnicodeDecodeError is a ValueError subclass — a non-UTF-8 factory/SECRETS.md or .gitignore escapes as a raw traceback, no PREFLIGHT.md is written, and the asserted fail-closed invariant is not delivered. parse_toml, check_a7 and check_a8 all catch UnicodeDecodeError; check_c12 does not, and no test feeds a non-UTF-8 file to it."
+      required_change: "Handle UnicodeDecodeError in check_c12's two read_text calls with a named FAIL detail (as parse_toml does), or widen run_verify's named-error catch to cover it, and add a defect test (non-UTF-8 SECRETS.md) asserting a named FAIL row and no traceback."
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: onboarding/readiness.py:440
+      evidence: "missing_protections validates parameters only for `pull_request` (`required_approving_review_count >= 1`); for `required_status_checks` it checks type presence only. A ruleset carrying a `required_status_checks` rule with an empty or absent checks parameter passes C-3/W-7 while the PASS detail claims full protection — the guard is defeated by a widened input. Every ruleset test removes or adds rule TYPES (`test_c3_fail_empty_rules`, `test_c3_fail_single_missing_protection`); none exercises a present-but-empty required_status_checks parameter."
+      required_change: "Either validate that the `required_status_checks` rule carries a non-empty checks parameter in missing_protections, or state explicitly in the check detail that only type presence is claimed; add a ruleset-dataset test with an empty required_status_checks parameter pinning the chosen semantics."
+      actionable: true
+    - id: RA-004
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: onboarding/readiness.py:1230
+      evidence: "In run_attest the malformed-scoped-id guard (`if check_id.count(\":\") != 1 or not binding.strip()`) is nested inside `if binding:`, so it is unreachable for the empty-binding case: `attest <home> C-13: --by x --note y` partitions to binding=\"\", skips the block, and appends a row for the meaningless id \"C-13:\" to the append-only ledger instead of the named refusal `unknown check id`; no test covers a trailing-colon id."
+      required_change: "Reject a check_id containing \":\" with an empty or whitespace-only binding before the declared-binding lookup (named EngineError, rc 1), and add a CLI test asserting the refusal message and a byte-identical ledger."
+      actionable: true
+    - id: RA-005
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: onboarding/readiness.py:1173
+      evidence: "load_registry hard-requires a bool `required` per check row, but the gate computation `green = summary[\"failed\"] == 0` never consults it — every FAIL gates regardless of the flag, and the flag drives no output. A production registry change flipping a CORE check to `required: false` leaves behavior and output byte-identical: the validated field is nominal, and no test pins what `required` means for gating."
+      required_change: "Either gate on `required` (only required FAILs force RED, non-required FAILs render as named non-gating rows) with a test that flips a check's flag and observes the rc change, or drop the misleading per-row bool from the registry schema and its validation."
+      actionable: true
+    - id: RA-006
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: onboarding/readiness.py:384
+      evidence: "append_attest builds `event_id = f\"onboard-attest-{check_id}-{int(time.time())}\"` and dedupes against a ledger snapshot loaded before the append (TOCTOU): two concurrent attest runs within the same unix second both load the same `existing` set, both conclude the id is free, and both append — duplicate event_ids hit the ledger's uniqueness law, and on LedgerError the dedupe silently degrades to `existing = set()` (no collision check at all)."
+      required_change: "Make the append collision-safe under concurrent runs (e.g. re-read/verify uniqueness inside the append path or derive a suffix from content the snapshot cannot collide on) and add an operational test appending two attests for the same check within one second asserting distinct event_ids and a valid ledger."
+      actionable: true
+    - id: RA-007
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: onboarding/tests/test_readiness.py:306
+      evidence: "test_read_only_hash_walk computes `changed = {k for k in after if k not in before or before.get(k) != after[k]}` and `added = set(after) - set(before)` — both keyed on `after`, so files DELETED by a verify run never appear; a production change making verify unlink any home file outside the sanctioned set keeps the read-only-law test green."
+      required_change: "Include deletions in the walk comparison (`set(before) - set(after)` must also be a subset of the sanctioned set, or empty) so removing the guard fails the test."
+      actionable: true
+    - id: RA-008
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: onboarding/readiness.py:348
+      evidence: "home_states() wraps the installed state_machine import/exec in `except Exception: pass` and silently falls back to the kit's SM.STATES; W-8's comparison baseline therefore changes without any signal in the detail line (\"Stage options cover all N pipeline states\" names neither authority nor N's source). A production change that makes the installed module raise (or a truncated STATES list in it) silently swaps or shrinks the authority W-8 checks against; no test covers a broken or divergent installed state_machine.py."
+      required_change: "Name the authority used in the W-8 detail (installed vs kit fallback), and add a test with a broken/short-STATES installed factory/tools/state_machine.py pinning the fallback behavior and the detail wording."
+      actionable: true
+    - id: RA-009
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: onboarding/readiness.py:546
+      evidence: "env_ref_problems silently skips non-string refs (`if not isinstance(ref, str) or CV.is_deferred(ref): continue`) and resolves `file:` refs as `(ctx.home / ref[5:]).exists()` — an absolute or `../`-escaping path resolves outside the home, so a production change declaring `refs = [\"file:/etc/passwd\"]` or a dict-valued ref passes W-3's presence guard without any credential material under the home. No test covers a non-string ref or a home-escaping file: ref."
+      required_change: "Refuse (named W-3 problem) non-string refs and file: refs that resolve outside the home, and add tests for both escapes."
+      actionable: true
+    - id: RA-010
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: onboarding/readiness.py:1048
+      evidence: "applicability's `control_home not declared (workspace.toml unreadable or invalid)` N-A branch (mode \"unknown\") turns off ALL eight mode:dedicated checks, and N-A never gates; apply_defects has no defect that removes or garbles the `control_home` key while keeping the TOML parseable, so no test shows whether a valid workspace.toml that merely omits control_home still forces RED via C-10 or silently greens with W-1..W-8 all N-A."
+      required_change: "Add a defect test (workspace.toml without `control_home`, otherwise valid) pinning the intended outcome: either a named FAIL from an always-applicable check or the N-A rendering with its rc, so widening applicability to unknown-mode cannot silently disable the WORKSPACE category."
+      actionable: true

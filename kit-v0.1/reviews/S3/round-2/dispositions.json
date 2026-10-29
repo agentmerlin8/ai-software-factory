@@ -1,0 +1,94 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001",
+      "disposition": "rejected",
+      "reason": "Acceptance executed at the reviewed head; the gate-evidence input is a deterministic-gate record, not the acceptance transcript.",
+      "evidence": "Acceptance evidence measured at the reviewed head 52a7d81344333b2337c7dc601b0a5b6bedcc3cd1: `python3 onboarding/test_out.py --smoke` (default seed = the kit's benchmark-app/) ran 10/10 steps PASS with verify GREEN (18 pass / 0 fail / 13 n-a), rc 0. The smoke is an execution acceptance, not a unit test; the record cites the run rather than embedding it in the package gate inputs."
+    },
+    {
+      "id": "RC-002",
+      "disposition": "rejected",
+      "reason": "The scope extension is recorded, not hidden: the genericization tripwire is a carried S2 residual (T6) named in the PR body, and it enforces the build-plan ground rule that this repo stays generic. A second plan amendment for a carried residual is bookkeeping, not a scope change.",
+      "evidence": "PR #23 body, T6: 'Carried S2 residuals: ... F3 - genericization CI tripwire (tools/check_generi...'; build-plan ground rules: 'This repo stays generic - no private product names ever'."
+    },
+    {
+      "id": "RC-003",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "ONBOARDING.md choices table now states the --control-home default (dedicated) and when in-repo applies."
+    },
+    {
+      "id": "RC-004",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "architecture.md older bullet amended: only registry-version drift FAILs; kit-sha drift stays advisory."
+    },
+    {
+      "id": "RC-005",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "target-repo-readiness.md check-categories line now lists the five categories including WORKSPACE."
+    },
+    {
+      "id": "RA-001",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "install_bytes refuses when any component from the target root to dest is a symlink and verifies resolved containment under the target."
+    },
+    {
+      "id": "RA-002",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "issue-form absence classification anchored to ^HTTP 404; a non-404 'not found' now raises a named ProbeError (test added)."
+    },
+    {
+      "id": "RA-003",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "forge-login parse refuses a line with no 'account' token as well as the empty tail; both shapes tested."
+    },
+    {
+      "id": "RA-004",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "G4 refuses when a dedicated home's origin cannot be normalized (named refusal + NEXT)."
+    },
+    {
+      "id": "RA-005",
+      "disposition": "rejected",
+      "reason": "No behavioral risk: the sweep is the union of tracked and walked files by design; walked_files already covers every tracked file, so the tracked enumeration is belt-and-braces, and a mutation removing it cannot hide a file.",
+      "evidence": "check_genericization.scan: files = sorted(set(tracked) | set(walked_files(root))); walked_files walks the tree outside .git and applies the same exclusions."
+    },
+    {
+      "id": "RA-006",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "--command-result list elements are shape-checked as objects; '[42]' is a named usage refusal (rc 2, element index named)."
+    },
+    {
+      "id": "RA-007",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "EXCLUDED_TREES boundary pinned by two temp-tree tests (inside the reviews subtree skipped; a sibling path reported)."
+    },
+    {
+      "id": "RA-008",
+      "disposition": "rejected",
+      "reason": "Informational: defense-in-depth escaping behind a validated path; no change required and none made.",
+      "evidence": "cmd_propose refuses every --repo-url that normalize_repo_url rejects before render_workspace_draft is reached; actionable=false in the finding."
+    },
+    {
+      "id": "RS-001",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "Same fix as RA-001: parent-component symlink and resolved-containment checks in install_bytes."
+    },
+    {
+      "id": "RS-002",
+      "disposition": "fixed",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "evidence": "Same fix as RA-002: structural ^HTTP 404 anchoring for issue-form absence."
+    }
+  ]
+}

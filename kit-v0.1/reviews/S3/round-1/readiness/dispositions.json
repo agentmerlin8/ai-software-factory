@@ -1,0 +1,130 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "Unused hash_walk helper removed from readiness.py (tests keep their local copy)."
+    },
+    {
+      "id": "RC-002",
+      "disposition": "rejected",
+      "reason": "Same acceptance evidence as pipeline RC-001.",
+      "evidence": "The acceptance was executed at head 62867b7: `python3 onboarding/test_out.py --smoke` (default seed = the kit's benchmark-app/) ran 10/10 steps PASS, verify GREEN (18 pass / 0 fail), rc 0. test_out.py is unchanged since the reviewed head 2bd431c, so the run applies to the reviewed code. The unit test's synthetic seed is a suite-speed choice, not a deferral of the acceptance."
+    },
+    {
+      "id": "RC-003",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "test_readiness module docstring corrected to describe the shipped FAIL-path coverage."
+    },
+    {
+      "id": "RC-004",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "test_docs_consistency docstring corrected to describe both shipped tests."
+    },
+    {
+      "id": "RA-001",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "Added W-1 toplevel-mismatch FAIL test; deleting the comparison makes it fail."
+    },
+    {
+      "id": "RA-002",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "check_c12 decode/read failures return a named FAIL, no traceback."
+    },
+    {
+      "id": "RA-003",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "required_status_checks parameter validation."
+    },
+    {
+      "id": "RA-004",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Malformed scoped-id guard unreachable for the empty-binding branch."
+    },
+    {
+      "id": "RA-005",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "`required` registry field is loaded but not consulted by the gate computation."
+    },
+    {
+      "id": "RA-006",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Attest event_id TOCTOU window."
+    },
+    {
+      "id": "RA-007",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "Read-only hash walk now compares deletions as well as changes/additions."
+    },
+    {
+      "id": "RA-008",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "home_states swallows installed state-machine errors."
+    },
+    {
+      "id": "RA-009",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Non-string credential refs are skipped silently (confinement fixed separately)."
+    },
+    {
+      "id": "RA-010",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "N-A applicability for unknown control-home mode."
+    },
+    {
+      "id": "RS-001",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "--forge-fixture false-PASS path (same class as tools-docs RS-002)."
+    },
+    {
+      "id": "RS-002",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Applicability N-A for an unknown control-home mode; confirm an invalid config still fails a gating check."
+    },
+    {
+      "id": "RS-003",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "check_c12 decode/read failures return a named FAIL, no traceback (same fix as RA-002)."
+    },
+    {
+      "id": "RS-004",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "file: credential refs resolved and confined under the control home; escapes are a named problem."
+    },
+    {
+      "id": "RS-005",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "home_states swallows installed state-machine errors and falls back to the kit authority."
+    },
+    {
+      "id": "RS-006",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Attestation identity is self-declared; allowlist check is a trust-model decision."
+    },
+    {
+      "id": "RS-007",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "Preflight detail rows normalise CR/LF before escaping so a detail cannot break the table."
+    }
+  ]
+}

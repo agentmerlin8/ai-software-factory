@@ -1,0 +1,65 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 6014aa8b460055e2cda30d20da8b67c8af03a3a6d4033502afb8479706e559a2
+  base_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  head_sha: 52a7d81344333b2337c7dc601b0a5b6bedcc3cd1
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/onboard.py:510
+      evidence: "the symlink fix guards only the destination itself — '+        if dest.is_symlink():' raising OnboardError — but the prior finding it answers (pipeline RS-002) required refusing 'when dest or any component of dest.parent inside the target is a symlink, or resolve dest and verify it stays within target.resolve()' and applying the same check to the mkdir(parents=True) path; the hunk leaves dest.parent unexamined, so a hostile target tree whose 'factory' directory is itself a symlink to an outside location makes dest.is_symlink() False and dest.exists() follow the link, and install_bytes writes through to the outside target; all three new tests (test_installer_refuses_dangling_symlink_directly, test_installer_refuses_symlink_to_existing_file, test_apply_refuses_dangling_symlink_dest) plant the symlink only AT the destination path, so no test fails with the parent-component escape open"
+      required_change: "extend install_bytes to resolve dest and verify containment within target.resolve() (or check every parent component inside the target for symlinks before mkdir/write), and add a test where a PARENT directory of an install path is a symlink to an outside directory, asserting the named refusal and that nothing is written outside"
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@onboarding/forge_probe.py:330
+      evidence: "the tightened absence classifier '+        if \"404\" in detail and \"not found\" in detail.lower():' is pinned on only one side: mutation — drop the '\"404\" in detail' conjunct, keeping 'if \"not found\" in detail.lower():' — and every test in TestIssueFormTransport404Classification stays green ('HTTP 404: Not Found (GH006)' and 'error 404: TEMPLATE NOT FOUND' still classify absent; 'pipeline 4041 failed: deploy error' and 'HTTP 404: API rate limit exceeded' contain no 'not found' and still raise ProbeError); no test feeds a NON-404 stderr that contains 'not found' (e.g. 'ssh: Could not resolve hostname — host not found'), so the 404 half of the guard can be deleted without any test failing while a DNS or CLI error is silently reclassified as template absence"
+      required_change: "add a stubbed-transport case with a non-404 stderr containing 'not found' (e.g. 'host not found') asserting a named ProbeError, so removing either conjunct of the classifier fails the suite"
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/test_out.py:490
+      evidence: "the login-parse fix covers only the empty-tail shape — '+                if not tail:' raising TestOutError — but the prior finding it answers (pipeline RA-008) named TWO shapes and required covering both: 'a line lacking account silently yields garbage (e.g. the first whitespace token)'; a 'Logged in to' line without the 'account' substring still takes split(\"account\")[-1] = the whole line and silently assigns tail[0] (the first whitespace token, e.g. a check-mark glyph) as the login that feeds 'gh repo create' ownership; TestGhAuthLoginParseGuard's EmptyTailAuthRunner emits only 'Logged in to github.com account' — no test drives the missing-'account' shape, so that path stays a silent garbage value"
+      required_change: "refuse (named TestOutError) or fall back to the explicit '<owner>' sentinel when the 'account' token is absent from the line, and add a second stubbed full-path case for that shape as the prior finding required"
+      actionable: true
+    - id: RA-004
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/onboard.py:454
+      evidence: "the self-binding guard change only casefolds the comparison ('+                home_slug.casefold() == binding_slug.casefold():'); the prior finding it answers (pipeline RA-009) required handling the normalize-FAILURE escape: 'when control_home=dedicated and an origin exists but normalize_repo_url fails, either refuse with a named message or fall back to comparing the raw origin string against the binding' — the hunk leaves 'home_slug = RD.repo_slug_from_url(normalize_repo_url(facts[\"origin_url\"]) or \"\")' untouched, so an origin outside the two grammars (ssh:// with a port, non-GitHub host) still collapses home_slug to '' and the guard passes through; the only new test (test_case_variant_self_binding_refused) uses a normalizing https origin, so no test exercises a non-normalizing origin plus a self-referential --repo-url"
+      required_change: "refuse with a named message (or compare the raw origin against the binding) when control_home=dedicated, an origin exists, and normalize_repo_url returns None; add the test the prior finding named — a dedicated propose with a non-normalizing origin plus a self-referential --repo-url"
+      actionable: true
+    - id: RA-005
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/check_genericization.py:161
+      evidence: "the union scan '+    tracked = tracked_files(root) if is_git_repo(root) else []' / '+    files = sorted(set(tracked) | set(walked_files(root)))' makes the tracked-file enumeration non-load-bearing — mutation: stub tracked_files to return [] and every test stays green, because walked_files alone supplies all on-disk files and the new test_git_repo_untracked_file_is_swept only proves the WALK half of the union; the prior finding's acceptance (tools-docs RA-001: 'assert rc 1 plus the exact HIT line, so an empty or stubbed tracked-file enumeration fails the suite') is therefore still not met — no test observes the tracked enumeration contributing anything"
+      required_change: "either pin the tracked branch with a case only it can satisfy (a git-tracked file absent from the walk, e.g. excluded by a walk skip rule, carrying a seeded token → HIT), or delete the now-redundant tracked_files/is_git_repo branch so the scan has one tested source"
+      actionable: true
+    - id: RA-006
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/gates/pre_review_gate.py:644
+      evidence: "the new shape-contract law validates only the TOP level of --command-result: 'if isinstance(parsed, list): command_results.extend(parsed)' — list ELEMENTS are never shape-checked, so a file holding '[42]' or '[\"x\"]' extends command_results with non-objects that flow into the gate's payload walk, the exact failure class the sibling --ui-results fix names in its own comment ('never reach check_ui_results (whose payload walk would raise an AttributeError on a non-object)'); test_non_object_command_result_named_usage_refusal feeds only the scalar '42', so no test covers a list of non-objects and the named-refusal rationale is unenforced for the list branch"
+      required_change: "validate each element of a --command-result list as a JSON object with a named rc-2 usage refusal for non-object elements (mirroring the ui-results check), and add a test feeding '[42]' asserting the named refusal and no traceback"
+      actionable: true
+    - id: RA-007
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/check_genericization.py:169
+      evidence: "the fix introduces a new whole-subtree exclusion — '+EXCLUDED_TREES = (\"kit-v0.1/reviews\",)' with the scan-loop skip '+        if any(rel == prefix or rel.startswith(prefix + \"/\") for prefix in EXCLUDED_TREES):' — and no test pins its boundary in either direction: mutation — widen the prefix to 'kit-v0.1' (or any ancestor of real product docs) — and every suite case stays green, because the temp-tree cases never create a kit-v0.1 path and test_real_repo_root_is_clean only gets MORE excluded; a banned token planted anywhere under the excluded subtree is invisible to the tripwire, and nothing tests that a seeded token just OUTSIDE the prefix still HITs while one just INSIDE is skipped"
+      required_change: "add two temp-tree cases pinning the carve-out boundary: a seeded banned token under a kit-v0.1/reviews/ path is skipped (rc 0) and the same token under a sibling path (e.g. kit-v0.1/other/) is reported (rc 1, exact HIT line), so widening EXCLUDED_TREES fails the suite"
+      actionable: true
+    - id: RA-008
+      severity: info
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@onboarding/onboard.py:336
+      evidence: "the render_workspace_draft escaping hunk ('+        safe_url = (args.repo_url.replace(\"\\\\\", \"\\\\\\\\\").replace(\\'\"\\', \\\\'\\\\\"\\'))') is unreachable through any validated path — cmd_propose now refuses every --repo-url that normalize_repo_url rejects and substitutes the NORMALIZED value, which by construction carries no quote or backslash — and no test drives render_workspace_draft with a raw escapable string, so mutation: delete both .replace calls and every test stays green; the hunk is harmless defense-in-depth but is not proof of anything"
+      required_change: "none required; if the defense-in-depth layer is wanted, add a direct unit test calling render_workspace_draft with an escapable repo_url so the escaping is pinned, otherwise note it as belt-and-braces"
+      actionable: false

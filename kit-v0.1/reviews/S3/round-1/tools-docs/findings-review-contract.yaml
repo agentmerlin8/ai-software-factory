@@ -1,0 +1,44 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: bd0de80a5873fd8fa69dc5d701b01fd84c873f1d914ef6f04f94d4d9fd40ec33
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: blocker
+      rubric_dimension: contract_fidelity
+      artifact_reference: kit-v0.1/target-repo-readiness.md:9
+      evidence: "Docs in this diff assert shipped state for artifacts the diff does not contain: target-repo-readiness.md adds '2. **Onboard verify** (shipped in S3 — `onboarding/readiness.py` + `onboarding/registry.json`)', and architecture.md:130 adds 'Onboarding pipeline SHIPPED (S3): `onboarding/onboard.py` `preflight|inspect|propose|apply|verify|attest`'. Yet the package's own Diff stat (total: 21 files, +853 -257, matching Identity changed_files: 21 with 'withheld_files: none / omitted_files: none') adds no onboarding/onboard.py, no onboarding/readiness.py, no onboarding/registry.json, and no fresh-repo test-out scripts. The S3 acceptance criteria — 'verify green on a fixture control-home repo', 'Precise, named FAILs on a deliberately non-compliant repo', 'The test-out scripts ship and run green against benchmark-app as a smoke' — are touched by no hunk, and the Gate evidence cites only generic runs (python3 -m unittest 1343 tests, test_gate.py 63 tests, config_validator on 3 templates, CI success) with no fixture-scoped verify, non-compliant-repo FAIL, or benchmark-app smoke evidence."
+      required_change: "Land the S3 acceptance artifacts inside the reviewed range — the deterministic pipeline (preflight→inspect→propose→apply→verify), the readiness registry, and the fresh-repo test-out scripts — with fixture-scoped gate evidence (verify green on the fixture control-home, named FAILs on a deliberately non-compliant repo, test-out green against benchmark-app); or, if those files exist outside this diff, correct the package Identity/omitted_files so the diff accounts for them. Until then the docs must not assert 'shipped in S3' / 'SHIPPED (S3)' for artifacts and verification the package's own evidence does not show."
+      actionable: true
+    - id: RC-002
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: README.md:131
+      evidence: "The README quickstart runs the whole pipeline with no control-home flag — 'python3 onboarding/onboard.py propose /path/to/your/repo' then 'apply' — but no default is documented anywhere in the package. ONBOARDING.md:137 defines the choice ('Control-home mode | `--control-home dedicated|in-repo` | `control_home` in `workspace.toml`. `dedicated` = a separate workspace repo holds the ledger/config and binds product repos; `in-repo` = the target repo is its own control home. Drives which WORKSPACE checks apply in verify.') and documents defaults for every other propose/apply choice (workspace name, repo-url, envs, pin, ui) — but not for --control-home. A reader following the quickstart cannot determine which control-home configuration the bare commands produce, even though the mode drives which WORKSPACE checks verify applies."
+      required_change: "State the default --control-home mode in ONBOARDING.md's guided-session choices table (as done for the other choices), and make the README quickstart's configuration explicit — either pass the flag or state which control-home mode the bare command sequence results in."
+      actionable: true
+    - id: RC-003
+      severity: major
+      rubric_dimension: scope
+      artifact_reference: tools/check_genericization.py:1
+      evidence: "A substantial body of the diff maps to no S3 acceptance criterion and no S3 plan item: tools/check_genericization.py (+189, docstring self-tags it 'the genericization tripwire (S2-F3)'), tools/tests/test_genericization_check.py (+116), the S2-F2 named-refusal hardening in tools/contract_lib.py, tools/gates/mechanical_checks.py, tools/gates/pre_review_gate.py and tools/gates/test_gate.py (comments cite 'S2-F2' throughout), plus the CI step '+        run: python3 tools/check_genericization.py' and '+          fetch-depth: 0   # full history — readiness pin-resolution checks' whose stated purpose ('resolve concrete pins against ancestor commits') serves the readiness code that is absent from this diff. The frozen S3 scope is 'Deterministic onboarding scripts … plus the guided-session brief … the readiness registry … and the fresh-repo test-out scripts'; these hunks are remediation of the prior slice's (S2) review findings, and the package contains no recorded deviation or scope extension covering them ('allowed_files: all changed files' records no such decision)."
+      required_change: "Either record the scope extension — an explicit deviation/scope note in the contract or plan tying the S2-F2/S2-F3 remediation and the genericization CI gate to this slice — or split these hunks out of the S3 range into their own reviewed change. The fetch-depth:0 CI comment must also name a check that ships in the same range or be deferred with it."
+      actionable: true
+    - id: RC-004
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: kit-v0.1/architecture.md:436
+      evidence: "The new bullet fixes kit-sha drift as non-gating: 'kit-sha drift is **ADVISORY** (`kit version drift: ... (advisory — does not gate)`) — it never gates.' The unchanged bullet two lines below in the same section still reads: 'A kit-version vs registry-version mismatch is a **FAIL** (drift must be visible).' As written the older sentence asserts a FAIL for exactly the kit-version drift the new bullet declares ADVISORY-only, leaving the frozen doc self-contradictory on which drift gates."
+      required_change: "Amend the older bullet so it names only registry-version drift as the FAIL condition (matching the new frozen semantics: registry-version drift FAIL, kit-sha drift ADVISORY, never gating), removing the contradiction inside the Onboarding architecture section."
+      actionable: true
+    - id: RC-005
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: kit-v0.1/target-repo-readiness.md:11
+      evidence: "The diff's new docs fix a five-category registry — ONBOARDING.md §5: 'category (CORE/WORKSPACE/UI/ADAPTER/ADVISORY)' and 'Control-home mode … Drives which WORKSPACE checks apply in verify' — but target-repo-readiness.md, edited by this same diff (hunk '@@ -6,7 +6,7 @@'), keeps its category line at four categories with no WORKSPACE: 'Check categories: **CORE** (required for any factory run) · **UI** (only when stories touch UI) · **ADAPTER** (required only when that adapter executes work) · **ADVISORY** (recommended).' The shipped checklist doc therefore does not describe the WORKSPACE category the shipped pipeline docs say verify applies."
+      required_change: "Update the Check-categories line in kit-v0.1/target-repo-readiness.md to include WORKSPACE (five categories, matching ONBOARDING.md §5 and architecture.md's Onboarding architecture section), since the file is already touched by this slice."
+      actionable: true

@@ -1,0 +1,411 @@
+{
+  "base_sha": "152b205b48937a3a12020c02c8378022d088d86e",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: GitHub ref-pattern matching for include and exclude, wildcard regressions.",
+      "fix_sha": "62867b7",
+      "id": "EX-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: ruleset listing paginated to exhaustion (per_page=100&page=N).",
+      "fix_sha": "62867b7",
+      "id": "EX-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: only target=branch rulesets participate in selection.",
+      "fix_sha": "62867b7",
+      "id": "EX-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "issue_form classifies absence only on 404 + not-found; unrelated errors raise a named ProbeError (test added).",
+      "fix_sha": "a447cb2",
+      "id": "RA-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "stdlib-imports test replaced with a source AST scan of imported modules; verified it fails on a planted third-party import.",
+      "fix_sha": "52a7d81",
+      "id": "RA-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "__pycache__ test now seeds a temp source tree and asserts the installed tree excludes it.",
+      "fix_sha": "52a7d81",
+      "id": "RA-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "run_full test uses distinct runner sentinels; the test now observes which seam is called.",
+      "fix_sha": "52a7d81",
+      "id": "RA-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "non-array ruleset listing raises a named ProbeError instead of coercing to empty.",
+      "fix_sha": "a447cb2",
+      "id": "RA-005",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Drafts-dir reuse drift; design call on whether apply should install only proposed envs.",
+      "fix_sha": null,
+      "id": "RA-006",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "catch-all refusal paths now print a NEXT line.",
+      "fix_sha": "a447cb2",
+      "id": "RA-007",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "forge-login parse guards the empty tail with a named TestOutError.",
+      "fix_sha": "a447cb2",
+      "id": "RA-008",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "G4 no-origin case to be confirmed alongside the case-insensitive compare.",
+      "fix_sha": null,
+      "id": "RA-009",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "The acceptance was executed at head 62867b7: `python3 onboarding/test_out.py --smoke` (default seed = the kit's benchmark-app/) ran 10/10 steps PASS, verify GREEN (18 pass / 0 fail), rc 0. test_out.py is unchanged since the reviewed head 2bd431c, so the run applies to the reviewed code. The unit test's synthetic seed is a suite-speed choice, not a deferral of the acceptance.",
+      "fix_sha": null,
+      "id": "RC-001",
+      "issue": null,
+      "reason": "Acceptance is a run, and it is green; the unit test's synthetic seed is a speed choice."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "label_ensure builds argv inside the transport from named params; a caller-supplied argv is refused.",
+      "fix_sha": "a447cb2",
+      "id": "RS-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "install_bytes refuses a symlink destination before the exists check; outside target is never created.",
+      "fix_sha": "a447cb2",
+      "id": "RS-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "--envs names validated as single path components before any path use.",
+      "fix_sha": "a447cb2",
+      "id": "RS-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RA-001 (issue_form classification).",
+      "fix_sha": "a447cb2",
+      "id": "RS-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RA-005 (ruleset listing shape).",
+      "fix_sha": "a447cb2",
+      "id": "RS-005",
+      "issue": null,
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/forge_probe.py:485",
+      "evidence": "External review 5658724504 (2026-10-26, high): an active ruleset including ~DEFAULT_BRANCH but excluding refs/heads/m* does not protect main, yet this matcher selects it; wildcard includes are also missed.",
+      "id": "EX-001",
+      "lens": "external",
+      "required_change": "Implement GitHub-compatible ref-pattern matching for include AND exclude selectors; add wildcard and exclude regression cases.",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "external"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/forge_probe.py:205",
+      "evidence": "External review 5658724504 (2026-10-26, medium): the ruleset list request reads only the first page (30 by default); an applicable ruleset on a later page makes the probe report missing protection.",
+      "id": "EX-002",
+      "lens": "external",
+      "required_change": "Page the rulesets endpoint to exhaustion before fetching details, as the labels transport already does.",
+      "rubric_dimension": "operational",
+      "severity": "major",
+      "source": "external"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/forge_probe.py:491",
+      "evidence": "External review 5658724504 (2026-10-26, medium): selection does not filter target == branch, so an active tag ruleset using ~ALL can be chosen ahead of the default-branch ruleset.",
+      "id": "EX-003",
+      "lens": "external",
+      "required_change": "Only rulesets whose target is branch may participate in branch-protection selection.",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "external"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/forge_probe.py:262",
+      "evidence": "the real transport's issue_form branch discriminates errors solely by substring \u2014 'if \"404\" in detail: return {\"present\": False, \"path\": None}' else ProbeError \u2014 and no test in the package ever drives gh_probe_transport's issue_form branch at a non-zero rc: TestIssueForm uses the in-memory RecorderTransport and TestRealTransportRepoNormalization.test_issue_form_contents_endpoint_normalized stubs only an rc=0 success. A production change that returns present=False for ANY failed rc (dropping the 404 discrimination), or one where an unrelated stderr that merely contains '404' (rate-limit or proxy text) is read as 'template absent', leaves every test green while converting real forge failures into a false absent-template fact for the check layer.",
+      "id": "RA-001",
+      "lens": "review-adversary",
+      "required_change": "add stubbed-subprocess tests over the cited branch: non-zero rc with a 404 stderr -> {'present': False, 'path': None}; non-zero rc with a non-404 stderr (e.g. 500 / rate limit) -> named ProbeError; assert both against gh_probe_transport directly.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/tests/test_forge_probe.py:838",
+      "evidence": "test_module_imports_stdlib_only scans vars(FP) but skips every value where 'hasattr(value, \"__file__\")' \u2014 which is exactly every imported module (json, re, subprocess, and any third-party module). Adding 'import requests' (or any non-stdlib import) to forge_probe.py leaves this test green; only classes/functions are ever checked, and their __module__ roots are trivially stdlib or the skipped 'onboarding' root. The stdlib-only law for forge_probe.py is therefore unenforced \u2014 onboard.py and test_out.py have real AST-based import checks, forge_probe.py's house-law test survives removal of the law it guards.",
+      "id": "RA-002",
+      "lens": "review-adversary",
+      "required_change": "replace the vars() scan with the AST walk used by test_onboard.py's test_stdlib_only_imports, applied to the onboarding/forge_probe.py source, asserting every import root is in sys.stdlib_module_names (allowlist 'onboarding'/'tools' only).",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/tests/test_onboard.py:484",
+      "evidence": "test_no_pycache_from_tools_copy depends on ambient state \u2014 its comment assumes 'the kit's tools/ tree carries a live __pycache__' but nothing seeds one: the test module sets sys.dont_write_bytecode = True, onboard.py sets it too, and every child runs with -B / PYTHONDONTWRITEBYTECODE=1, so on a clean checkout no __pycache__ is guaranteed to exist when the test runs. Deleting the '__pycache__' filter from Installer.install_tree (onboard.py:506) \u2014 the guard behind the documented 'factory/{tools,gates} (no __pycache__)' install law \u2014 leaves this test and test_full_install_set's rglob assertion green whenever the ambient pycache is absent.",
+      "id": "RA-003",
+      "lens": "review-adversary",
+      "required_change": "make the test self-proving: drive Installer.install_tree over a temporary source tree that the test itself seeds with a __pycache__ directory and .pyc file, then assert neither is installed; keep the end-to-end assertion as a secondary check.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/tests/test_test_out.py:301",
+      "evidence": "run_full_stubbed assigns the SAME FullStubRunner instance to both TO.run_argv and TO.run_argv_live, so no test observes which seam run_full actually calls. Replacing every run_argv_live call in run_full with run_argv \u2014 the G8 regression that isolates live children from the operator's git configuration (GIT_CONFIG_GLOBAL=/dev/null) and breaks the gh credential helper for the private-repo clone/push \u2014 leaves the whole suite green: test_full_live_path_runs_through_run_argv_live only checks recorded argv content, and test_run_argv_live_uses_live_env exercises the helper in isolation, never its threading through run_full.",
+      "id": "RA-004",
+      "lens": "review-adversary",
+      "required_change": "stub the two seams with distinct recorders and assert that every live-path invocation (gh auth status, gh repo create, clone, commit, push, and the pipeline calls) lands on the run_argv_live recorder and none on run_argv.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/forge_probe.py:209",
+      "evidence": "the ruleset transport branch coerces any non-array listing to empty \u2014 'for entry in listing if isinstance(listing, list) else []' \u2014 so an rc-0 JSON object body (rate-limit message, proxy error page) is silently reported downstream as found=False with read='ok', i.e. 'no rulesets at all', instead of a named refusal; the labels branch at forge_probe.py:233 refuses the identical shape with 'expected an array of labels'. No test in the package feeds a non-array rulesets listing to gh_probe_transport, so the asymmetric silent-empty path is unexercised and the check layer's diagnosis can be built on a misread payload.",
+      "id": "RA-005",
+      "lens": "review-adversary",
+      "required_change": "refuse a non-array ruleset listing with a named ProbeError mirroring the labels branch (or return read='refused' with an error detail), and add a stubbed-transport test for the non-array payload.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/onboard.py:535",
+      "evidence": "apply installs every '*.toml' found under onboarding-drafts/environments via 'sorted((drafts_dir / \"environments\").glob(\"*.toml\"))', while propose only (re)writes the envs named by --envs and never prunes stale drafts. Re-running propose with a narrowed --envs (e.g. 'local,github' then 'local') leaves github.toml on disk and apply installs it \u2014 an environment the current propose run never declared. test_deterministic_regeneration re-runs propose with identical args only, so the accumulation path is never exercised.",
+      "id": "RA-006",
+      "lens": "review-adversary",
+      "required_change": "prune drafts/environments to the declared env set in propose (or have apply install only the envs of the current draft set), and add a test that re-proposes with a narrowed --envs and asserts the dropped environment is neither drafted nor installed.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/onboard.py:731",
+      "evidence": "main()'s catch-all handlers ('except OnboardError' / 'except OSError') print 'refused: {exc}' and return 1 WITHOUT any NEXT: line, contradicting the module's own law that EVERY pipeline command ends with exactly one NEXT: line. The path is reachable in production: cmd_inspect calls collect_facts unguarded (unlike cmd_apply), so a kit checkout where 'git rev-parse HEAD' fails raises OnboardError from kit_head_sha straight into the catch-all, as does any OSError during os.walk or draft writes. No test covers the catch-all \u2014 the refusal tests all exercise in-command paths that do print NEXT.",
+      "id": "RA-007",
+      "lens": "review-adversary",
+      "required_change": "emit a NEXT: line in main()'s exception paths (or handle collect_facts failures per-command as cmd_apply does) and add a test asserting exactly one NEXT line on a command that ends in the catch-all refusal.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/test_out.py:490",
+      "evidence": "run_full parses the forge login with 'login = ln.split(\"account\")[-1].split()[0]': a 'Logged in to' line ending at 'account' (empty tail) makes .split() return [] and [0] raises an uncaught IndexError \u2014 a raw traceback from a CLI whose stated law is named fail-closed messages, never a raw traceback (main catches only OSError); a line lacking 'account' silently yields garbage (e.g. the first whitespace token of the whole line) and builds a bogus clone URL from it. Only the --full live path reaches this code (declared unexercised in v0.1-S3) and FullStubRunner feeds only a well-formed line, so neither escape is covered.",
+      "id": "RA-008",
+      "lens": "review-adversary",
+      "required_change": "parse the login with a named refusal or an explicit '<owner>' fallback when the account token is absent (forge_probe._LOGIN_RE already encodes the grammar), and cover both malformed-line shapes in the stubbed full-path test.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/onboard.py:433",
+      "evidence": "the G4 dedicated self-binding guard fires only when 'home_slug and binding_slug and home_slug == binding_slug'; home_slug comes from normalize_repo_url(facts['origin_url']), which returns None for any origin outside its two grammars (e.g. ssh:// URLs with a port, non-GitHub hosts whose URL_RE fullmatch fails), collapsing to the empty-slug pass-through that test_dedicated_without_origin_ok codifies for absent origins. A dedicated home whose origin EXISTS but does not normalize therefore skips the guard entirely, and an explicit --repo-url equal to that same origin drafts exactly the self-binding G4 exists to refuse; no test covers a present-but-unnormalizable origin.",
+      "id": "RA-009",
+      "lens": "review-adversary",
+      "required_change": "when control_home=dedicated and an origin exists but normalize_repo_url fails, either refuse with a named message or fall back to comparing the raw origin string against the binding before drafting; add a test for a dedicated propose with a non-normalizing origin plus a self-referential --repo-url.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/tests/test_test_out.py:22",
+      "evidence": "Contract acceptance: \"The test-out scripts ship and run green against `benchmark-app` as a smoke.\" The package's own test docstring substitutes a different seed and defers the required run: \"All smoke runs work on temp dirs with a tiny synthetic seed (the real benchmark-app seed run is the orchestrator's acceptance, not a unit test).\" The Gate evidence section lists four commands (python3 -m unittest; python3 tools/gates/test_gate.py; config_validator over 3 templates; CI runs) \u2014 none is a `python3 onboarding/test_out.py --smoke` invocation against the default benchmark-app seed, and no other artifact in the package records such a run at head 2bd431c.",
+      "id": "RC-001",
+      "lens": "review-contract",
+      "required_change": "Make the benchmark-app smoke run evidenced inside the review surface: either add the green `python3 onboarding/test_out.py --smoke` (default seed = benchmark-app/) invocation with its output to the gate-evidence artifact at head 2bd431cd82e0938b42309ed3d1ff808d9e2260ad, or add an in-suite test that exercises the default benchmark-app seed end-to-end. Until one of these exists, the third acceptance criterion's \"run green against benchmark-app\" clause is not shown satisfied.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/forge_probe.py:303",
+      "evidence": "the label_ensure branch of the default transport executes a caller-supplied argv verbatim: `if op == \"label_ensure\": argv = params[\"argv\"]` then `out = subprocess.run(argv, capture_output=True, text=True)` \u2014 the docstring's containment claim that the single sanctioned write op is confined to label ensure is not enforced at the transport seam; any caller (or future edit to Forge.label_ensure) that reaches gh_probe_transport with op=\"label_ensure\" and an arbitrary argv list gets arbitrary subprocess execution under the operator's gh credentials, and the tests would stay green because they only assert the pure builder's output and the recorded params for calls made through Forge.label_ensure",
+      "id": "RS-001",
+      "lens": "review-security",
+      "required_change": "confine the write seam at the transport: in the label_ensure branch, rebuild the argv from the structured params via build_label_ensure_argv(params[\"repo\"], params[\"name\"], params[\"color\"], params[\"description\"]) instead of trusting params[\"argv\"], so the default transport can only ever execute `gh label create ... --force`",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/onboard.py:483",
+      "evidence": "Installer.install_bytes decides with `dest = self.target / rel` then `if dest.exists():` and otherwise `dest.parent.mkdir(parents=True, exist_ok=True)` + `dest.write_bytes(data)` \u2014 no symlink or resolved-path confinement check anywhere; a hostile target tree carrying a broken symlink at an install path (e.g. `factory/KICKOFF.md -> ~/.profile`) makes exists() False and write_bytes follow the link, creating/overwriting files OUTSIDE the target, and mkdir(parents=True) likewise follows symlinked parent dirs; the package's own test_out.py treats exactly this class as a real threat (\"a preserved symlink could point OUTSIDE the temp dir and later writes ... would mutate the original target\") but apply \u2014 the command that actually writes into a possibly third-party repo \u2014 has no equivalent guard",
+      "id": "RS-002",
+      "lens": "review-security",
+      "required_change": "before any write, refuse (named, fail-closed) when dest or any component of dest.parent inside the target is a symlink, or resolve dest and verify it stays within target.resolve(); apply the same check to the mkdir(parents=True) path",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/onboard.py:416",
+      "evidence": "propose validates --envs entries only by existence \u2014 `if not (WS_TEMPLATES / \"environments\" / f\"{name}.toml\").is_file()` \u2014 with no format or single-component check on `name`, then builds `src = WS_TEMPLATES / \"environments\" / f\"{name}.toml\"` and `dst = drafts_dir / \"environments\" / f\"{name}.toml\"`; a traversal name (`--envs ../../../..../x`) reads any existing *.toml on disk and writes a copy outside onboarding-drafts (dst.parent.mkdir creates the escaping dirs), and an absolute name resets both Paths entirely (pathlib `/` with an absolute operand), turning dst into an arbitrary *.toml path that is then rewritten; every sibling input on this same command is grammar-checked (WS_SLUG_RE, REPO_ID_RE, pin, control_home), and test_out.py ships validate_dir_name for exactly this class, so the env-name boundary is a validation gap, not a design choice",
+      "id": "RS-003",
+      "lens": "review-security",
+      "required_change": "validate each env name as a single relative component before any path join (reuse the validate_dir_name law: non-empty, no NUL, no '/' or '\\\\', not '.'/'..', equal to its own Path(...).name), with a named refusal otherwise",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/forge_probe.py:262",
+      "evidence": "the issue_form transport branch classifies failure by substring on the child's stderr: `detail = (out.stderr or \"\").strip()` then `if \"404\" in detail: return {\"present\": False, \"path\": None}` \u2014 any error whose text happens to contain '404' anywhere (rate-limit bodies, repo names, echoed URLs) is silently reclassified as a legitimate 'template absent' result instead of a named ProbeError, so the check layer reports 'issue form missing' when the real condition is an unprobeable forge",
+      "id": "RS-004",
+      "lens": "review-security",
+      "required_change": "match the HTTP status structurally (e.g. the leading `HTTP 404` of gh api's error output or `gh api --silent` status handling) instead of an unanchored '404' substring, and raise the named ProbeError for everything else",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/forge_probe.py:209",
+      "evidence": "the ruleset transport branch swallows a non-array listing: `for entry in listing if isinstance(listing, list) else []:` \u2014 a valid-JSON object response (e.g. `{\"message\": \"API rate limit exceeded\"}`) yields zero rulesets and Forge.ruleset then returns found=False with read=\"ok\", presenting a refused/degraded read as a successful read that found no protection; the labels op in the same transport explicitly refuses this shape (`expected an array of labels`), so the ruleset path is the inconsistent one",
+      "id": "RS-005",
+      "lens": "review-security",
+      "required_change": "mirror the labels op: when the parsed listing is not a list, raise the named ProbeError (`probe failed: ruleset \u2014 cannot parse gh output: expected an array of rulesets`) instead of iterating an empty fallback",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3/round-1/gate-evidence.md",
+      "evidence_sha256": "5e3e920675d39d8117295fdede6908ce3fadfeab66999a52c63b9bfe0c2e67d1",
+      "exit": 0,
+      "gate": "deterministic-gates"
+    }
+  ],
+  "head_sha": "2bd431cd82e0938b42309ed3d1ff808d9e2260ad",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 1
+  },
+  "open_findings": [
+    "RA-006",
+    "RA-009",
+    "RC-001"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3/round-1/pkg-pipeline.md",
+    "sha256": "269be00da739de416d92686bf26baa6624c630a899ea102e693e720bebbcd3b1"
+  },
+  "pr": 23,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-external.yaml",
+      "document_sha256": "19d3f83897ad34bc4b481ed8d30aa178125e510a221f69c244dc8a225e316051",
+      "role": "external",
+      "rubric_version": "external-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-review-adversary.yaml",
+      "document_sha256": "5eb752f021c2cbca7ad6abfa5e77f7311a5a78e3c124fd9903e536ced0d4974f",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-review-contract.yaml",
+      "document_sha256": "be1f081fb1f9dd8d0673c562dfb6fe8e55d7e8ef7099081bcae34b4ad8dad4db",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/pipeline/findings-review-security.yaml",
+      "document_sha256": "6eaa2b74d3c0a486c314529b60c18fe202a45ea206a886e563cff0ee7211b54d",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v1",
+  "story": "S3",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 0,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 0,
+    "loop": 1,
+    "loop_cap": 2,
+    "majors": 11,
+    "minors": 7
+  }
+}

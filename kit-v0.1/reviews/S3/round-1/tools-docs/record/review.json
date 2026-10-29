@@ -1,0 +1,421 @@
+{
+  "base_sha": "152b205b48937a3a12020c02c8378022d088d86e",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: non-object UI evidence is a named usage refusal (rc 2) and never reaches check_ui_results.",
+      "fix_sha": "62867b7",
+      "id": "EX-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: quickstart passes --control-home in-repo in README.md and onboarding/README.md.",
+      "fix_sha": "62867b7",
+      "id": "EX-005",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "check_genericization scans the union of tracked and walked files so untracked new files are swept; test added.",
+      "fix_sha": "52a7d81",
+      "id": "RA-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "mechanical_checks.check_bare_runners returns early when no --runner names are declared (nothing to check), and the added verify_commands type check runs whenever the check is active.",
+      "fix_sha": null,
+      "id": "RA-002",
+      "issue": null,
+      "reason": "Not dead code: the bare-invocation check is scoped to declared runners; contract-shape validation lives in the contract parser."
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "The loop rewrites non-list contract fields to [] with the comment explaining that a list-typed field failing the contract parser is normalized so the gate reports the parser's named findings rather than crashing.",
+      "fix_sha": null,
+      "id": "RA-003",
+      "issue": null,
+      "reason": "Documented normalization, not a defect."
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Unreachable defensive try/except; remove or wire it in a cleanup pass.",
+      "fix_sha": null,
+      "id": "RA-004",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: _read_injected_json uses a sentinel so JSON null is a shape refusal, not a read failure.",
+      "fix_sha": "62867b7",
+      "id": "RA-005",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "gitignore template over-broad substring patterns.",
+      "fix_sha": null,
+      "id": "RA-006",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Carve-out is a whole-line test broader than its clone-URL intent.",
+      "fix_sha": null,
+      "id": "RA-007",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "onboarding/readiness.py (1291 lines), onboard.py, forge_probe.py and their tests are in the same diff (pkg-readiness / pkg-pipeline, hashes de145807 / 269be00d). The tools-docs package was scoped to tools+docs so each lens fit a context.",
+      "fix_sha": null,
+      "id": "RC-001",
+      "issue": null,
+      "reason": "Package-scope artifact: the docs describe artifacts shipped in the same PR but outside this package."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "62867b7: quickstart passes --control-home in-repo in README.md and onboarding/README.md, with the reason stated.",
+      "fix_sha": "62867b7",
+      "id": "RC-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "PR #23 body, T6: 'Carried S2 residuals: F3 - genericization CI tripwire (tools/check_generi...'. It enforces the build-plan ground rule 'This repo stays generic - no private product names ever'.",
+      "fix_sha": null,
+      "id": "RC-003",
+      "issue": null,
+      "reason": "The tool is a carried S2 residual, disclosed in the PR body."
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Advisory-vs-gating wording for kit-SHA drift; docs wording pass.",
+      "fix_sha": null,
+      "id": "RC-004",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Five-category registry wording vs implemented checks; docs wording pass.",
+      "fix_sha": null,
+      "id": "RC-005",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Same item as RA-006 (gitignore substring patterns).",
+      "fix_sha": null,
+      "id": "RS-001",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "--forge-fixture false-PASS path; needs an explicit test-mode gate or report annotation.",
+      "fix_sha": null,
+      "id": "RS-002",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": ".github/workflows/kit-ci.yml: actions/checkout with fetch-depth 0 and no token input, no permissions: key, no secret references; GITHUB_TOKEN is not passed to any script.",
+      "fix_sha": null,
+      "id": "RS-003",
+      "issue": null,
+      "reason": "No elevated token: the workflow declares no permissions block and no secrets; fetch-depth only affects history."
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Genericization tripwire skips binary/unreadable files; decide whether to fail loudly.",
+      "fix_sha": null,
+      "id": "RS-004",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "artifact_reference": "tools/gates/pre_review_gate.py:639",
+      "evidence": "External review 5658724504 (2026-10-26, medium): a --ui-results file containing an empty list reaches check_ui_results and raises AttributeError instead of a named refusal.",
+      "id": "EX-004",
+      "lens": "external",
+      "required_change": "Validate that the parsed UI payload is an object before passing it to the gate and refuse non-object JSON by name.",
+      "rubric_dimension": "operational",
+      "severity": "major",
+      "source": "external"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "README.md:131",
+      "evidence": "External review 5658724504 (2026-10-26, low): with an origin remote the quickstart stops at propose, because default dedicated mode infers a binding to that same origin and rejects it; the same block appears in onboarding/README.md.",
+      "id": "EX-005",
+      "lens": "external",
+      "required_change": "Pass --control-home in-repo in the single-repository quickstart in both README.md and onboarding/README.md.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "external"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/check_genericization.py:144",
+      "evidence": "scan() selects `files = tracked_files(root) if is_git_repo(root) else walked_files(root)`, and the CI step (`run: python3 tools/check_genericization.py`) executes inside an actions/checkout work tree, so production always takes the git-tracked branch. Yet the suite docstring says each case runs in a `temp tree, non-git -> the tree-walk branch`, and the only case touching the git branch, test_real_repo_root_is_clean, asserts merely rc 0 plus `genericization: 0 hit(s) in 0 file(s)` - which an empty scan satisfies; test_root_flag_honored_and_validated's default-root leg asserts only `assertNotIn(\"leak.md\", proc.stdout)` with no rc or hit check. Named defeating change: stub `tracked_files` to `return []` (leave is_git_repo intact); every test in tools/tests/test_genericization_check.py stays green while the CI tripwire permanently prints `0 hit(s) in 0 file(s)`, exits 0, and waves banned-token leaks through.",
+      "id": "RA-001",
+      "lens": "review-adversary",
+      "required_change": "add a suite case that exercises the git branch as a detector: git-init a temp repo, commit a file containing a seeded token, run the tool with --root at it, and assert rc 1 plus the exact HIT line, so an empty or stubbed tracked-file enumeration fails the suite",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/gates/mechanical_checks.py:201",
+      "evidence": "the new guard in check_bare_runners (`declared = contract.get(\"verify_commands\")` / non-list -> `fail(...)`) sits after the early return `no runner names declared (--runner) - bare-invocation check inactive`. No test in the package reaches it: the unit assertion calls only `M.check_verify_commands({\"verify_commands\": 42}, ...)`, and the CLI case test_verify_commands_non_list_named passes no --runner, so check_bare_runners returns inactive before the guard runs. Deleting this guard leaves the whole suite green, while a production contract with declared runners and `verify_commands: 42` regresses to the raw TypeError the hunk's own comment (`named refusal, never TypeError (S2-F2)`) says must never happen.",
+      "id": "RA-002",
+      "lens": "review-adversary",
+      "required_change": "add a unit case calling check_bare_runners with a non-empty runners list and a non-list verify_commands, asserting the named `must be a list, got int` finding and no exception",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/gates/pre_review_gate.py:172",
+      "evidence": "the normalization loop rewrites five keys (`files`, `tests`, `verify_commands`, `invariants`, `decisions`) to `[]` when non-list, justified by the comment `a list-typed field that failed the type check above already carries a NAMED finding`. The package proves that claim for only two of the five keys (the tests assert named findings for `files: 42` and `verify_commands: 42`); for `tests`, `invariants`, and `decisions` no test shows a named finding exists, and validate_contract's body is not in the package. If any of those three keys lacks a type finding upstream, the silent `[]` normalization makes downstream checks (tests coverage, invariants, decisions) pass vacuously with zero findings - and removing validate_contract's type check for one of those keys, or extending the normalization list to a key that never had one, leaves the suite green.",
+      "id": "RA-003",
+      "lens": "review-adversary",
+      "required_change": "add gate cases feeding non-list `tests`, `invariants`, and `decisions` through the plan/build CLI, each asserting a NAMED finding is emitted alongside the normalization, so the comment's claim is test-pinned for all five keys",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/gates/pre_review_gate.py:366",
+      "evidence": "build_mode's new try/except around `diff_file.read_text` (named `manifest-diff` finding, `named refusal, never a raw traceback (S2-F2)`) is unreachable through the CLI: main() now pre-reads `args.diff_file` and returns rc 2 (`usage: unreadable ...`) before build_mode is ever called, and the only test for a bad diff file, test_missing_diff_file_is_usage_refusal, exercises just that pre-check. No test calls build_mode directly with an unreadable injected diff. Reverting the guard to a bare `diff_file.read_text(...)` - or deleting it - leaves the entire suite green while any programmatic caller (test harnesses, future embedders importing the module) regresses to a raw traceback on a non-UTF-8 diff.",
+      "id": "RA-004",
+      "lens": "review-adversary",
+      "required_change": "add a unit test that calls Gate.build_mode directly with a non-UTF-8 or unreadable --diff-file path and asserts the named `manifest-diff ... unreadable` finding with no traceback, so the guard is proven independent of the CLI pre-check",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/gates/pre_review_gate.py:502",
+      "evidence": "_read_injected_json uses None as its failure sentinel and returns `json.loads(text)` on success; a --command-result or --ui-results file whose entire content is the valid JSON literal `null` therefore returns None indistinguishably from a read failure, and callers do `if parsed is None: return 2` - an rc-2 exit with NO `usage: unreadable ...` line printed, contradicting the helper's own contract (`Returns the parsed value, or None after printing usage: unreadable <path>`) and the S2-F2 named-refusal rule. No test covers a null-content evidence file, so the silent unnamed refusal ships green.",
+      "id": "RA-005",
+      "lens": "review-adversary",
+      "required_change": "separate the failure signal from parsed values (sentinel object or (ok, value) tuple) so valid JSON `null` is handled explicitly - either accepted as a legal empty evidence value or refused with the named usage line - and add a test pinning the chosen behavior",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/templates/gitignore:6",
+      "evidence": "the installed ignore template carries the patterns `*secret*` (line 6) and `*token*` (line 7) while ONBOARDING.md's apply list installs `factory/SECRETS.md` and `.gitignore` into the same target repo. On case-insensitive filesystems (macOS/Windows checkouts, where git sets core.ignorecase and matches ignore patterns case-insensitively) `*secret*` matches `factory/SECRETS.md`, so apply installs the secrets-posture doc but git silently never tracks it - an unhandled partial-install failure mode; the diff ships no check that every file apply installs survives the .gitignore it installs, and Linux CI (case-sensitive) can never catch it.",
+      "id": "RA-006",
+      "lens": "review-adversary",
+      "required_change": "narrow the pattern or add a negation (e.g. `!factory/SECRETS.md`) so installed template files are never ignored by the installed .gitignore, and add a verify/apply check (exercised case-insensitively) that no installed file matches the ignore rules",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/check_genericization.py:132",
+      "evidence": "carve-out 1 is implemented as a whole-line test - `if name == \"agentmerlin\" and \"ai-software-factory\" in line.lower(): continue` - while its documented intent is narrow: `clone URLs like github.com/agentmerlin8-ops/ai-software-factory pass`. Any agentmerlin occurrence on a line that merely mentions the factory name is carved out, so a leaking reference (e.g. `vendored from agentmerlin/[redacted]-ingest into ai-software-factory`) passes the tripwire; the guard is wider than the claim. test_agentmerlin_with_factory_identity_passes pins only the pass direction (a genuine clone URL), and no test distinguishes URL-shaped identity lines from arbitrary co-mentioned lines, so widening or keeping the broad form stays green either way.",
+      "id": "RA-007",
+      "lens": "review-adversary",
+      "required_change": "narrow the carve-out to the claimed shape (agentmerlin appearing as part of an ai-software-factory repo URL/host path on the line) and add a failing-case test for a bare agentmerlin reference that merely co-occurs with the factory name",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "kit-v0.1/target-repo-readiness.md:9",
+      "evidence": "Docs in this diff assert shipped state for artifacts the diff does not contain: target-repo-readiness.md adds '2. **Onboard verify** (shipped in S3 \u2014 `onboarding/readiness.py` + `onboarding/registry.json`)', and architecture.md:130 adds 'Onboarding pipeline SHIPPED (S3): `onboarding/onboard.py` `preflight|inspect|propose|apply|verify|attest`'. Yet the package's own Diff stat (total: 21 files, +853 -257, matching Identity changed_files: 21 with 'withheld_files: none / omitted_files: none') adds no onboarding/onboard.py, no onboarding/readiness.py, no onboarding/registry.json, and no fresh-repo test-out scripts. The S3 acceptance criteria \u2014 'verify green on a fixture control-home repo', 'Precise, named FAILs on a deliberately non-compliant repo', 'The test-out scripts ship and run green against benchmark-app as a smoke' \u2014 are touched by no hunk, and the Gate evidence cites only generic runs (python3 -m unittest 1343 tests, test_gate.py 63 tests, config_validator on 3 templates, CI success) with no fixture-scoped verify, non-compliant-repo FAIL, or benchmark-app smoke evidence.",
+      "id": "RC-001",
+      "lens": "review-contract",
+      "required_change": "Land the S3 acceptance artifacts inside the reviewed range \u2014 the deterministic pipeline (preflight\u2192inspect\u2192propose\u2192apply\u2192verify), the readiness registry, and the fresh-repo test-out scripts \u2014 with fixture-scoped gate evidence (verify green on the fixture control-home, named FAILs on a deliberately non-compliant repo, test-out green against benchmark-app); or, if those files exist outside this diff, correct the package Identity/omitted_files so the diff accounts for them. Until then the docs must not assert 'shipped in S3' / 'SHIPPED (S3)' for artifacts and verification the package's own evidence does not show.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "README.md:131",
+      "evidence": "The README quickstart runs the whole pipeline with no control-home flag \u2014 'python3 onboarding/onboard.py propose /path/to/your/repo' then 'apply' \u2014 but no default is documented anywhere in the package. ONBOARDING.md:137 defines the choice ('Control-home mode | `--control-home dedicated|in-repo` | `control_home` in `workspace.toml`. `dedicated` = a separate workspace repo holds the ledger/config and binds product repos; `in-repo` = the target repo is its own control home. Drives which WORKSPACE checks apply in verify.') and documents defaults for every other propose/apply choice (workspace name, repo-url, envs, pin, ui) \u2014 but not for --control-home. A reader following the quickstart cannot determine which control-home configuration the bare commands produce, even though the mode drives which WORKSPACE checks verify applies.",
+      "id": "RC-002",
+      "lens": "review-contract",
+      "required_change": "State the default --control-home mode in ONBOARDING.md's guided-session choices table (as done for the other choices), and make the README quickstart's configuration explicit \u2014 either pass the flag or state which control-home mode the bare command sequence results in.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "tools/check_genericization.py:1",
+      "evidence": "A substantial body of the diff maps to no S3 acceptance criterion and no S3 plan item: tools/check_genericization.py (+189, docstring self-tags it 'the genericization tripwire (S2-F3)'), tools/tests/test_genericization_check.py (+116), the S2-F2 named-refusal hardening in tools/contract_lib.py, tools/gates/mechanical_checks.py, tools/gates/pre_review_gate.py and tools/gates/test_gate.py (comments cite 'S2-F2' throughout), plus the CI step '+        run: python3 tools/check_genericization.py' and '+          fetch-depth: 0   # full history \u2014 readiness pin-resolution checks' whose stated purpose ('resolve concrete pins against ancestor commits') serves the readiness code that is absent from this diff. The frozen S3 scope is 'Deterministic onboarding scripts \u2026 plus the guided-session brief \u2026 the readiness registry \u2026 and the fresh-repo test-out scripts'; these hunks are remediation of the prior slice's (S2) review findings, and the package contains no recorded deviation or scope extension covering them ('allowed_files: all changed files' records no such decision).",
+      "id": "RC-003",
+      "lens": "review-contract",
+      "required_change": "Either record the scope extension \u2014 an explicit deviation/scope note in the contract or plan tying the S2-F2/S2-F3 remediation and the genericization CI gate to this slice \u2014 or split these hunks out of the S3 range into their own reviewed change. The fetch-depth:0 CI comment must also name a check that ships in the same range or be deferred with it.",
+      "rubric_dimension": "scope",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "kit-v0.1/architecture.md:436",
+      "evidence": "The new bullet fixes kit-sha drift as non-gating: 'kit-sha drift is **ADVISORY** (`kit version drift: ... (advisory \u2014 does not gate)`) \u2014 it never gates.' The unchanged bullet two lines below in the same section still reads: 'A kit-version vs registry-version mismatch is a **FAIL** (drift must be visible).' As written the older sentence asserts a FAIL for exactly the kit-version drift the new bullet declares ADVISORY-only, leaving the frozen doc self-contradictory on which drift gates.",
+      "id": "RC-004",
+      "lens": "review-contract",
+      "required_change": "Amend the older bullet so it names only registry-version drift as the FAIL condition (matching the new frozen semantics: registry-version drift FAIL, kit-sha drift ADVISORY, never gating), removing the contradiction inside the Onboarding architecture section.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "kit-v0.1/target-repo-readiness.md:11",
+      "evidence": "The diff's new docs fix a five-category registry \u2014 ONBOARDING.md \u00a75: 'category (CORE/WORKSPACE/UI/ADAPTER/ADVISORY)' and 'Control-home mode \u2026 Drives which WORKSPACE checks apply in verify' \u2014 but target-repo-readiness.md, edited by this same diff (hunk '@@ -6,7 +6,7 @@'), keeps its category line at four categories with no WORKSPACE: 'Check categories: **CORE** (required for any factory run) \u00b7 **UI** (only when stories touch UI) \u00b7 **ADAPTER** (required only when that adapter executes work) \u00b7 **ADVISORY** (recommended).' The shipped checklist doc therefore does not describe the WORKSPACE category the shipped pipeline docs say verify applies.",
+      "id": "RC-005",
+      "lens": "review-contract",
+      "required_change": "Update the Check-categories line in kit-v0.1/target-repo-readiness.md to include WORKSPACE (five categories, matching ONBOARDING.md \u00a75 and architecture.md's Onboarding architecture section), since the file is already touched by this slice.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/templates/gitignore:7",
+      "evidence": "The shipped gitignore template ignores '*token*' (line 7) and '*secret*' (line 6) by bare substring: '+*secret*' / '+*token*'. apply installs this template into every onboarded control home (ONBOARDING.md: \"- `factory/KICKOFF.md`, `factory/SECRETS.md`, `.gitignore`\"). The patterns match ANY path containing the substring, not just secret stores \u2014 e.g. src/tokenizer.py, token_bucket.md, secret_sharing.rs are silently untracked, so code and config the operator expects committed never enters version control, with no error anywhere.",
+      "id": "RS-001",
+      "lens": "review-security",
+      "required_change": "Narrow the shipped patterns to the documented secret locations only (e.g. 'secrets/', '.env', '.env.*', '*.pem', plus at most '*secret*'/'*token*' anchored to a dedicated directory such as 'secrets/**' or '*.secret'), so legitimate source files whose names merely contain the substrings are not ignored; update SECRETS.md's C-12 wording if it names these patterns.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@ONBOARDING.md:173",
+      "evidence": "The fixture seam swaps the real forge transport for attacker/operator-controlled data: \"`preflight`, `apply`, and `verify` accept `--forge-fixture <file>`: the sanctioned fixture-backed seam that swaps the forge (gh) transport for a dataset-driven one\" (ONBOARDING.md:173-175), while verify's output is committed truth: \"`factory/PREFLIGHT.md` is regenerated on every run and is the **report of record**\" (ONBOARDING.md:108) and the verify loop says \"commit it\" (ONBOARDING.md:154). The only guard separating a fixture-backed run from a real readiness record is prose \u2014 \"a real onboarding session never passes it\" (ONBOARDING.md:176) \u2014 nothing in the documented behavior marks, refuses, or distinguishes a PREFLIGHT.md produced under --forge-fixture. Mutation: run `verify --forge-fixture f.json` against a green fixture dataset and commit the resulting report of record; downstream consumers (KICKOFF cold start reads \"factory/PREFLIGHT.md (the latest verify result)\", ONBOARDING.md's kickoff message) accept it as real readiness.",
+      "id": "RS-002",
+      "lens": "review-security",
+      "required_change": "Make the fixture mode mechanically visible in the report of record: when verify runs with --forge-fixture, stamp the regenerated factory/PREFLIGHT.md with an unmissable fixture-mode marker (and record it in the onboarding/verify output), or refuse to write the report of record under a fixture unless an explicit override flag is passed, so a fixture-backed run can never produce an unmarked readiness record.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:28",
+      "evidence": "The workflow changes deepen what untrusted-branch code can do without pinning token scope: the diff adds full-history checkout ('+          fetch-depth: 0   # full history \u2014 readiness pin-resolution checks', .github/workflows/kit-ci.yml:12) and a new step executing repo-controlled Python on every push/PR ('+      - name: Genericization tripwire (banned-token sweep)' / '+        run: python3 tools/check_genericization.py', lines 28-29). Neither hunk introduces or shows a least-privilege `permissions:` block, so the job's steps run with the repository's default GITHUB_TOKEN scope (write-all on private/legacy settings), wider than anything the listed steps need \u2014 a fork-branch or malicious-commit change to the executed scripts inherits that token.",
+      "id": "RS-003",
+      "lens": "review-security",
+      "required_change": "Add an explicit least-privilege permissions block to the workflow (e.g. `permissions: contents: read` at the workflow or job level) so the CI job's GITHUB_TOKEN is scoped to read-only regardless of repository defaults.",
+      "rubric_dimension": "security",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/check_genericization.py:153",
+      "evidence": "The tripwire silently skips any file that is not valid UTF-8 or cannot be read: '+        except (UnicodeDecodeError, OSError):' / '+            continue  # binary/unreadable: skipped, never fatal' (tools/check_genericization.py:153-154). Mutation: append one invalid byte (e.g. 0xff) to a text file containing banned vocabulary and the file leaves the scan entirely \u2014 the gate stays green (exit 0, 'genericization: 0 hit(s)') while the leak ships, with no line naming the skipped file. The docstring makes the skip deliberate, but the skip is invisible in the output, so a bypass produces no signal.",
+      "id": "RS-004",
+      "lens": "review-security",
+      "required_change": "Make skips visible: print a one-line notice per skipped-but-git-tracked file (e.g. 'SKIP <path>: not valid UTF-8') and include the skip count in the summary, so a file silently dropping out of the tripwire's coverage is observable in CI logs; optionally fail when a text-extension file is undecodable.",
+      "rubric_dimension": "security",
+      "severity": "minor",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3/round-1/gate-evidence.md",
+      "evidence_sha256": "5e3e920675d39d8117295fdede6908ce3fadfeab66999a52c63b9bfe0c2e67d1",
+      "exit": 0,
+      "gate": "deterministic-gates"
+    }
+  ],
+  "head_sha": "2bd431cd82e0938b42309ed3d1ff808d9e2260ad",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 1
+  },
+  "open_findings": [
+    "RA-002",
+    "RA-003",
+    "RA-004",
+    "RA-006",
+    "RA-007",
+    "RC-001",
+    "RC-003",
+    "RC-004",
+    "RC-005",
+    "RS-001",
+    "RS-002",
+    "RS-003",
+    "RS-004"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3/round-1/pkg-tools-docs.md",
+    "sha256": "bd0de80a5873fd8fa69dc5d701b01fd84c873f1d914ef6f04f94d4d9fd40ec33"
+  },
+  "pr": 23,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-external.yaml",
+      "document_sha256": "aac62af686328957c8e632cf26cfe0e70ede1caacc159f56c98bddf5c258c97b",
+      "role": "external",
+      "rubric_version": "external-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-review-adversary.yaml",
+      "document_sha256": "2b40386257f3671f4365e0dcfd9c31b7ddc08dce8a536d0422ef6c9a964207c8",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-review-contract.yaml",
+      "document_sha256": "2148d7e4374248f9b7bb4ae0f02b44925ce6804d7d5ff575e1d6a97b23a07ae1",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/tools-docs/findings-review-security.yaml",
+      "document_sha256": "6c6fbf0ae1a3521a2e4ff2e8c99b2d340d6d196dbe524343f4c09c68f6e15bee",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v1",
+  "story": "S3",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 1,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 0,
+    "loop": 1,
+    "loop_cap": 2,
+    "majors": 5,
+    "minors": 12
+  }
+}

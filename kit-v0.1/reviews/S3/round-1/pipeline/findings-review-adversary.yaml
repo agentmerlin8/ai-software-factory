@@ -1,0 +1,72 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 269be00da739de416d92686bf26baa6624c630a899ea102e693e720bebbcd3b1
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@onboarding/forge_probe.py:262
+      evidence: "the real transport's issue_form branch discriminates errors solely by substring — 'if \"404\" in detail: return {\"present\": False, \"path\": None}' else ProbeError — and no test in the package ever drives gh_probe_transport's issue_form branch at a non-zero rc: TestIssueForm uses the in-memory RecorderTransport and TestRealTransportRepoNormalization.test_issue_form_contents_endpoint_normalized stubs only an rc=0 success. A production change that returns present=False for ANY failed rc (dropping the 404 discrimination), or one where an unrelated stderr that merely contains '404' (rate-limit or proxy text) is read as 'template absent', leaves every test green while converting real forge failures into a false absent-template fact for the check layer."
+      required_change: "add stubbed-subprocess tests over the cited branch: non-zero rc with a 404 stderr -> {'present': False, 'path': None}; non-zero rc with a non-404 stderr (e.g. 500 / rate limit) -> named ProbeError; assert both against gh_probe_transport directly."
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@onboarding/tests/test_forge_probe.py:838
+      evidence: "test_module_imports_stdlib_only scans vars(FP) but skips every value where 'hasattr(value, \"__file__\")' — which is exactly every imported module (json, re, subprocess, and any third-party module). Adding 'import requests' (or any non-stdlib import) to forge_probe.py leaves this test green; only classes/functions are ever checked, and their __module__ roots are trivially stdlib or the skipped 'onboarding' root. The stdlib-only law for forge_probe.py is therefore unenforced — onboard.py and test_out.py have real AST-based import checks, forge_probe.py's house-law test survives removal of the law it guards."
+      required_change: "replace the vars() scan with the AST walk used by test_onboard.py's test_stdlib_only_imports, applied to the onboarding/forge_probe.py source, asserting every import root is in sys.stdlib_module_names (allowlist 'onboarding'/'tools' only)."
+      actionable: true
+    - id: RA-003
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@onboarding/tests/test_onboard.py:484
+      evidence: "test_no_pycache_from_tools_copy depends on ambient state — its comment assumes 'the kit's tools/ tree carries a live __pycache__' but nothing seeds one: the test module sets sys.dont_write_bytecode = True, onboard.py sets it too, and every child runs with -B / PYTHONDONTWRITEBYTECODE=1, so on a clean checkout no __pycache__ is guaranteed to exist when the test runs. Deleting the '__pycache__' filter from Installer.install_tree (onboard.py:506) — the guard behind the documented 'factory/{tools,gates} (no __pycache__)' install law — leaves this test and test_full_install_set's rglob assertion green whenever the ambient pycache is absent."
+      required_change: "make the test self-proving: drive Installer.install_tree over a temporary source tree that the test itself seeds with a __pycache__ directory and .pyc file, then assert neither is installed; keep the end-to-end assertion as a secondary check."
+      actionable: true
+    - id: RA-004
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@onboarding/tests/test_test_out.py:301
+      evidence: "run_full_stubbed assigns the SAME FullStubRunner instance to both TO.run_argv and TO.run_argv_live, so no test observes which seam run_full actually calls. Replacing every run_argv_live call in run_full with run_argv — the G8 regression that isolates live children from the operator's git configuration (GIT_CONFIG_GLOBAL=/dev/null) and breaks the gh credential helper for the private-repo clone/push — leaves the whole suite green: test_full_live_path_runs_through_run_argv_live only checks recorded argv content, and test_run_argv_live_uses_live_env exercises the helper in isolation, never its threading through run_full."
+      required_change: "stub the two seams with distinct recorders and assert that every live-path invocation (gh auth status, gh repo create, clone, commit, push, and the pipeline calls) lands on the run_argv_live recorder and none on run_argv."
+      actionable: true
+    - id: RA-005
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/forge_probe.py:209
+      evidence: "the ruleset transport branch coerces any non-array listing to empty — 'for entry in listing if isinstance(listing, list) else []' — so an rc-0 JSON object body (rate-limit message, proxy error page) is silently reported downstream as found=False with read='ok', i.e. 'no rulesets at all', instead of a named refusal; the labels branch at forge_probe.py:233 refuses the identical shape with 'expected an array of labels'. No test in the package feeds a non-array rulesets listing to gh_probe_transport, so the asymmetric silent-empty path is unexercised and the check layer's diagnosis can be built on a misread payload."
+      required_change: "refuse a non-array ruleset listing with a named ProbeError mirroring the labels branch (or return read='refused' with an error detail), and add a stubbed-transport test for the non-array payload."
+      actionable: true
+    - id: RA-006
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/onboard.py:535
+      evidence: "apply installs every '*.toml' found under onboarding-drafts/environments via 'sorted((drafts_dir / \"environments\").glob(\"*.toml\"))', while propose only (re)writes the envs named by --envs and never prunes stale drafts. Re-running propose with a narrowed --envs (e.g. 'local,github' then 'local') leaves github.toml on disk and apply installs it — an environment the current propose run never declared. test_deterministic_regeneration re-runs propose with identical args only, so the accumulation path is never exercised."
+      required_change: "prune drafts/environments to the declared env set in propose (or have apply install only the envs of the current draft set), and add a test that re-proposes with a narrowed --envs and asserts the dropped environment is neither drafted nor installed."
+      actionable: true
+    - id: RA-007
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@onboarding/onboard.py:731
+      evidence: "main()'s catch-all handlers ('except OnboardError' / 'except OSError') print 'refused: {exc}' and return 1 WITHOUT any NEXT: line, contradicting the module's own law that EVERY pipeline command ends with exactly one NEXT: line. The path is reachable in production: cmd_inspect calls collect_facts unguarded (unlike cmd_apply), so a kit checkout where 'git rev-parse HEAD' fails raises OnboardError from kit_head_sha straight into the catch-all, as does any OSError during os.walk or draft writes. No test covers the catch-all — the refusal tests all exercise in-command paths that do print NEXT."
+      required_change: "emit a NEXT: line in main()'s exception paths (or handle collect_facts failures per-command as cmd_apply does) and add a test asserting exactly one NEXT line on a command that ends in the catch-all refusal."
+      actionable: true
+    - id: RA-008
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@onboarding/test_out.py:490
+      evidence: "run_full parses the forge login with 'login = ln.split(\"account\")[-1].split()[0]': a 'Logged in to' line ending at 'account' (empty tail) makes .split() return [] and [0] raises an uncaught IndexError — a raw traceback from a CLI whose stated law is named fail-closed messages, never a raw traceback (main catches only OSError); a line lacking 'account' silently yields garbage (e.g. the first whitespace token of the whole line) and builds a bogus clone URL from it. Only the --full live path reaches this code (declared unexercised in v0.1-S3) and FullStubRunner feeds only a well-formed line, so neither escape is covered."
+      required_change: "parse the login with a named refusal or an explicit '<owner>' fallback when the account token is absent (forge_probe._LOGIN_RE already encodes the grammar), and cover both malformed-line shapes in the stubbed full-path test."
+      actionable: true
+    - id: RA-009
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/onboard.py:433
+      evidence: "the G4 dedicated self-binding guard fires only when 'home_slug and binding_slug and home_slug == binding_slug'; home_slug comes from normalize_repo_url(facts['origin_url']), which returns None for any origin outside its two grammars (e.g. ssh:// URLs with a port, non-GitHub hosts whose URL_RE fullmatch fails), collapsing to the empty-slug pass-through that test_dedicated_without_origin_ok codifies for absent origins. A dedicated home whose origin EXISTS but does not normalize therefore skips the guard entirely, and an explicit --repo-url equal to that same origin drafts exactly the self-binding G4 exists to refuse; no test covers a present-but-unnormalizable origin."
+      required_change: "when control_home=dedicated and an origin exists but normalize_repo_url fails, either refuse with a named message or fall back to comparing the raw origin string against the binding before drafting; add a test for a dedicated propose with a non-normalizing origin plus a self-referential --repo-url."
+      actionable: true

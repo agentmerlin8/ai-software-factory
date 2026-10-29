@@ -149,6 +149,56 @@ def rest_repo(repo: str) -> str:
     return slug if slug else repo
 
 
+_GLOB_CACHE: dict[str, re.Pattern] = {}
+
+
+def _ref_pattern_re(pattern: str) -> re.Pattern:
+    """Compile ONE GitHub ruleset ref pattern to a FULLMATCH regex
+    (compiled patterns cached under the RAW selector — deterministic,
+    no wall clock)."""
+    rx = _GLOB_CACHE.get(pattern)
+    if rx is not None:
+        return rx
+    raw = pattern
+    if not pattern.startswith("refs/"):
+        pattern = f"refs/heads/{pattern}"
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out.append(".*")      # any characters, INCLUDING '/'
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")   # any characters EXCEPT '/'
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    rx = re.compile("".join(out))
+    _GLOB_CACHE[raw] = rx
+    return rx
+
+
+def ref_selector_matches(selector: str, ref: str) -> bool:
+    """GitHub-compatible ref-pattern selector test — FULLMATCH semantics
+    over the concrete ref string (the ruleset probe always evaluates
+    `refs/heads/<branch>`, § Forge.ruleset).
+
+    Selector semantics (frozen):
+      * `~ALL` matches every ref.
+      * `~DEFAULT_BRANCH` matches — the probe evaluates the default
+        branch by contract, so the sentinel keeps that meaning.
+      * Any other selector is a ref glob compiled to a regex and
+        FULLMATCHED: `**` matches any characters including `/`, `*`
+        matches any characters except `/`, everything else literal.
+        A pattern without a `refs/` prefix is a BRANCH pattern —
+        `refs/heads/<pattern>` is matched (GitHub's unqualified-name
+        rule). fnmatch is never used (its `*` crosses `/`)."""
+    if selector == "~ALL" or selector == "~DEFAULT_BRANCH":
+        return True
+    return _ref_pattern_re(selector).fullmatch(ref) is not None
+
+
 # ---------------------------------------------------------------------------
 # default transport — maps ops to gh argv invocations (no shell anywhere)
 # ---------------------------------------------------------------------------
@@ -194,19 +244,35 @@ def gh_probe_transport(op: str, params: dict) -> dict:
                    "repo view")
         return _json_or_refuse(out.stdout, "repo view")
     if op == "ruleset":
-        # The list endpoint returns summaries WITHOUT `conditions`/`rules`;
-        # the per-id detail fetch carries them. Merge the COMPLETE detail
-        # payload — detail wins for every key it carries, so the branch
-        # matcher (Forge.ruleset) sees the real conditions/rules on the
-        # live path (fixtures mask this by pre-merging). The repo is
-        # normalized to owner/name for the REST path segment (F5).
+        # The list endpoint returns summaries WITHOUT `conditions`/`rules`
+        # and truncates at its default page size, so page
+        # `?per_page=100&page=N` to exhaustion first (a short page ends
+        # the loop — the same law as the labels branch, F2). Then fetch
+        # each detail BY ID: the per-id detail carries them. Merge the
+        # COMPLETE detail payload — detail wins for every key it
+        # carries, so the branch matcher (Forge.ruleset) sees the real
+        # conditions/rules on the live path (fixtures mask this by
+        # pre-merging). The repo is normalized to owner/name for the
+        # REST path segment (F5).
         repo = rest_repo(params["repo"])
-        listing = _json_or_refuse(
-            _run(["gh", "api", f"repos/{repo}/rulesets"],
-                 "ruleset").stdout,
-            "ruleset")
+        summaries: list[dict] = []
+        page = 1
+        while True:
+            out = _run(["gh", "api",
+                        f"repos/{repo}/rulesets?per_page=100&page={page}"],
+                       "ruleset")
+            batch = _json_or_refuse(out.stdout, "ruleset")
+            if not isinstance(batch, list):
+                raise ProbeError(
+                    "probe failed: ruleset — cannot parse gh output: "
+                    "expected an array of rulesets")
+            summaries.extend(entry for entry in batch
+                             if isinstance(entry, dict))
+            if len(batch) < 100:
+                break
+            page += 1
         rulesets = []
-        for entry in listing if isinstance(listing, list) else []:
+        for entry in summaries:
             rid = entry.get("id")
             detail = _json_or_refuse(
                 _run(["gh", "api", f"repos/{repo}/rulesets/{rid}"],
@@ -464,15 +530,22 @@ class Forge:
         the branch ruleset. Refused reads (plan-gated 403 etc.) come back
         as read='refused' + error — never an exception; no rulesets at
         all -> found=False. A ruleset matches iff its
-        conditions.ref_name.include matches the branch AND its
-        conditions.ref_name.exclude does NOT (same selector forms on
-        both lists — the literal `refs/heads/<branch>`, `~DEFAULT_BRANCH`
-        and `~ALL`, which matches ANY branch; F1/G2). Among matching
-        rulesets the first ACTIVE one is selected; only when none is
-        active does the first matching non-active one surface (so the
-        `staged, not enforcing` diagnosis is never hidden by order;
-        G3). `rules` carries the protection-rule objects the check
-        layer validates (F10)."""
+        conditions.ref_name.include matches the branch AND no
+        conditions.ref_name.exclude matches it (exclude wins over
+        include; F1/G2). Both lists carry GitHub ref-pattern selectors
+        under FULLMATCH semantics over `refs/heads/<branch>`: `~ALL`
+        matches every ref; `~DEFAULT_BRANCH` matches (the probe
+        evaluates the default branch by contract); any other pattern is
+        a glob — `**` crosses `/`, `*` does not, everything else
+        literal — and a pattern without a `refs/` prefix is a branch
+        pattern `refs/heads/<pattern>` (fnmatch never used). Only
+        rulesets whose `target` is absent or exactly `branch`
+        participate; a tag/push ruleset never protects a branch (F3).
+        Among matching rulesets the first ACTIVE one is selected; only
+        when none is active does the first matching non-active one
+        surface (so the `staged, not enforcing` diagnosis is never
+        hidden by order; G3). `rules` carries the protection-rule
+        objects the check layer validates (F10)."""
         try:
             data = self._call("ruleset", "ruleset",
                               {"repo": repo, "branch": branch})
@@ -483,12 +556,17 @@ class Forge:
         want = f"refs/heads/{branch}"
 
         def _selector_matches(selectors: list) -> bool:
-            return (want in selectors
-                    or "~DEFAULT_BRANCH" in selectors
-                    or "~ALL" in selectors)
+            return any(ref_selector_matches(str(sel), want)
+                       for sel in selectors)
 
         matches: list[dict] = []
         for rs in data.get("rulesets", []):
+            # F3: only rulesets that target branches take part — an
+            # active tag ruleset with ~ALL can never shadow the
+            # default-branch ruleset.
+            target = rs.get("target")
+            if target is not None and target != "branch":
+                continue
             ref_name = (rs.get("conditions") or {}).get("ref_name") or {}
             include = ref_name.get("include") or []
             exclude = ref_name.get("exclude") or []

@@ -6,8 +6,12 @@ sync_board FakeTransport pattern): NO network, NO gh. The real
 gh-backed transport is covered separately with subprocess.run stubbed
 via unittest.mock — still no network, no gh, no shell. Covers: auth
 scopes (full/partial/unparseable), repo view (ok/error), rulesets
-(active+bypass / disabled / absent / refused-without-raise), labels
-(all/subset), issue form (present/absent), project fields
+(active+bypass / disabled / absent / refused-without-raise),
+ref-pattern selector matching (fullmatch glob semantics,
+`~ALL`/`~DEFAULT_BRANCH`, unqualified branch patterns, exclude wins),
+branch-target filtering (a tag ruleset never shadows a branch one),
+ruleset listing pagination (page to exhaustion, then per-id details),
+labels (all/subset), issue form (present/absent), project fields
 (resolved/unresolvable/bad-grammar), the pure label-ensure argv builder
 (verbatim equality) + the single recorded write call, fixture datasets
 (load/unknown-op/malformed/end-to-end), parse_project_locator grammar,
@@ -329,6 +333,189 @@ class TestRulesetAllSelectorAndActivePreference(unittest.TestCase):
         self.assertEqual(result["enforcement"], "active")
 
 
+class TestRulesetRefPatternMatching(unittest.TestCase):
+    """F1 (EX-001): GitHub-compatible ref-pattern selectors — FULLMATCH
+    semantics over `refs/heads/<branch>` for include AND exclude:
+    `**` crosses `/`, `*` does not, everything else is literal, a
+    pattern without a `refs/` prefix is a branch pattern, `~ALL` matches
+    any ref, and exclude wins over include. fnmatch semantics (whose `*`
+    crosses `/`) never apply."""
+
+    def _result(self, include, exclude, branch):
+        rs = {"id": 1, "target": "branch", "enforcement": "active",
+              "conditions": {"ref_name": {"include": include}},
+              "bypass_actors": [], "rules": [{"type": "deletion"}]}
+        if exclude is not None:
+            rs["conditions"]["ref_name"]["exclude"] = exclude
+        forge = FP.Forge(RecorderTransport({"ruleset": {"rulesets": [rs]}}))
+        return forge.ruleset("fixture-org/app", branch)
+
+    def test_wildcard_include_matches_one_segment_not_across_slash(self):
+        self.assertTrue(self._result(
+            ["refs/heads/release/*"], None, "release/1")["found"])
+        self.assertFalse(self._result(
+            ["refs/heads/release/*"], None, "release/1/x")["found"])
+
+    def test_double_star_crosses_slash(self):
+        self.assertTrue(self._result(
+            ["refs/heads/release/**"], None, "release/1/x")["found"])
+        self.assertFalse(self._result(
+            ["refs/heads/release/**"], None, "release")["found"])
+
+    def test_exact_literal_fullmatch_unchanged(self):
+        # a literal pattern still matches its exact ref — and only it
+        # (fullmatch: `refs/heads/main` never prefix-matches `mainline`)
+        self.assertTrue(self._result(
+            ["refs/heads/main"], None, "main")["found"])
+        self.assertFalse(self._result(
+            ["refs/heads/main"], None, "mainline")["found"])
+
+    def test_unqualified_pattern_is_a_branch_pattern(self):
+        self.assertTrue(self._result(
+            ["release/*"], None, "release/2")["found"])
+        self.assertFalse(self._result(
+            ["release/*"], None, "release/2/x")["found"])
+
+    def test_all_selector_matches_every_ref(self):
+        self.assertTrue(self._result(
+            ["~ALL"], None, "anything/at/all")["found"])
+
+    def test_exclude_wins_over_include(self):
+        # `**` include + a refs/heads/release/* exclude -> release/9
+        # excluded, everything else covered (exclude lists are ORs)
+        self.assertFalse(self._result(
+            ["**"], ["refs/heads/release/*"], "release/9")["found"])
+        self.assertTrue(self._result(
+            ["**"], ["refs/heads/release/*"], "main")["found"])
+
+    def test_exclude_glob_blocks_default_branch(self):
+        # EX-001 repro verbatim: include ~DEFAULT_BRANCH, exclude
+        # refs/heads/m* — main must NOT be selected (fnmatch's `*`
+        # would have crossed the `/` here, but it never applies).
+        self.assertFalse(self._result(
+            ["~DEFAULT_BRANCH"], ["refs/heads/m*"], "main")["found"])
+        self.assertTrue(self._result(
+            ["~DEFAULT_BRANCH"], ["refs/heads/m*"], "dev")["found"])
+
+    def test_non_matching_pattern_does_not_match(self):
+        self.assertFalse(self._result(
+            ["refs/heads/release/*"], None, "main")["found"])
+        self.assertFalse(self._result(
+            ["refs/tags/v1*"], None, "main")["found"])
+
+    def test_empty_include_never_matches_empty_exclude_never_blocks(self):
+        self.assertFalse(self._result([], None, "main")["found"])
+        self.assertTrue(self._result(
+            ["~DEFAULT_BRANCH"], [], "main")["found"])
+
+
+class TestRulesetBranchTargetFilter(unittest.TestCase):
+    """F3 (EX-003): only rulesets whose `target` is absent or exactly
+    'branch' participate in branch-protection selection — an active TAG
+    ruleset using ~ALL, even when listed FIRST, must never be chosen."""
+
+    def test_active_tag_ruleset_never_shadows_branch_ruleset(self):
+        tag = {"id": 1, "target": "tag", "enforcement": "active",
+               "conditions": {"ref_name": {"include": ["~ALL"]}},
+               "bypass_actors": [],
+               "rules": [{"type": "update"}]}
+        branch = {"id": 2, "target": "branch", "enforcement": "active",
+                  "conditions": {"ref_name": {
+                      "include": ["~DEFAULT_BRANCH"]}},
+                  "bypass_actors": [],
+                  "rules": [{"type": "deletion"},
+                            {"type": "non_fast_forward"}]}
+        forge = FP.Forge(RecorderTransport(
+            {"ruleset": {"rulesets": [tag, branch]}}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["target"], "branch")
+        self.assertEqual(result["rules"], [{"type": "deletion"},
+                                           {"type": "non_fast_forward"}])
+
+    def test_tag_only_ruleset_selected_never(self):
+        tag = {"id": 3, "target": "tag", "enforcement": "active",
+               "conditions": {"ref_name": {"include": ["~ALL"]}},
+               "bypass_actors": []}
+        forge = FP.Forge(RecorderTransport(
+            {"ruleset": {"rulesets": [tag]}}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertFalse(result["found"])
+        self.assertEqual(result["read"], "ok")
+
+    def test_ruleset_without_target_still_participates(self):
+        rs = {"id": 4, "enforcement": "active",
+              "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+              "bypass_actors": []}
+        forge = FP.Forge(RecorderTransport(
+            {"ruleset": {"rulesets": [rs]}}))
+        result = forge.ruleset("fixture-org/app", "main")
+        self.assertTrue(result["found"])
+        self.assertEqual(result["target"], "branch")  # absent -> branch
+
+
+class TestRealTransportRulesetPagination(unittest.TestCase):
+    """F2 (EX-002): the ruleset op pages
+    `repos/<repo>/rulesets?per_page=100&page=N` to exhaustion (a short
+    page ends the loop — the labels law), THEN fetches each detail by
+    id — ids on LATER pages must be fetched too with the normalized
+    repo path."""
+
+    def test_two_page_stub_fetches_details_for_ids_on_both_pages(self):
+        page1 = [{"id": i, "target": "branch"} for i in range(1, 101)]
+        page2 = [{"id": 101, "target": "branch"},
+                 {"id": 102, "target": "branch"}]
+        outputs = [json.dumps(page1), json.dumps(page2)]
+        # one detail payload per listed id, in listing order
+        outputs += [json.dumps({"id": i, "target": "branch"})
+                    for i in range(1, 103)]
+        stub = _stub_run(*outputs)
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "ruleset", {"repo": "github.com/fixture-org/app",
+                            "branch": "main"})
+        argvs = [call.args[0] for call in stub.call_args_list]
+        self.assertEqual(len(argvs), 2 + 102)  # two pages + 102 details
+        self.assertEqual(
+            argvs[0], ["gh", "api",
+                       "repos/fixture-org/app/rulesets"
+                       "?per_page=100&page=1"])
+        self.assertEqual(
+            argvs[1], ["gh", "api",
+                       "repos/fixture-org/app/rulesets"
+                       "?per_page=100&page=2"])
+        detail_ids = [int(argv[2].rsplit("/", 1)[1]) for argv in argvs[2:]]
+        self.assertEqual(detail_ids, list(range(1, 103)))
+        # a page-1 id and BOTH page-2 ids got their detail fetch
+        self.assertEqual(
+            argvs[2], ["gh", "api", "repos/fixture-org/app/rulesets/1"])
+        self.assertEqual(
+            argvs[-1], ["gh", "api", "repos/fixture-org/app/rulesets/102"])
+        ids = [entry["id"] for entry in result["rulesets"]]
+        self.assertEqual(ids, list(range(1, 103)))
+
+    def test_single_short_page_stops_after_one_page_call(self):
+        page = [{"id": 7, "target": "branch"}]
+        stub = _stub_run(json.dumps(page),
+                         json.dumps({"id": 7, "target": "branch"}))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        argvs = [call.args[0] for call in stub.call_args_list]
+        self.assertEqual(len(argvs), 2)  # one list call + one detail
+        self.assertIn("?per_page=100&page=1", argvs[0][2])
+        self.assertEqual([e["id"] for e in result["rulesets"]], [7])
+
+    def test_non_array_page_named_refusal(self):
+        stub = _stub_run(json.dumps({"message": "API rate limit exceeded"}))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport("ruleset", {"repo": "o/r",
+                                                  "branch": "main"})
+        self.assertIn("ruleset", str(ctx.exception))
+        self.assertIn("expected an array", str(ctx.exception))
+
+
 class TestRealTransportLabelsPagination(unittest.TestCase):
     """G1: the labels op pages `gh api repos/<repo>/labels` to
     exhaustion — a required label that only appears on page 2 must be
@@ -414,7 +601,8 @@ class TestRealTransportRepoNormalization(unittest.TestCase):
                             "branch": "main"})
         argv = self._argvs(stub)[0]
         self.assertEqual(
-            argv, ["gh", "api", "repos/fixture-org/app/rulesets"])
+            argv, ["gh", "api",
+                   "repos/fixture-org/app/rulesets?per_page=100&page=1"])
 
     def test_ruleset_per_id_endpoint_normalized(self):
         list_json = json.dumps([{"id": 42, "target": "branch"}])
@@ -447,7 +635,8 @@ class TestRealTransportRepoNormalization(unittest.TestCase):
                 "ruleset", {"repo": "fixture-org/app", "branch": "main"})
         argv = self._argvs(stub)[0]
         self.assertEqual(
-            argv, ["gh", "api", "repos/fixture-org/app/rulesets"])
+            argv, ["gh", "api",
+                   "repos/fixture-org/app/rulesets?per_page=100&page=1"])
 
     def test_rest_repo_helper_shapes(self):
         self.assertEqual(FP.rest_repo("github.com/fixture-org/app"),

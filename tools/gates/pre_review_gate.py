@@ -499,22 +499,32 @@ class Gate:
                 for ln in result.stdout.splitlines() if ln.strip()]
 
 
+# Sentinel for injected-evidence load failures (_read_injected_json):
+# a parse failure must stay distinguishable from a file holding the
+# JSON literal `null`, so callers can apply the SHAPE check that names
+# what the file should hold (S2-F2 named refusals).
+_READ_FAILURE = object()
+
+
 def _read_injected_json(path: str):
     """Read + parse an injected evidence file (--command-result,
     --ui-results). Any read/decode/JSON failure is a NAMED rc-2 usage
-    refusal (S2-F2), never a raw traceback. Returns the parsed value,
-    or None after printing `usage: unreadable <path> — <detail>`."""
+    refusal (S2-F2), never a raw traceback; callers detect it via the
+    _READ_FAILURE sentinel. Returns the parsed value otherwise — a file
+    holding the JSON literal `null` parses successfully to None (callers
+    apply their own SHAPE check: each injected file's contract names
+    the shape it must hold)."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError) as e:
         print(f"usage: unreadable {path} — {e}", file=sys.stderr)
-        return None
+        return _READ_FAILURE
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
         print(f"usage: unreadable {path} — invalid JSON: {e}",
               file=sys.stderr)
-        return None
+        return _READ_FAILURE
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -626,18 +636,32 @@ def main(argv: list[str] | None = None) -> int:
         command_results: list[dict] = []
         for p in args.command_result:
             parsed = _read_injected_json(p)
-            if parsed is None:
+            if parsed is _READ_FAILURE:
                 return 2
             # both shapes legal: a LIST of results (extend) or a single
             # result object (append) — never wrap a list as one element.
             if isinstance(parsed, list):
                 command_results.extend(parsed)
-            else:
+            elif isinstance(parsed, dict):
                 command_results.append(parsed)
+            else:
+                print(f"usage: --command-result {p} — expected a JSON "
+                      f"object or array, got {type(parsed).__name__}",
+                      file=sys.stderr)
+                return 2
         ui_results = None
         if args.ui_results:
             ui_results = _read_injected_json(args.ui_results)
-            if ui_results is None:
+            if ui_results is _READ_FAILURE:
+                return 2
+            # F4: the UI evidence contract is a JSON OBJECT — a list,
+            # string, number or null must be refused by NAME here, exit
+            # 2, and never reach check_ui_results (whose payload walk
+            # would raise an AttributeError on a non-object).
+            if not isinstance(ui_results, dict):
+                print(f"usage: --ui-results {args.ui_results} — expected "
+                      f"a JSON object, got {type(ui_results).__name__}",
+                      file=sys.stderr)
                 return 2
         if args.diff_file:
             try:

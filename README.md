@@ -128,7 +128,8 @@ git clone https://github.com/agentmerlin8-ops/ai-software-factory
 cd ai-software-factory
 python3 onboarding/onboard.py preflight /path/to/your/repo
 python3 onboarding/onboard.py inspect /path/to/your/repo
-python3 onboarding/onboard.py propose /path/to/your/repo
+# --control-home in-repo: dedicated mode rejects a binding to the target's own origin
+python3 onboarding/onboard.py propose /path/to/your/repo --control-home in-repo
 python3 onboarding/onboard.py apply /path/to/your/repo
 python3 onboarding/onboard.py verify /path/to/your/repo
 ```

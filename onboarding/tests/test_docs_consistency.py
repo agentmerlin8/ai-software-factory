@@ -37,6 +37,15 @@ KICKOFF_TEMPLATE = (REPO_ROOT / "onboarding" / "templates" / "KICKOFF.md")
 SPEC_FREEZE_LINE = ("- **spec freeze** — the spec is frozen with human "
                     "approval before planning starts")
 
+# EX-005: the single-repository quickstart must pass `--control-home
+# in-repo` on propose in BOTH shipped locations — the default dedicated
+# mode infers a binding to the target's own origin and rejects it
+# (dedicated self-binding guard), which stops a fresh quickstart at
+# step 3.
+QUICKSTART_FILES = ("README.md", "onboarding/README.md")
+QUICKSTART_WHY = ("dedicated mode rejects a binding to the target's "
+                  "own origin")
+
 
 def tracked_docs() -> list[Path]:
     """The scanned docs: sorted, from git ls-files (argv list)."""
@@ -73,6 +82,33 @@ class TestDocsConsistency(unittest.TestCase):
         self.assertIn("Stop and ask a human ONLY for:", text)
         self.assertIn("stop and ask a human only at the gates listed below",
                       text)
+
+    def test_single_repo_quickstart_passes_control_home_in_repo(self) -> None:
+        """The single-repository quickstart's propose line carries
+        `--control-home in-repo` in BOTH shipped locations (root
+        README.md and onboarding/README.md) and says why (one
+        sentence): dedicated mode rejects a binding to the target's own
+        origin, so the default would stop the quickstart at propose."""
+        for rel in QUICKSTART_FILES:
+            path = REPO_ROOT / rel
+            with self.subTest(doc=rel):
+                self.assertTrue(path.is_file(), f"{rel} missing")
+                text = path.read_text(encoding="utf-8")
+                propose_line = ""
+                for line in text.splitlines():
+                    if ("onboard.py propose" in line
+                            and "/path/to/your/repo" in line):
+                        propose_line = " ".join(line.split())
+                        break
+                self.assertTrue(
+                    propose_line,
+                    f"{rel} has no quickstart propose line")
+                self.assertIn("--control-home in-repo", propose_line,
+                              f"{rel} quickstart propose line misses "
+                              "--control-home in-repo")
+                self.assertIn(QUICKSTART_WHY, text,
+                              f"{rel} does not say why the quickstart "
+                              "uses --control-home in-repo")
 
     def test_docs_name_the_pipeline_and_drop_deleted_assets(self) -> None:
         # (a) root ONBOARDING.md names every pipeline command

@@ -1304,6 +1304,66 @@ class MalformedInputNamedRefusals(unittest.TestCase):
             self.assertIn(f"usage: unreadable {bad} — invalid JSON:",
                           proc.stderr)
 
+    def test_non_object_ui_results_named_usage_refusal(self):
+        """Class 6 (F4): --ui-results parsing to anything but a JSON
+        object (list/string/number/null) → rc 2, a usage line naming
+        BOTH the file and the expected 'JSON object' shape, no
+        traceback, and check_ui_results is NEVER reached (no gate
+        verdict is printed)."""
+        d = FIX / "ui-assertions-valid"
+        with tempfile.TemporaryDirectory() as td:
+            for payload, kind in (("[]", "list"), ('"x"', "str"),
+                                  ("3", "int"), ("null", "NoneType")):
+                bad = Path(td) / "ui-not-an-object.json"
+                bad.write_text(payload, encoding="utf-8")
+                with self.subTest(payload=payload):
+                    proc = self._cli(
+                        ["build", str(d), "--root", str(REPO),
+                         "--base", "main",
+                         "--diff-file", str(d / "diff-name-status.txt"),
+                         "--discovery", f"tests={d / 'discovery.txt'}",
+                         "--ui-results", str(bad)])
+                    self.assertEqual(proc.returncode, 2)
+                    self.assertNotIn("Traceback", proc.stderr)
+                    self.assertIn(f"usage: --ui-results {bad}",
+                                  proc.stderr)
+                    self.assertIn("JSON object", proc.stderr)
+                    self.assertIn(f"got {kind}", proc.stderr)
+                    # never reached the check layer: no gate verdict
+                    self.assertNotIn("PRE-REVIEW GATE", proc.stdout)
+
+    def test_object_ui_results_still_runs_the_normal_gate_path(self):
+        """F4 keeps object payloads working: the valid ui-assertions
+        fixture passes through the CLI under the normal gate path."""
+        d = FIX / "ui-assertions-valid"
+        proc = self._cli(
+            ["build", str(d), "--root", str(REPO), "--base", "main",
+             "--diff-file", str(d / "diff-name-status.txt"),
+             "--discovery", f"tests={d / 'discovery.txt'}",
+             "--ui-results", str(d / "ui-results.json")])
+        self.assertEqual(proc.returncode, 0,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("PRE-REVIEW GATE (build): PASS", proc.stdout)
+
+    def test_non_object_command_result_named_usage_refusal(self):
+        """Same shape-contract law for --command-result: a valid-JSON
+        non-object/non-array (string/number/null) is a named rc-2
+        refusal, not a silent skip or a downstream crash."""
+        d = FIX / "build-valid-manifest"
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "cr.json"
+            bad.write_text("42", encoding="utf-8")
+            proc = self._cli(
+                ["build", str(d), "--root", str(REPO), "--base", "main",
+                 "--diff-file", str(d / "diff-name-status.txt"),
+                 "--discovery", f"tests={d / 'discovery.txt'}",
+                 "--command-result", str(bad)])
+            self.assertEqual(proc.returncode, 2)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn(f"usage: --command-result {bad}", proc.stderr)
+            self.assertIn("JSON object or array", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

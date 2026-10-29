@@ -278,36 +278,23 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(metrics["precision"], 0.0)
         self.assertEqual(metrics["approval_escapes"], 2)
 
-    def test_stop_shape_parses_as_zero_metrics(self):
+    def test_stop_shape_refused_by_name(self):
+        """F6: a stopped lens is refused by name, not scored as zero metrics
+        (a zero-finding score would read as a clean reviewer that never
+        ran)."""
         stopped = lens_file(
             Path(self._tmp.name) / "stopped.json",
             "review-security",
             [],
             stop={"rule": "package-hash-mismatch", "detail": "hash does not match the package"},
         )
-        cases = bench_score.load_bench(self.bench.base)
-        produced = bench_score.load_lens_output("review-security", stopped)
-        metrics = bench_score.evaluate(cases, {"review-security": produced})["lenses"][
-            "review-security"
-        ]
-        self.assertEqual(
-            strict(metrics),
-            {
-                "produced": 0,
-                "matched": 0,
-                "precision": 0.0,
-                "recall": 0.0,
-                "critical_major_expected": 2,
-                "critical_major_matched": 0,
-                "critical_major_recall": 0.0,
-                "clean_cases": 1,
-                "unnecessary_revisions": 0,
-                "unnecessary_revision_rate": 0.0,
-                "defective_cases": 2,
-                "approval_escapes": 2,
-                "approval_escape_rate": 1.0,
-            },
-        )
+        with self.assertRaises(BenchError) as ctx:
+            bench_score.load_lens_output("review-security", stopped)
+        message = str(ctx.exception)
+        self.assertIn("review bench: ", message)
+        self.assertIn("lens review-security", message)
+        self.assertIn("stopped review", message)
+        self.assertIn("package-hash-mismatch", message)
 
     def test_bench_refusals(self):
         base = Path(self._tmp.name)
@@ -451,6 +438,26 @@ class CliTests(unittest.TestCase):
         result = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(result.returncode, 1)
         self.assertIn("written by 'review-adversary'", result.stderr)
+
+    def test_cli_stopped_lens_exit1(self):
+        """F6: the bench CLI refuses a stopped lens by name, exit 1."""
+        stopped = lens_file(
+            Path(self._tmp.name) / "stopped.json",
+            "review-security", [],
+            stop={"rule": "package-hash-mismatch",
+                  "detail": "package hashes disagree"},
+        )
+        argv = [sys.executable, str(SCORE), "--bench", str(self.bench.base),
+                "--outputs", f"review-contract={self.bench.lens_c}",
+                "--outputs", f"review-adversary={self.bench.lens_a}",
+                "--outputs", f"review-security={stopped}",
+                "--json"]
+        result = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("review bench: ", result.stderr)
+        self.assertIn("lens review-security", result.stderr)
+        self.assertIn("stopped review", result.stderr)
+        self.assertIn("package-hash-mismatch", result.stderr)
 
     def test_cli_missing_lens_role_exit1(self):
         # A partial panel is a named refusal: the combined block is the

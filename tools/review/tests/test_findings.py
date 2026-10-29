@@ -208,6 +208,21 @@ class LoadHappyPathTests(_FileFixtureTest):
             findings.load(self.dir / "nope.yaml")
         self.assertIn("cannot read", str(ctx.exception))
 
+    def test_latin1_file_decode_error_is_named(self) -> None:
+        """F5: a non-UTF-8 file raises UnicodeDecodeError from
+        Path.read_text, which is neither OSError nor FindingsError — load
+        must convert it into a named refusal naming the file and the decode
+        problem."""
+        path = self.dir / "latin1.yaml"
+        path.write_bytes(b'a: "\xe9"\n')  # latin-1 é, not valid UTF-8
+        with self.assertRaises(FindingsError) as ctx:
+            findings.load(path)
+        message = str(ctx.exception)
+        self.assertTrue(message.startswith("review findings:"), message)
+        self.assertIn(str(path), message)
+        self.assertIn("not valid UTF-8", message)
+        self.assertIn("invalid continuation byte", message)
+
     def test_empty_file_invalid(self) -> None:
         path = self.write_yaml("empty.yaml", "")
         with self.assertRaises(FindingsError) as ctx:
@@ -580,6 +595,26 @@ class CliTests(_FileFixtureTest):
         code, out, _ = self.run_cli(["findings", "json", str(path)])
         self.assertEqual(code, 0)
         self.assertEqual(out, findings.to_json(findings.load(path)))
+
+    def test_validate_latin1_file_exit_1_no_traceback(self) -> None:
+        """F5: both CLI commands must refuse a non-UTF-8 file by name."""
+        path = self.dir / "latin1.yaml"
+        path.write_bytes(b'a: "\xe9"\n')
+        code, _, err = self.run_cli(["findings", "validate", str(path)])
+        self.assertEqual(code, 1)
+        self.assertIn("cannot read", err)
+        self.assertIn("UTF-8", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_json_cmd_latin1_file_exit_1_no_traceback(self) -> None:
+        path = self.dir / "latin1.yaml"
+        path.write_bytes(b'a: "\xe9"\n')
+        code, _, err = self.run_cli(["findings", "json", str(path)])
+        self.assertEqual(code, 1)
+        self.assertTrue(err.startswith("review findings:"), err)
+        self.assertIn("cannot read", err)
+        self.assertIn("UTF-8", err)
+        self.assertNotIn("Traceback", err)
 
     def test_json_cmd_invalid_exit_1(self) -> None:
         path = self.write_json("bad.json", doc_a(decision="MAYBE"))

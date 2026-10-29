@@ -517,6 +517,71 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertIn("### weird \u00fc.txt (A)\n", pkg)
         self.assertNotIn("\\303\\274", pkg)
 
+    def test_literal_pathspecs_do_not_glob_star_path(self) -> None:
+        """F1: a changed file literally named src/*.py must not select (and
+        embed) other src files when its per-file diff runs.
+
+        A pathspec ``src/*.py`` would glob-match src/secret.py too, so the
+        star-named file's diff block would carry secret.py's content.  The
+        build passes --literal-pathspecs: only the literal filename diff
+        appears under the star-named heading.
+        """
+        src = self.repo / "src"
+        src.mkdir(exist_ok=True)
+        (src / "*.py").write_text("star one\n", encoding="utf-8")
+        (src / "secret.py").write_text("secret one\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "star base")
+        base = self.rev_parse("HEAD")
+        (src / "*.py").write_text("star two\n", encoding="utf-8")
+        (src / "secret.py").write_text("secret two\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "star head")
+        head = self.rev_parse("HEAD")
+        proc = self.cli("build", "--repo", str(self.repo), "--base", base,
+                        "--head", head, "--out", str(self.dir / "pkg-star.md"))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        pkg = (self.dir / "pkg-star.md").read_text(encoding="utf-8")
+        star_block = self.diff_block(pkg, "src/*.py")
+        secret_block = self.diff_block(pkg, "src/secret.py")
+        self.assertIn("-star one", star_block)
+        self.assertIn("+star two", star_block)
+        self.assertNotIn("secret", star_block)  # no glob-selected embed
+        self.assertIn("-secret one", secret_block)
+        self.assertIn("+secret two", secret_block)
+
+    def test_paths_with_quotes_and_backslashes_parse_verbatim(self) -> None:
+        """F2: name-status/numstat use -z, so a filename that git would
+        C-quote in non-NUL output (double quote, backslash) still gets a
+        real per-file diff instead of an empty one."""
+        name = 'we"ird\\file.py'
+        (self.repo / name).write_text("line one\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "quoted base")
+        base = self.rev_parse("HEAD")
+        (self.repo / name).write_text("line one\nline two\n",
+                                      encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "quoted head")
+        head = self.rev_parse("HEAD")
+        proc = self.cli("build", "--repo", str(self.repo), "--base", base,
+                        "--head", head, "--out",
+                        str(self.dir / "pkg-quoted.md"))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        pkg = (self.dir / "pkg-quoted.md").read_text(encoding="utf-8")
+        self.assertIn(f"### {name} (M)\n", pkg)
+        self.assertIn(f"1\t0\t{name}\n", pkg)  # stat rows carry the real path
+        block = self.diff_block(pkg, name)
+        self.assertIn(" line one", block)  # context line, real path diffed
+        self.assertIn("+line two", block)
+
+    def test_scope_lists_binary_files(self) -> None:
+        """F4: Scope names every binary path explicitly, one per line, so a
+        lens sees that the content body is unavailable."""
+        self.build_ok()
+        self.assertIn("binary_files:\n- bin.dat\n", self.pkg)
+        self.assertIn("### bin.dat (M)\n\n[binary]\n", self.pkg)
+
     # -- P4: remote origin security ----------------------------------------
 
     def test_remote_origin_userinfo_stripped(self) -> None:
@@ -667,6 +732,25 @@ class IncludeScopeTests(unittest.TestCase):
         self.assertIn("changed_files: 1", text)
         self.assertIn("### docs/a.md", text)
         self.assertNotIn("### src/a.py", text)
+
+    def test_include_blank_value_refused(self) -> None:
+        """F3: an empty/whitespace-only --include would silently skip the
+        scope filter and ship the whole diff; it must be a named refusal."""
+        for blank in ("", "   ", "\t"):
+            with self.subTest(blank=repr(blank)):
+                result = self.build("--include", blank)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("review package: --include value must not "
+                              "be empty", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_scope_without_binaries_says_none(self) -> None:
+        """F4: a diff tree with no binary files lists binary_files: none."""
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = (Path(self._tmp.name) / "pkg.md").read_text(encoding="utf-8")
+        self.assertIn("binary_files: none\n", text)
+        self.assertNotIn("binary_files:\n- ", text)
 
     def test_include_matching_nothing_is_refused(self) -> None:
         result = self.build("--include", "nothing-here")

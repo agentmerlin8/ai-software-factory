@@ -165,18 +165,20 @@ def changed_statuses(repo, base: str, head: str):
     """[(status, path)] for every changed file, sorted by path.
 
     Renames are disabled, so a rename shows up as delete + add, matching the
-    per-file diff command used under ## Diff.
+    per-file diff command used under ## Diff.  ``-z`` makes the output
+    NUL-delimited records (status NUL path NUL) with paths verbatim: no
+    C-quoting, so quotes/backslashes/tabs/newlines in filenames parse back
+    to the real path instead of feeding the per-file diff a quoted name.
     """
     proc = git(repo, "-c", "core.quotepath=false", "diff", "--no-renames",
-               "--name-status", base, head)
+               "--name-status", "-z", base, head)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip()
                            or "git diff --name-status failed")
+    records = [record for record in proc.stdout.split(b"\0") if record]
     rows = []
-    for line in proc.stdout.splitlines():
-        code, sep, path = line.partition(b"\t")
-        if not sep or not path:
-            continue
+    for index in range(0, len(records) - 1, 2):  # status NUL path NUL
+        code, path = records[index], records[index + 1]
         rows.append((code.decode("ascii", "replace"),
                      path.decode("utf-8", "replace")))
     rows.sort(key=lambda row: row[1])
@@ -187,16 +189,20 @@ def numstat_rows(repo, base: str, head: str):
     """[(added, deleted, path)] straight from git diff --numstat.
 
     Never ``git diff --stat``: that output depends on terminal width.
-    Binary rows carry added=deleted="-".
+    Binary rows carry added=deleted="-".  ``-z`` terminates each record
+    (added TAB deleted TAB path NUL) after the whole path, so paths with
+    embedded tabs or newlines no longer break record boundaries either.
     """
     proc = git(repo, "-c", "core.quotepath=false", "diff", "--no-renames",
-               "--numstat", base, head)
+               "--numstat", "-z", base, head)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip()
                            or "git diff --numstat failed")
     rows = []
-    for line in proc.stdout.splitlines():
-        parts = line.split(b"\t", 2)
+    for record in proc.stdout.split(b"\0"):
+        if not record:
+            continue
+        parts = record.split(b"\t", 2)
         if len(parts) != 3:
             continue
         rows.append((parts[0].decode("ascii", "replace"),
@@ -206,7 +212,11 @@ def numstat_rows(repo, base: str, head: str):
 
 
 def file_diff_text(repo, base: str, head: str, path: str) -> str:
+    # --literal-pathspecs: a changed path passed after ``--`` is the literal
+    # filename, never a glob — a file really named ``src/*.py`` must not
+    # select (and embed) every other changed file under src/.
     proc = git(repo,
+               "--literal-pathspecs",
                "-c", "diff.renames=false", "-c", "core.quotepath=false",
                "diff", "--no-renames", "--no-color", "--no-ext-diff",
                "--full-index", "-U3", base, head, "--", path)
@@ -313,7 +323,8 @@ def matches_include(path: str, includes: list[str]) -> bool:
 
 def render_scope(allowed: list[str] | None, withheld: list[str] | None,
                  omitted: list[tuple[str, int]],
-                 includes: list[str] | None = None) -> str:
+                 includes: list[str] | None = None,
+                 binary: list[str] | None = None) -> str:
     lines = []
     if includes is None:
         lines.append("included_paths: all changed files\n")
@@ -335,6 +346,11 @@ def render_scope(allowed: list[str] | None, withheld: list[str] | None,
     else:
         lines.append("omitted_files:\n")
         lines.extend(f"- {p} ({n} bytes)\n" for p, n in omitted)
+    if not binary:
+        lines.append("binary_files: none\n")
+    else:
+        lines.append("binary_files:\n")
+        lines.extend(f"- {p}\n" for p in binary)
     return "".join(lines)
 
 
@@ -355,9 +371,15 @@ def compose_package(args) -> tuple[str, str]:
     if base == head:
         fail("review package: base and head are the same commit")
 
+    include_values = getattr(args, "include", None) or []
+    for value in include_values:
+        if not value.strip():
+            # An empty include would otherwise build an empty list, skip the
+            # scope filter entirely, and ship the whole diff.
+            fail("review package: --include value must not be empty")
     includes = None
-    if getattr(args, "include", None):
-        includes = [value.strip() for value in args.include if value.strip()]
+    if include_values:
+        includes = [value.strip() for value in include_values]
     allowed = None
     if args.allowed is not None:
         allowed = read_list_file(args.allowed, "--allowed")
@@ -395,6 +417,10 @@ def compose_package(args) -> tuple[str, str]:
     num_by_path = {}
     for added, deleted, path in stats:
         num_by_path[path] = (added, deleted)
+    # Binary files get a body marker but no readable content; the Scope
+    # section lists them explicitly so a lens can see content is missing.
+    binary_paths = sorted(path for a, d, path in stats
+                          if a == "-" and d == "-")
     insertions = sum(int(a) for a, _ in num_by_path.values() if a.isdigit())
     deletions = sum(int(d) for _, d in num_by_path.values() if d.isdigit())
 
@@ -440,7 +466,8 @@ def compose_package(args) -> tuple[str, str]:
     ])
 
     scope = render_scope(allowed, withheld,
-                         [(p, s) for p, s, _ in omitted], includes)
+                         [(p, s) for p, s, _ in omitted], includes,
+                         binary_paths)
 
     stat_lines = [f"{a}\t{d}\t{p}\n" for a, d, p in stats]
     stat_lines.append(f"total: {len(blocks)} files, +{insertions} -{deletions}\n")

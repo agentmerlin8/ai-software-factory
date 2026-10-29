@@ -279,10 +279,20 @@ def load_lens_output(role: str, path: str | Path) -> list[Produced]:
 
     Raises FindingsError when the file is unreadable, fails
     ``review.findings.v1`` validation, or was written by a reviewer
-    other than `role`.
+    other than `role`.  A stopped review (shape B) is refused by
+    BenchError: scoring it as an empty findings list would count a
+    reviewer that never ran as a clean zero.
     """
     doc = load_findings(path)
-    reviewer = doc["review"].get("reviewer")
+    review = doc["review"]
+    if "stop" in review:
+        stop = review.get("stop")
+        rule = stop.get("rule") if isinstance(stop, dict) else None
+        raise BenchError(
+            f"lens {role}: findings document {path} is a stopped review "
+            f"({rule})"
+        )
+    reviewer = review.get("reviewer")
     if reviewer != role:
         raise FindingsError(
             f"lens {role}: findings document {path} was written by {reviewer!r}"

@@ -345,6 +345,12 @@ def load(path: str | Path) -> dict:
     p = Path(path)
     try:
         text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        # Neither OSError nor FindingsError: refuse by name instead of
+        # leaking a bare traceback from the CLI.
+        raise FindingsError(
+            f"cannot read {p}: file is not valid UTF-8 ({exc.reason})"
+        ) from exc
     except OSError as exc:
         raise FindingsError(f"cannot read {p}: {exc.strerror or exc}") from exc
     stripped = text.strip()

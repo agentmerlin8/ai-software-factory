@@ -175,6 +175,28 @@ class _GitFixtureTest(unittest.TestCase):
                        encoding="utf-8")
         return out
 
+    def write_stop_findings(self, reviewer: str,
+                            rule: str = "package-hash-mismatch",
+                            path: Path | None = None) -> Path:
+        """A shape-B findings document: the reviewer STOPPED."""
+        if not hasattr(self, "pkg_sha"):
+            self.build_package()
+        out = path or (self.repo / f"findings-{reviewer}-stop.yaml")
+        doc = {
+            "schema": "review.findings.v1",
+            "review": {
+                "reviewer": reviewer,
+                "rubric_version": f"{reviewer}-v1",
+                "package_sha256": self.pkg_sha,
+                "base_sha": self.base,
+                "head_sha": self.head,
+                "stop": {"rule": rule,
+                         "detail": f"reviewer stopped: {rule}"},
+            },
+        }
+        out.write_text(yamlish_dumps(doc), encoding="utf-8")
+        return out
+
     def render(self, **overrides) -> subprocess.CompletedProcess:
         """Run render with a full default asset set; overrides replace keys:
         story, pr, base, head, package, findings (list of (role, path)),
@@ -551,6 +573,36 @@ class _GitFixtureTest(unittest.TestCase):
         proc = self.render(findings=[("review-adversary", str(missing))])
         self.assertEqual(proc.returncode, 1)
         self.assertIn("review record: unreadable findings doc:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_render_refuses_stopped_review(self) -> None:
+        """F6: a stop-block findings document must not render as an empty
+        findings list and thereby APPROVE a panel that never reviewed."""
+        doc = self.write_stop_findings("review-security",
+                                       "package-hash-mismatch")
+        proc = self.render(findings=[("review-security", str(doc))])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: stopped review: review-security "
+                      "(package-hash-mismatch)", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_stopped_review_lens(self) -> None:
+        """F6: check re-parses reviewer documents with the same refusal."""
+        out, data, _ = self.render_ok()
+        role = "review-adversary"
+        doc_path = self.repo / f"findings-{role}.yaml"
+        stop_doc = self.write_stop_findings(role, path=doc_path)
+        for reviewer in data["reviewers"]:
+            if reviewer["role"] == role:
+                reviewer["document_sha256"] = hashlib.sha256(
+                    stop_doc.read_bytes()).hexdigest()
+        (out / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: stopped review: review-adversary "
+                      "(package-hash-mismatch)", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
     def test_undispositioned_findings_refused(self) -> None:

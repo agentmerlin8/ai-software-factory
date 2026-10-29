@@ -253,6 +253,12 @@ def load_review_lens(path: str, role: str, pkg: PackageInfo) -> dict:
     if review.get("reviewer") != role:
         fail(f"review record: reviewer role mismatch: --findings {role}={path} "
              f"but the document declares reviewer {review.get('reviewer')!r}")
+    stop = review.get("stop")
+    if isinstance(stop, dict) and stop.get("rule"):
+        # Shape B: the reviewer STOPPED, it did not approve.  Treating the
+        # missing findings list as empty would let compose_record emit
+        # APPROVED for a panel that never reviewed.
+        fail(f"review record: stopped review: {role} ({stop['rule']})")
     mismatches = []
     if review.get("package_sha256") != pkg.sha256:
         mismatches.append(f"package_sha256 {review.get('package_sha256')!r} "

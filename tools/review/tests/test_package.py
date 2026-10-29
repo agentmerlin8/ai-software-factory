@@ -461,5 +461,60 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertNotIn("\\303\\274", pkg)
 
 
+class IncludeScopeTests(unittest.TestCase):
+    """--include narrows the diff, the stat line, and the identity counts."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name) / "repo"
+        self.repo.mkdir()
+        self.git("init")
+        self.git("config", "user.email", "a@b.c")
+        self.git("config", "user.name", "a")
+        (self.repo / "docs").mkdir()
+        (self.repo / "src").mkdir()
+        (self.repo / "docs" / "a.md").write_text("doc\n", encoding="utf-8")
+        (self.repo / "src" / "a.py").write_text("a = 1\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-m", "base")
+        self.base = self.rev("HEAD")
+        (self.repo / "docs" / "a.md").write_text("doc changed\n", encoding="utf-8")
+        (self.repo / "src" / "a.py").write_text("a = 2\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-m", "head")
+        self.head = self.rev("HEAD")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def git(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(self.repo), *args],
+                              capture_output=True, text=True, check=True)
+
+    def rev(self, ref: str) -> str:
+        return self.git("rev-parse", ref).stdout.strip()
+
+    def build(self, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build", "--repo", str(self.repo),
+             "--base", self.base, "--head", self.head,
+             "--out", str(Path(self._tmp.name) / "pkg.md"), *extra],
+            capture_output=True, text=True)
+
+    def test_include_limits_diff_and_counts(self) -> None:
+        result = self.build("--include", "docs")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = (Path(self._tmp.name) / "pkg.md").read_text(encoding="utf-8")
+        self.assertIn("included_paths:\n- docs\n", text)
+        self.assertIn("changed_files: 1", text)
+        self.assertIn("### docs/a.md", text)
+        self.assertNotIn("### src/a.py", text)
+
+    def test_include_matching_nothing_is_refused(self) -> None:
+        result = self.build("--include", "nothing-here")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--include matched no changed files", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

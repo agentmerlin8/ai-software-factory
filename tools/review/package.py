@@ -243,9 +243,27 @@ def diff_section_block(path: str, status: str, text: str, binary: bool) -> str:
     return heading + "```diff\n" + text + "```\n"
 
 
+def matches_include(path: str, includes: list[str]) -> bool:
+    """A path is inside an --include scope when it equals the scope path or
+    sits beneath it (component-wise, never a bare string prefix)."""
+    for include in includes:
+        scope = include.rstrip("/")
+        if not scope:
+            continue
+        if path == scope or path.startswith(scope + "/"):
+            return True
+    return False
+
+
 def render_scope(allowed: list[str] | None, withheld: list[str] | None,
-                 omitted: list[tuple[str, int]]) -> str:
+                 omitted: list[tuple[str, int]],
+                 includes: list[str] | None = None) -> str:
     lines = []
+    if includes is None:
+        lines.append("included_paths: all changed files\n")
+    else:
+        lines.append("included_paths:\n")
+        lines.extend(f"- {p}\n" for p in includes)
     if allowed is None:
         lines.append("allowed_files: all changed files\n")
     else:
@@ -281,6 +299,9 @@ def compose_package(args) -> tuple[str, str]:
     if base == head:
         fail("review package: base and head are the same commit")
 
+    includes = None
+    if getattr(args, "include", None):
+        includes = [value.strip() for value in args.include if value.strip()]
     allowed = None
     if args.allowed is not None:
         allowed = read_list_file(args.allowed, "--allowed")
@@ -290,6 +311,14 @@ def compose_package(args) -> tuple[str, str]:
 
     statuses = changed_statuses(args.repo, base, head)
     stats = numstat_rows(args.repo, base, head)
+    if includes:
+        statuses = [(status, path) for status, path in statuses
+                    if matches_include(path, includes)]
+        stats = [(a, d, path) for a, d, path in stats
+                 if matches_include(path, includes)]
+        if not statuses:
+            fail("review package: --include matched no changed files: "
+                 + ", ".join(includes))
     num_by_path = {}
     for added, deleted, path in stats:
         num_by_path[path] = (added, deleted)
@@ -336,7 +365,8 @@ def compose_package(args) -> tuple[str, str]:
         f"deletions: {deletions}\n",
     ])
 
-    scope = render_scope(allowed, withheld, [(p, s) for p, s, _ in omitted])
+    scope = render_scope(allowed, withheld,
+                         [(p, s) for p, s, _ in omitted], includes)
 
     stat_lines = [f"{a}\t{d}\t{p}\n" for a, d, p in stats]
     stat_lines.append(f"total: {len(blocks)} files, +{insertions} -{deletions}\n")
@@ -434,6 +464,10 @@ def add_common_arguments(parser: argparse.ArgumentParser, out_flag: bool) -> Non
                         help="gate evidence input PATH[:LABEL] (repeatable)")
     parser.add_argument("--allowed",
                         help="file listing allowed artifact paths, one per line")
+    parser.add_argument("--include", action="append", default=[],
+                        metavar="PATH",
+                        help="review scope: only changed paths at or under "
+                             "this path (repeatable)")
     parser.add_argument("--withheld",
                         help="file listing withheld artifact paths, one per line")
     parser.add_argument("--max-diff-bytes", type=nonnegative_int,

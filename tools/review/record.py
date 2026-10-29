@@ -149,6 +149,26 @@ def parse_withheld(body_text: str) -> tuple[str, ...]:
     return tuple(withheld)
 
 
+def record_path(path: str, repo: str) -> str:
+    """The path form stored in a record: repo-relative when the file lives
+    inside the repository, absolute otherwise. Records are committed
+    artifacts, so a local absolute path may not leak into them."""
+    absolute = os.path.abspath(path)
+    root = os.path.abspath(repo)
+    try:
+        relative = os.path.relpath(absolute, root)
+    except ValueError:  # different drives (Windows)
+        return absolute
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        return absolute
+    return relative.replace(os.sep, "/")
+
+
+def resolve_record_path(path: str, repo: str) -> str:
+    """Resolve a stored record path for reading (relative -> repo-joined)."""
+    return path if os.path.isabs(path) else os.path.join(repo, path)
+
+
 def parse_package(path: str) -> PackageInfo:
     """Verify a package against its own hash and extract identity + scope."""
     data = read_bytes(path, "review record: package unreadable")
@@ -240,7 +260,8 @@ def load_review_lens(path: str, role: str, pkg: PackageInfo) -> dict:
     }
 
 
-def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo):
+def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo,
+                      repo: str):
     """Load every --findings ROLE=FILE pair; returns (reviewers, findings)."""
     reviewers: list[dict] = []
     findings: list[dict] = []
@@ -255,7 +276,7 @@ def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo):
         reviewers.append({
             "role": role,
             "rubric_version": lens["rubric_version"],
-            "document": os.path.abspath(path),
+            "document": record_path(path, repo),
             "document_sha256": lens["document_sha256"],
         })
         for finding in lens["findings"]:
@@ -277,7 +298,8 @@ def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo):
 
 # -- gate evidence ---------------------------------------------------------
 
-def collect_gates(specs: list[str], parser: argparse.ArgumentParser) -> list[dict]:
+def collect_gates(specs: list[str], parser: argparse.ArgumentParser,
+                  repo: str) -> list[dict]:
     """Parse NAME=EXIT:EVIDENCE specs and hash each evidence file."""
     parsed: list[dict] = []
     for spec in specs:
@@ -288,7 +310,7 @@ def collect_gates(specs: list[str], parser: argparse.ArgumentParser) -> list[dic
         if not path_sep or not path or not exit_text.isdigit():
             parser.error(f"bad --gate spec (expected NAME=EXIT:EVIDENCE): {spec!r}")
         parsed.append({"gate": name, "exit": int(exit_text),
-                       "evidence_path": os.path.abspath(path)})
+                       "evidence_path": record_path(path, repo)})
     missing: list[str] = []
     for item in parsed:
         try:
@@ -487,7 +509,7 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
         if not sep or not role or not path:
             parser.error(f"bad --findings spec (expected ROLE=FILE): {spec!r}")
         specs.append((role, path))
-    reviewers, findings = collect_reviewers(specs, pkg)
+    reviewers, findings = collect_reviewers(specs, pkg, args.repo)
 
     withheld = set(pkg.withheld)
     withheld_ids = [f["id"] for f in findings
@@ -495,7 +517,7 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
     if withheld_ids:
         fail("review record: withheld artifact: " + ", ".join(withheld_ids))
 
-    gate_results = collect_gates(args.gate, parser)
+    gate_results = collect_gates(args.gate, parser, args.repo)
     entries = load_dispositions(args.dispositions)
     matched = match_dispositions(entries, findings)
     by_id = {f["id"]: f for f in findings}
@@ -519,7 +541,8 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
         "pr": args.pr,
         "base_sha": pkg.base_sha,
         "head_sha": pkg.head_sha,
-        "package": {"path": pkg.path, "sha256": pkg.sha256},
+        "package": {"path": record_path(pkg.path, args.repo),
+                    "sha256": pkg.sha256},
         "lane": {"name": LANE_NAME, "version": LANE_VERSION},
         "reviewers": reviewers,
         "gate_results": gate_results,
@@ -741,7 +764,7 @@ def cmd_check(args) -> int:
     if errors:
         fail("review record: invalid record: " + "; ".join(errors))
 
-    pkg = parse_package(data["package"]["path"])
+    pkg = parse_package(resolve_record_path(data["package"]["path"], args.repo))
     if pkg.sha256 != data["package"]["sha256"]:
         fail(f"review record: package hash mismatch: "
              f"recorded {data['package']['sha256']}, computed {pkg.sha256}")
@@ -757,7 +780,7 @@ def cmd_check(args) -> int:
         fail("review record: withheld artifact: " + ", ".join(withheld_ids))
 
     for reviewer in data["reviewers"]:
-        raw = read_bytes(reviewer["document"],
+        raw = read_bytes(resolve_record_path(reviewer["document"], args.repo),
                          "review record: findings doc mismatch: "
                          f"{reviewer['role']}")
         if hashlib.sha256(raw).hexdigest() != reviewer["document_sha256"]:
@@ -766,7 +789,7 @@ def cmd_check(args) -> int:
 
     for gate in data["gate_results"]:
         try:
-            raw = Path(gate["evidence_path"]).read_bytes()
+            raw = Path(resolve_record_path(gate["evidence_path"], args.repo)).read_bytes()
         except OSError:
             fail(f"review record: gate evidence path missing: {gate['gate']} "
                  f"({gate['evidence_path']})")

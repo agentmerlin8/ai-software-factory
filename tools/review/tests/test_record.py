@@ -816,5 +816,32 @@ class TestDispositionShaCoercion(unittest.TestCase):
                              "6032430")
 
 
+class RecordPathTests(unittest.TestCase):
+    """Committed records must not leak local absolute paths."""
+
+    def test_path_inside_repo_is_relative(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            (repo / "stories" / "S1").mkdir(parents=True)
+            target = repo / "stories" / "S1" / "review.json"
+            target.write_text("{}", encoding="utf-8")
+            self.assertEqual(record.record_path(str(target), str(repo)),
+                             "stories/S1/review.json")
+
+    def test_path_outside_repo_stays_absolute(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            other = Path(td) / "repo-other"
+            repo.mkdir()
+            other.mkdir()
+            target = other / "x.yaml"
+            target.write_text("{}", encoding="utf-8")
+            self.assertTrue(os.path.isabs(record.record_path(str(target), str(repo))))
+
+    def test_resolve_record_path_joins_relative(self) -> None:
+        self.assertEqual(record.resolve_record_path("a/b.yaml", "/tmp/r"),
+                         os.path.join("/tmp/r", "a/b.yaml"))
+
+
 if __name__ == "__main__":
     unittest.main()

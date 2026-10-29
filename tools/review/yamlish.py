@@ -62,8 +62,14 @@ import re
 import sys
 from pathlib import Path
 
-_INT_RE = re.compile(r"^-?[0-9]+$")
-_FLOAT_RE = re.compile(r"^[+-]?(\.[0-9]+|[0-9]+(\.[0-9]*)?([eE][+-]?[0-9]+)?)$")
+# A plain scalar is an integer only in canonical decimal form: no leading
+# zeros. Hex-looking identifiers (and shas that happen to be all digits with
+# a leading zero) must stay strings, or a valid 7-char short SHA would be
+# silently reinterpreted.
+_INT_RE = re.compile(r"^-?(0|[1-9][0-9]*)$")
+# A float must carry a decimal point or an exponent; a bare digit run is an
+# integer (or, with a leading zero, a string) — never a float.
+_FLOAT_RE = re.compile(r"^[+-]?((\.[0-9]+)|([0-9]+\.[0-9]*)|([0-9]+(\.[0-9]*)?[eE][+-]?[0-9]+))$")
 _PLAIN_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _INDICATOR_RE = re.compile(r"(^|\s)([&*!])")
 _PLAIN_BAD_START = frozenset("#&*!|>%@`\"'\\[],{}?:- ")

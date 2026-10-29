@@ -368,5 +368,24 @@ class CliTests(unittest.TestCase):
         self.assertIn("cannot read", err)
 
 
+class TestNumericScalars(unittest.TestCase):
+    """Numeric-looking scalars must keep their type and round-trip.
+
+    A short commit SHA can be all digits (e.g. 6032430). Parsing it as an
+    integer silently breaks sha validation, and a leading zero would corrupt
+    the value outright.
+    """
+
+    def test_canonical_integer_parses_as_int(self) -> None:
+        self.assertIsInstance(yamlish.loads("a: 6032430")["a"], int)
+
+    def test_leading_zero_stays_a_string(self) -> None:
+        self.assertEqual(yamlish.loads("a: 0123456")["a"], "0123456")
+
+    def test_numeric_looking_string_round_trips(self) -> None:
+        value = {"a": "6032430", "b": "0123456"}
+        self.assertEqual(yamlish.loads(yamlish.dumps(value)), value)
+
+
 if __name__ == "__main__":
     unittest.main()

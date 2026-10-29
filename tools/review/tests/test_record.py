@@ -16,6 +16,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+from tools.review import record
 from pathlib import Path
 
 if __package__ in (None, ""):  # direct CLI: python3 tools/review/tests/test_record.py
@@ -796,6 +798,22 @@ class _GitFixtureTest(unittest.TestCase):
         check = self.check_proc(out)
         self.assertEqual(check.returncode, 0, check.stderr)
         self.assertIn("review record: OK (", check.stdout)
+
+
+class TestDispositionShaCoercion(unittest.TestCase):
+    """An unquoted all-digit short SHA arrives as an int; it is still a SHA."""
+
+    def test_unquoted_numeric_fix_sha_is_coerced_to_str(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "disp.yaml"
+            path.write_text(
+                "dispositions:\n"
+                "  - id: RA-001\n"
+                "    disposition: fixed\n"
+                "    fix_sha: 6032430\n",
+                encoding="utf-8")
+            self.assertEqual(record.load_dispositions(str(path))[0]["fix_sha"],
+                             "6032430")
 
 
 if __name__ == "__main__":

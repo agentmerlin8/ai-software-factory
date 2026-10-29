@@ -337,7 +337,9 @@ def load_dispositions(path: str) -> list[dict]:
         entry = {
             "id": item.get("id"),
             "disposition": item.get("disposition"),
-            "fix_sha": item.get("fix_sha"),
+            "fix_sha": (str(item["fix_sha"])
+                        if isinstance(item.get("fix_sha"), int)
+                        else item.get("fix_sha")),
             "reason": item.get("reason"),
             "issue": item.get("issue"),
             "evidence": item.get("evidence"),

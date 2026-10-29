@@ -116,6 +116,11 @@ class SyntheticBench:
             "review-security",
             [finding("review-security", 1, "major", "test_quality", "artifacts/s2/b.md:3")],
         )
+        self.lens_c = lens_file(
+            base / "contract.json",
+            "review-contract",
+            [],
+        )
 
     def evaluate(self) -> dict:
         cases = bench_score.load_bench(self.base)
@@ -237,7 +242,10 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(metrics["precision"], 0.5)
         self.assertEqual(metrics["recall"], 0.5)
 
-    def test_matched_info_severity_does_not_protect(self):
+    def test_matched_info_severity_counts_no_critical_major_credit(self):
+        """Strict critical/major credit requires the produced finding that
+        made the match to be blocker/major: an info severity match is a
+        match, but not a catch, and it protects no defective case."""
         low = lens_file(
             Path(self._tmp.name) / "info.json",
             "review-adversary",
@@ -249,7 +257,8 @@ class ScoringTests(unittest.TestCase):
             "review-adversary"
         ]
         self.assertEqual(metrics["matched"], 1)          # key match ignores severity
-        self.assertEqual(metrics["critical_major_matched"], 1)  # expected severity counts
+        self.assertEqual(metrics["critical_major_matched"], 0)  # info earns no credit
+        self.assertEqual(metrics["critical_major_recall"], 0.0)
         self.assertEqual(metrics["approval_escapes"], 2)  # info protects nobody
         self.assertEqual(metrics["approval_escape_rate"], 1.0)
 
@@ -383,6 +392,8 @@ class CliTests(unittest.TestCase):
             "--bench",
             str(bench or self.bench.base),
             "--outputs",
+            f"review-contract={self.bench.lens_c}",
+            "--outputs",
             f"review-adversary={self.bench.lens_a}",
             "--outputs",
             f"review-security={self.bench.lens_s}",
@@ -397,7 +408,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(data["schema"], "review.bench.v1")
         self.assertEqual(data["cases"], 3)
         self.assertEqual(
-            list(data["lenses"]), ["review-adversary", "review-security"]
+            list(data["lenses"]),
+            ["review-adversary", "review-contract", "review-security"],
         )
         self.assertEqual(list(data), sorted(data))
         self.assertEqual(list(data["lenses"]), sorted(data["lenses"]))
@@ -410,8 +422,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("review bench:", result.stdout)
         self.assertIn("combined", result.stdout)
+        self.assertIn("review-contract", result.stdout)
         self.assertIn("review-adversary", result.stdout)
         self.assertIn("review-security", result.stdout)
+        self.assertIn("with expected blocker/major 2, without 1", result.stdout)
         self.assertIn("0.6667", result.stdout)
         self.assertIn("s2  defective  CHANGES_REQUESTED", result.stdout)
         self.assertIn("s3  clean  CHANGES_REQUESTED (unnecessary)", result.stdout)
@@ -420,17 +434,38 @@ class CliTests(unittest.TestCase):
         bad = Path(self._tmp.name) / "bad.json"
         bad.write_text("{}\n", encoding="utf-8")
         argv = [sys.executable, str(SCORE), "--bench", str(self.bench.base),
-                "--outputs", f"review-adversary={bad}", "--json"]
+                "--outputs", f"review-contract={self.bench.lens_c}",
+                "--outputs", f"review-adversary={bad}",
+                "--outputs", f"review-security={self.bench.lens_s}",
+                "--json"]
         result = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(result.returncode, 1)
         self.assertIn("review findings: ", result.stderr)
 
     def test_cli_role_mismatch_exit1(self):
         argv = [sys.executable, str(SCORE), "--bench", str(self.bench.base),
-                "--outputs", f"review-security={self.bench.lens_a}", "--json"]
+                "--outputs", f"review-contract={self.bench.lens_c}",
+                "--outputs", f"review-adversary={self.bench.lens_a}",
+                "--outputs", f"review-security={self.bench.lens_a}",
+                "--json"]
         result = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(result.returncode, 1)
         self.assertIn("written by 'review-adversary'", result.stderr)
+
+    def test_cli_missing_lens_role_exit1(self):
+        # A partial panel is a named refusal: the combined block is the
+        # deliverable, so any missing lens role is exit 1, not a report.
+        argv = [sys.executable, str(SCORE), "--bench", str(self.bench.base),
+                "--outputs", f"review-adversary={self.bench.lens_a}",
+                "--outputs", f"review-security={self.bench.lens_s}",
+                "--json"]
+        result = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "review bench: combined block requires all three lens roles",
+            result.stderr,
+        )
+        self.assertIn("missing review-contract", result.stderr)
 
     def test_cli_unreadable_bench_exit1(self):
         result = self.run_cli(["--json"], bench=Path(self._tmp.name) / "nope")
@@ -477,6 +512,8 @@ class CliTests(unittest.TestCase):
             str(SCORE),
             "--bench",
             str(self.bench.base),
+            "--outputs",
+            f"review-contract={self.bench.lens_c}",
             "--outputs",
             f"review-adversary={self.bench.lens_a}",
             "--outputs",
@@ -618,6 +655,188 @@ class MinorOnlyCaseTests(unittest.TestCase):
             self.assertEqual(lens["defective_cases"], 1)
             self.assertEqual(lens["approval_escapes"], 1)
             self.assertEqual(lens["approval_escape_rate"], 1.0)
+
+
+class EscapeLocationTests(unittest.TestCase):
+    """Approval-escape protection is computed per expected finding location."""
+
+    def test_clean_file_in_same_case_does_not_protect_the_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            (arts / "def").mkdir(parents=True, exist_ok=True)
+            (arts / "def" / "f.md").write_text("# x\n# y\ndefect\n",
+                                                encoding="utf-8")
+            (arts / "def" / "clean.md").write_text("# c\nclean\n",
+                                                   encoding="utf-8")
+            case_file(cases / "def.json", "def", "def", "artifacts/def/f.md",
+                      [{"id": "E01", "severity": "major",
+                        "rubric_dimension": "behavior",
+                        "artifact_reference": "artifacts/def/f.md:3"}])
+            out = lens_file(
+                base / "lens.json", "review-adversary",
+                [finding("review-adversary", 1, "blocker", "operational",
+                         "artifacts/def/clean.md:1")])
+            report = bench_score.evaluate(
+                bench_score.load_bench(base),
+                {"review-adversary": bench_score.load_lens_output(
+                    "review-adversary", out)})
+            lens = report["lenses"]["review-adversary"]
+            # The case decision is still CHANGES_REQUESTED (any produced
+            # blocker/major requests changes), but nothing protects the
+            # defect location: the escape is counted per location.
+            self.assertEqual(report["decisions"]["def"], "CHANGES_REQUESTED")
+            self.assertEqual(lens["approval_escapes"], 1)
+            self.assertEqual(lens["approval_escape_rate"], 1.0)
+
+    def test_produced_at_defect_location_protects(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            (arts / "def").mkdir(parents=True, exist_ok=True)
+            (arts / "def" / "f.md").write_text("# x\n# y\ndefect\n",
+                                                encoding="utf-8")
+            case_file(cases / "def.json", "def", "def", "artifacts/def/f.md",
+                      [{"id": "E01", "severity": "major",
+                        "rubric_dimension": "behavior",
+                        "artifact_reference": "artifacts/def/f.md:3"}])
+            out = lens_file(
+                base / "lens.json", "review-adversary",
+                [finding("review-adversary", 1, "major", "behavior",
+                         "artifacts/def/f.md:3")])
+            report = bench_score.evaluate(
+                bench_score.load_bench(base),
+                {"review-adversary": bench_score.load_lens_output(
+                    "review-adversary", out)})
+            lens = report["lenses"]["review-adversary"]
+            self.assertEqual(lens["approval_escapes"], 0)
+            self.assertEqual(lens["approval_escape_rate"], 0.0)
+
+
+class DistinctConsumptionTests(unittest.TestCase):
+    """Location-level detection consumes each produced finding once."""
+
+    def test_one_produced_cannot_cover_two_expected_at_one_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            (arts / "multi").mkdir(parents=True, exist_ok=True)
+            (arts / "multi" / "f.md").write_text("# h\nd1\nd2\n",
+                                                  encoding="utf-8")
+            case_file(cases / "multi.json", "multi", "multi",
+                      "artifacts/multi/f.md",
+                      [{"id": "E01", "severity": "major",
+                        "rubric_dimension": "behavior",
+                        "artifact_reference": "artifacts/multi/f.md:2"},
+                       {"id": "E02", "severity": "major",
+                        "rubric_dimension": "test_quality",
+                        "artifact_reference": "artifacts/multi/f.md:3"}])
+            out = lens_file(
+                base / "lens.json", "review-adversary",
+                [finding("review-adversary", 1, "major", "behavior",
+                         "artifacts/multi/f.md:2")])
+            report = bench_score.evaluate(
+                bench_score.load_bench(base),
+                {"review-adversary": bench_score.load_lens_output(
+                    "review-adversary", out)})
+            loc = report["lenses"]["review-adversary"]["location"]
+            self.assertEqual(loc["detected"], 1)          # only one pairing
+            self.assertEqual(loc["detection_recall"], 0.5)
+            self.assertEqual(loc["critical_major_detected"], 1)
+            self.assertEqual(loc["dimension_agreement"], 1.0)  # paired tag agrees
+            # strict matching: one key of two matched
+            strict = report["lenses"]["review-adversary"]
+            self.assertEqual(strict["matched"], 1)
+            self.assertEqual(strict["recall"], 0.5)
+
+
+class UnnecessaryRevisionDenominatorTests(unittest.TestCase):
+    """The rate denominator is every case without an expected blocker/major."""
+
+    def test_minor_only_cases_count_in_the_denominator(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            (arts / "min").mkdir(parents=True, exist_ok=True)
+            (arts / "min" / "f.md").write_text("# m\nminor\n", encoding="utf-8")
+            case_file(cases / "min.json", "min", "min", "artifacts/min/f.md",
+                      [{"id": "E01", "severity": "minor",
+                        "rubric_dimension": "docs_process",
+                        "artifact_reference": "artifacts/min/f.md:2"}])
+            (arts / "clean").mkdir(parents=True, exist_ok=True)
+            (arts / "clean" / "g.md").write_text("# g\nclean\n",
+                                                 encoding="utf-8")
+            case_file(cases / "clean.json", "clean", "clean",
+                      "artifacts/clean/g.md", [])
+            # A blocker on the minor-only case makes it an unnecessary
+            # revision; the denominator is every case without an expected
+            # blocker/major (the clean control AND the minor-only case).
+            out = lens_file(
+                base / "lens.json", "review-adversary",
+                [finding("review-adversary", 1, "blocker", "operational",
+                         "artifacts/min/f.md:2")])
+            report = bench_score.evaluate(
+                bench_score.load_bench(base),
+                {"review-adversary": bench_score.load_lens_output(
+                    "review-adversary", out)})
+            lens = report["lenses"]["review-adversary"]
+            self.assertEqual(lens["unnecessary_revisions"], 1)
+            self.assertEqual(lens["unnecessary_revision_rate"], 0.5)
+
+
+class LoaderConfinementTests(unittest.TestCase):
+    """load_bench confines artifact paths; string prefixes are not enough."""
+
+    def test_artifact_reference_traversal_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            (arts / "s1").mkdir(parents=True, exist_ok=True)
+            (arts / "s1" / "a.md").write_text("a\n", encoding="utf-8")
+            (base / "outside.txt").write_text("x\ny\n", encoding="utf-8")
+            doc = {
+                "id": "s1",
+                "title": "s1",
+                "provenance": "synthetic",
+                "artifact": "artifacts/s1/a.md",
+                "expected": {"findings": [{
+                    "id": "E01",
+                    "severity": "major",
+                    "rubric_dimension": "behavior",
+                    "artifact_reference": "artifacts/s1/../../../outside.txt:1",
+                }]},
+            }
+            (cases / "s1.json").write_text(json.dumps(doc, indent=2),
+                                           encoding="utf-8")
+            with self.assertRaisesRegex(BenchError,
+                                        "escapes the cases directory"):
+                bench_score.load_bench(base)
+
+    def test_case_artifact_traversal_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td) / "bench"
+            cases = base / "cases"
+            arts = cases / "artifacts"
+            (arts / "s1").mkdir(parents=True, exist_ok=True)
+            (base / "outside.txt").write_text("x\ny\n", encoding="utf-8")
+            doc = {
+                "id": "s1",
+                "title": "s1",
+                "provenance": "synthetic",
+                "artifact": "artifacts/s1/../../../outside.txt",
+                "expected": {"findings": []},
+            }
+            (cases / "s1.json").write_text(json.dumps(doc, indent=2),
+                                           encoding="utf-8")
+            with self.assertRaisesRegex(BenchError,
+                                        "artifact path .* escapes the cases "
+                                        "directory"):
+                bench_score.load_bench(base)
 
 
 if __name__ == "__main__":

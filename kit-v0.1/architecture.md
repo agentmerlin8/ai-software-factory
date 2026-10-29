@@ -238,7 +238,7 @@ The review gate is **owned and reproducible**; no external/bot reviewer is a fac
 
 **Paths** — kit: `tools/review/` (incl. `bench/`); install: `factory/tools/review/` (same module tree; the kit root and the installed `factory/` are both import roots). Control-home records: `stories/<id>/review/`. Kit self-build records: `kit-v0.1/reviews/<slice>/`. External historical findings are ingested with `source=external`; they are evidence, not a live gate.
 
-**Calibration** — `tools/review/bench/` holds adjudicated seed cases (field notes 18–25, the held slice's external findings, and clean controls); `tools/review/score.py` reports per-lens and combined precision, critical/major recall, unnecessary-revision rate, and approval-escape rate. A frozen baseline is committed; a lane change is promoted only against it.
+**Calibration** — `tools/review/bench/` holds adjudicated seed cases (field notes 18–25, the held slice's external findings, and clean controls); `tools/review/bench/score.py` reports per-lens and combined precision, critical/major recall, unnecessary-revision rate, and approval-escape rate. A frozen baseline is committed; a lane change is promoted only against it.
 
 **Boundary (S3.5a)** — records are not ledger events yet; state-machine evidence changes, the required CI check, and ruleset changes are S3.5b. The owner merge gate is unchanged.
 

@@ -33,7 +33,7 @@ AGENTS_DIR = ROOT / "agents"
 ROLES = {
     "review-contract.agent.md": (
         "review-contract", "review-contract-v1", "RC",
-        ("contract_fidelity", "scope", "docs_process"),
+        ("contract_fidelity", "scope", "docs_process", "architecture"),
     ),
     "review-adversary.agent.md": (
         "review-adversary", "review-adversary-v1", "RA",

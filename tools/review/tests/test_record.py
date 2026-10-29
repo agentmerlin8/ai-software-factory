@@ -179,7 +179,7 @@ class _GitFixtureTest(unittest.TestCase):
         """Run render with a full default asset set; overrides replace keys:
         story, pr, base, head, package, findings (list of (role, path)),
         dispositions, gates (list of str), loop, loop_cap, prior (list),
-        out_dir, extra (list of str)."""
+        out_dir, extra (list of str), models (dict role->model)."""
         if "package" not in overrides:
             overrides["package"] = str(self.build_package()[0])
         if "findings" not in overrides:
@@ -190,6 +190,12 @@ class _GitFixtureTest(unittest.TestCase):
             overrides["dispositions"] = str(self.write_dispositions(
                 [{"id": "RA-001", "disposition": "fixed",
                   "fix_sha": self.fix_a}]))
+        models = overrides.pop("models", None)
+        if models is None:
+            # Auto-models cover every findings role that is a known role;
+            # unknown roles must reach collect_reviewers' own refusal.
+            models = {role: "test-model-v1" for role, _ in
+                      overrides["findings"] if role in record.ROLES}
         kw = {
             "repo": str(self.repo),
             "story": "S35A",
@@ -198,6 +204,7 @@ class _GitFixtureTest(unittest.TestCase):
             "head": self.head,
             "dispositions": overrides["dispositions"],
             "findings": overrides["findings"],
+            "models": models,
             "gates": [f"lint=0:{self.gate_path}"],
             "loop": None,
             "loop_cap": None,
@@ -211,6 +218,8 @@ class _GitFixtureTest(unittest.TestCase):
                 "--package", kw["package"], "--dispositions", kw["dispositions"]]
         for role, path in kw["findings"]:
             args += ["--findings", f"{role}={path}"]
+        for role, model in sorted(kw["models"].items()):
+            args += ["--model", f"{role}={model}"]
         for gate in kw["gates"]:
             args += ["--gate", gate]
         if kw["loop"] is not None:
@@ -432,20 +441,48 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertIn("review record: withheld artifact: RA-001", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
-    def test_package_diff_reference_exempt_from_withheld_and_touch(self) -> None:
-        withheld = self.dir / "withheld.txt"
-        withheld.write_text("a.txt\n", encoding="utf-8")
-        package, _ = self.build_package("--withheld", str(withheld))
+    def test_package_diff_reference_touch_rule_enforced(self) -> None:
+        """package:diff@ refs follow the same touch rule as plain paths:
+        strip prefix + line suffix; the fix commit must touch the path."""
         doc = self.write_findings("review-adversary",
                                   [self.finding("RA-001",
                                                 artifact="package:diff@a.txt:4")])
         disp = self.write_dispositions(
             [{"id": "RA-001", "disposition": "fixed",
               "fix_sha": self.fix_other}])
-        proc = self.render(package=str(package),
-                           findings=[("review-adversary", str(doc))],
+        proc = self.render(findings=[("review-adversary", str(doc))],
                            dispositions=str(disp))
-        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: bad fixed sha:", proc.stderr)
+        self.assertIn("does not touch a.txt", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_package_diff_reference_touched_by_fix_accepted(self) -> None:
+        doc = self.write_findings("review-adversary",
+                                  [self.finding("RA-001",
+                                                artifact="package:diff@a.txt:4")])
+        disp = self.write_dispositions(
+            [{"id": "RA-001", "disposition": "fixed",
+              "fix_sha": self.fix_a}])
+        _, data, _ = self.render_ok(findings=[("review-adversary", str(doc))],
+                                    dispositions=str(disp))
+        self.assertEqual(data["open_findings"], [])
+        self.assertEqual(data["dispositions"][0]["fix_sha"], self.fix_a)
+
+    def test_package_diff_reference_withheld_refused(self) -> None:
+        """The withheld rule applies to package:diff@ refs too: the prefix
+        is no longer an exemption from withheld checks."""
+        withheld = self.dir / "withheld.txt"
+        withheld.write_text("a.txt\n", encoding="utf-8")
+        package, _ = self.build_package("--withheld", str(withheld))
+        doc = self.write_findings("review-adversary",
+                                  [self.finding("RA-001",
+                                                artifact="package:diff@a.txt:4")])
+        proc = self.render(package=str(package),
+                           findings=[("review-adversary", str(doc))])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: withheld artifact: RA-001", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
 
     def test_package_hash_mismatch_refused(self) -> None:
         package, sha = self.build_package()
@@ -706,6 +743,81 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertEqual(data["reviewers"][0]["role"], "review-contract")
         self.assertEqual(data["reviewers"][0]["rubric_version"],
                          "review-contract-v1")
+
+    # -- reviewer models (RC-004) ------------------------------------------
+
+    def test_reviewer_models_recorded_in_json_and_markdown(self) -> None:
+        contract = self.write_findings(
+            "review-contract",
+            [self.finding("RC-001", "info", artifact="src/app.py:1",
+                          dimension="contract_fidelity")])
+        adversary = self.write_findings("review-adversary", [])
+        disp = self.write_dispositions(
+            [{"id": "RC-001", "disposition": "rejected", "reason": "no",
+              "evidence": "e"}])
+        _, data, md = self.render_ok(
+            findings=[("review-adversary", str(adversary)),
+                      ("review-contract", str(contract))],
+            models={"review-contract": "gpt-4o-2025-11",
+                    "review-adversary": "qwen3.8-max"},
+            dispositions=str(disp))
+        by_role = {r["role"]: r for r in data["reviewers"]}
+        self.assertEqual(by_role["review-contract"]["model"], "gpt-4o-2025-11")
+        self.assertEqual(by_role["review-adversary"]["model"], "qwen3.8-max")
+        self.assertIn("| role | model | rubric | document |", md)
+        self.assertIn("| review-contract | gpt-4o-2025-11 | "
+                      "review-contract-v1 |", md)
+        self.assertIn("| review-adversary | qwen3.8-max | "
+                      "review-adversary-v1 |", md)
+
+    def test_external_reviewer_model_recorded(self) -> None:
+        doc = self.write_findings("external", [self.finding("EX-001", "info",
+                                                           artifact="a.txt:1")])
+        disp = self.write_dispositions(
+            [{"id": "EX-001", "disposition": "rejected",
+              "reason": "legacy", "evidence": "wire log"}])
+        _, data, _ = self.render_ok(findings=[("external", str(doc))],
+                                    models={"external": "legacy-mapper-v0"},
+                                    dispositions=str(disp))
+        self.assertEqual(data["reviewers"][0]["model"], "legacy-mapper-v0")
+
+    def test_render_missing_reviewer_model_refused(self) -> None:
+        doc = self.write_findings("review-adversary",
+                                  [self.finding("RA-001", "minor")])
+        proc = self.render(findings=[("review-adversary", str(doc))],
+                           models={})
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: missing reviewer model: "
+                      "review-adversary", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_render_unknown_model_role_refused(self) -> None:
+        proc = self.render(models={"review-contract": "m",
+                                    "mystery": "m"})
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: unknown model role: mystery",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_render_model_role_without_findings_refused(self) -> None:
+        proc = self.render(models={"review-security": "m"})
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: model role without findings doc: "
+                      "review-security", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_reviewer_without_model(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def strip_model(data):
+            del data["reviewers"][0]["model"]
+
+        self.rewrite_record(out, strip_model)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: invalid record:", proc.stderr)
+        self.assertIn("model must be a non-empty string", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
 
     # -- check subcommand -------------------------------------------------
 
@@ -971,7 +1083,9 @@ class _GitFixtureTest(unittest.TestCase):
         proc = self.cli("render", "--repo", str(self.repo), "--story", "S35A",
                         "--pr", "7", "--base", self.base, "--head", self.head,
                         "--package", str(package), "--findings",
-                        f"review-adversary={doc}", "--dispositions", str(disp),
+                        f"review-adversary={doc}", "--model",
+                        "review-adversary=direct-run-model",
+                        "--dispositions", str(disp),
                         "--gate", f"lint=0:{gate}", "--out-dir", str(out),
                         cwd=self.repo)
         self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)

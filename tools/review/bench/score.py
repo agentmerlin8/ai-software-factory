@@ -11,12 +11,17 @@ file + rubric_dimension, and reports per-lens and combined metrics.
 CLI (``python3 tools/review/bench/score.py ...``)
 - ``--bench DIR`` — the bench directory (must contain ``cases/``).
 - ``--outputs ROLE=FILE [--outputs ROLE=FILE ...]`` — one findings
-  document per role; ROLE must be one of findings.ROLES.
+  document per role; ROLE must be one of findings.ROLES.  The combined
+  block is the deliverable the lane is calibrated against, so all three
+  lens roles (``review-contract``, ``review-adversary``,
+  ``review-security``) are required and a partial panel is a named
+  refusal (exit 1).
 - ``--json`` — print a single ``review.bench.v1`` object (sorted keys).
 
 Exit codes: 0 = inputs parsed and metrics printed (metrics are data, so
 0 regardless of how few findings matched); 1 = unreadable or invalid
-input (bench, case file, or findings document); 2 = usage errors.
+input (bench, case file, or findings document) or a partial panel;
+2 = usage errors.
 
 Matching rule
 -------------
@@ -25,8 +30,15 @@ A produced finding names a case because the path component right after
 ``tools/review/bench/cases/artifacts/fn18/x.md:3`` attributes to the same
 case as ``artifacts/fn18/x.md:3``.  It matches one expected finding when
 case id, artifact tail, and rubric_dimension all agree.  Line numbers do
-not participate in the match; severity does not participate either,
-except in the critical-major buckets and the escape/unnecessary counts.
+not participate in the match.  Severity does not participate in the
+strict match, but it gates every protection count: strict critical/major
+recall requires the matched produced finding itself to be blocker/major,
+approval-escape protection is computed per expected finding location (a
+produced blocker/major at a clean or wrong file protects nothing), and
+unnecessary revisions are counted over every case without an expected
+blocker/major finding.  Location-level detection pairs produced and
+expected findings one-to-one per artifact file: one produced finding
+cannot cover two expected findings at the same file.
 """
 
 from __future__ import annotations
@@ -49,6 +61,7 @@ from tools.review.findings import load as load_findings
 
 SCHEMA = "review.bench.v1"
 CRITICAL_MAJOR = ("blocker", "major")
+LENS_ROLES = ("review-contract", "review-adversary", "review-security")
 _EXPECTED_ID_RE = re.compile(r"^E[0-9]+$")
 _REFERENCE_RE = re.compile(r"^(?P<path>.+):(?P<line>[0-9]+)$")
 _LINE_SUFFIX_RE = re.compile(r"(:\d+)$")
@@ -124,6 +137,7 @@ def load_bench(bench_dir: str | Path) -> dict[str, BenchCase]:
     cases_dir = root / "cases"
     if not cases_dir.is_dir():
         raise BenchError(f"cannot read bench {root}: missing cases/ directory")
+    cases_root = cases_dir.resolve()
     cases: dict[str, BenchCase] = {}
     expected_keys: set[tuple[str, str, str]] = set()
     for case_path in sorted(cases_dir.glob("*.json")):
@@ -156,6 +170,11 @@ def load_bench(bench_dir: str | Path) -> dict[str, BenchCase]:
         if len(parts) < 3 or parts[1] != case_id:
             raise BenchError(
                 f"invalid case {case_id}: artifact {artifact!r} must live in artifacts/{case_id}/"
+            )
+        artifact_target = (cases_dir / artifact).resolve()
+        if not artifact_target.is_relative_to(cases_root):
+            raise BenchError(
+                f"invalid case {case_id}: artifact path {artifact!r} escapes the cases directory"
             )
         expected_doc = doc["expected"]
         if not isinstance(expected_doc, dict):
@@ -199,7 +218,15 @@ def load_bench(bench_dir: str | Path) -> dict[str, BenchCase]:
                     f"invalid {label}: artifact_reference path {ref_path!r} "
                     f"must live in artifacts/{case_id}/"
                 )
-            target = cases_dir / ref_path
+            # The string-prefix check is not a confinement: resolve the
+            # path and refuse traversal outside the cases directory before
+            # anything is read (a ``../`` segment passes the prefix).
+            target = (cases_dir / ref_path).resolve()
+            if not target.is_relative_to(cases_root):
+                raise BenchError(
+                    f"invalid {label}: artifact_reference path {ref_path!r} "
+                    "escapes the cases directory"
+                )
             if not target.is_file():
                 raise BenchError(f"invalid {label}: artifact_reference file not found: {ref_path}")
             if line < 1 or line > len(target.read_text(encoding="utf-8").splitlines()):
@@ -214,7 +241,7 @@ def load_bench(bench_dir: str | Path) -> dict[str, BenchCase]:
                 )
             expected_keys.add(key)
             expected.append(Expected(fid, raw["severity"], dimension, reference, line, tail))
-        if not (cases_dir / artifact).is_file():
+        if not artifact_target.is_file():
             raise BenchError(f"invalid case {case_id}: artifact not found: {artifact}")
         cases[case_id] = BenchCase(
             case_id, doc["title"], doc["provenance"], artifact, tuple(expected)
@@ -286,6 +313,7 @@ def load_lens_output(role: str, path: str | Path) -> list[Produced]:
 # -- metrics ---------------------------------------------------------------
 
 def _critical_ids(produced: list[Produced]) -> set[str]:
+    """Case ids touched by any produced blocker/major (any tail)."""
     return {
         finding.case_id
         for finding in produced
@@ -293,11 +321,42 @@ def _critical_ids(produced: list[Produced]) -> set[str]:
     }
 
 
+def _covered_locations(produced: list[Produced]) -> dict[str, set[str]]:
+    """case id -> artifact tails carrying a produced blocker/major."""
+    covered: dict[str, set[str]] = {}
+    for finding in produced:
+        if (finding.case_id is not None and finding.tail is not None
+                and finding.severity in CRITICAL_MAJOR):
+            covered.setdefault(finding.case_id, set()).add(finding.tail)
+    return covered
+
+
+def _escape_cases(cases: dict[str, BenchCase],
+                  covered: dict[str, set[str]]) -> int:
+    """Approval escapes, computed per expected finding location.
+
+    A defective case escapes when no produced blocker/major sits at any
+    of the case's expected blocker/major artifact locations: a produced
+    blocker/major at a clean file (or any other file of the case)
+    protects nothing.
+    """
+    escapes = 0
+    for case in cases.values():
+        if not case.defective:
+            continue
+        expected_locations = {item.tail for item in case.expected
+                              if item.severity in CRITICAL_MAJOR}
+        if not (expected_locations & covered.get(case.id, set())):
+            escapes += 1
+    return escapes
+
+
 def _metrics(
     cases: dict[str, BenchCase],
     expected_index: dict[tuple[str, str, str], Expected],
     produced: list[Produced],
     matched: set[tuple[str, str, str]],
+    matched_cm: set[tuple[str, str, str]],
     critical: set[str],
 ) -> dict:
     produced_n = len(produced)
@@ -309,20 +368,25 @@ def _metrics(
         for item in case.expected
         if item.severity in CRITICAL_MAJOR
     )
+    # Strict critical/major recall counts a match only when the produced
+    # finding that made it was itself blocker/major: matching an expected
+    # major with a produced info/minor is a match, but not a catch.
     cm_matched = sum(
-        1 for key in matched if expected_index[key].severity in CRITICAL_MAJOR
+        1
+        for key in matched
+        if key in matched_cm and expected_index[key].severity in CRITICAL_MAJOR
     )
     clean_cases = sum(1 for case in cases.values() if not case.expected)
-    # Only cases holding an expected blocker/major are "defective": a
-    # minor-only artifact is approvable under the verdict policy, so it may
-    # not inflate the approval-escape denominator.
     defective_cases = sum(1 for case in cases.values() if case.defective)
+    # The unnecessary-revision denominator is every case WITHOUT an
+    # expected blocker/major: clean cases AND minor-only cases.  A
+    # minor-only case is approvable under the verdict policy, but
+    # requesting changes on one is still an unnecessary revision.
+    no_cm_cases = sum(1 for case in cases.values() if not case.defective)
     unnecessary = sum(
-        1 for case in cases.values() if not case.expected and case.id in critical
+        1 for case in cases.values() if not case.defective and case.id in critical
     )
-    escapes = sum(
-        1 for case in cases.values() if case.defective and case.id not in critical
-    )
+    escapes = _escape_cases(cases, _covered_locations(produced))
     return {
         "produced": produced_n,
         "matched": matched_n,
@@ -333,10 +397,12 @@ def _metrics(
         "critical_major_recall": round(cm_matched / cm_expected, 4) if cm_expected else 0.0,
         "clean_cases": clean_cases,
         "unnecessary_revisions": unnecessary,
-        "unnecessary_revision_rate": round(unnecessary / clean_cases, 4) if clean_cases else 0.0,
+        "unnecessary_revision_rate": (round(unnecessary / no_cm_cases, 4)
+                                      if no_cm_cases else 0.0),
         "defective_cases": defective_cases,
         "approval_escapes": escapes,
-        "approval_escape_rate": round(escapes / defective_cases, 4) if defective_cases else 0.0,
+        "approval_escape_rate": (round(escapes / defective_cases, 4)
+                                 if defective_cases else 0.0),
     }
 
 
@@ -345,10 +411,15 @@ def evaluate(
 ) -> dict:
     """Score every lens and the combined view.
 
-    Combined matching is the union of lens matches; a case escapes only
-    when no lens raised blocker/major for it.  ``report['lenses']`` and
+    Combined matching and critical coverage are the unions of the lens
+    values; strict critical/major recall counts a match only when the
+    produced finding that made it was blocker/major, an approval escape
+    is computed per expected finding location, and the combined block
+    assumes the caller provided all three lens roles (the CLI enforces
+    it with a named refusal).  ``report['lenses']`` and
     ``report['combined']`` carry the metric dicts; decisions are derived
-    from the combined critical set.
+    from the combined critical set — any produced blocker/major in a case
+    requests changes, the same rule the record verdict uses.
     """
     expected_index: dict[tuple[str, str, str], Expected] = {}
     for case in cases.values():
@@ -357,30 +428,39 @@ def evaluate(
     lens_order = sorted(outputs, key=lambda role: ROLES.index(role))
     lens_metrics: dict[str, dict] = {}
     lens_matched: dict[str, set] = {}
+    lens_matched_cm: dict[str, set] = {}
     lens_critical: dict[str, set[str]] = {}
     all_produced: list[Produced] = []
     for role in lens_order:
         produced = outputs[role]
         matched: set = set()
+        matched_cm: set = set()
         for finding in produced:
             if finding.case_id is None or finding.tail is None:
                 continue
             key = (finding.case_id, finding.tail, finding.rubric_dimension)
             if key in expected_index and key not in matched:
                 matched.add(key)
+                if finding.severity in CRITICAL_MAJOR:
+                    matched_cm.add(key)
         lens_metrics[role] = _metrics(
-            cases, expected_index, produced, matched, _critical_ids(produced)
+            cases, expected_index, produced, matched, matched_cm,
+            _critical_ids(produced)
         )
         lens_metrics[role]["location"] = _location_metrics(cases, produced)
         lens_matched[role] = matched
+        lens_matched_cm[role] = matched_cm
         lens_critical[role] = _critical_ids(produced)
         all_produced.extend(produced)
     matched_union: set = set()
+    matched_cm_union: set = set()
     critical_union: set[str] = set()
     for role in lens_order:
         matched_union |= lens_matched[role]
+        matched_cm_union |= lens_matched_cm[role]
         critical_union |= lens_critical[role]
-    combined = _metrics(cases, expected_index, all_produced, matched_union, critical_union)
+    combined = _metrics(cases, expected_index, all_produced, matched_union,
+                        matched_cm_union, critical_union)
     combined["location"] = _location_metrics(cases, all_produced)
     decisions = {
         case_id: ("CHANGES_REQUESTED" if case_id in critical_union else "APPROVED")
@@ -410,12 +490,17 @@ def _location_metrics(cases: dict[str, BenchCase],
     the narrower question the lane actually owes — did some lens raise a
     finding at the right artifact? — and reports dimension/severity
     agreement separately.
+
+    Produced findings are consumed one-to-one per location: each expected
+    finding pairs with a DISTINCT produced finding (dimension-agreeing ones
+    first, so tag agreement is preserved when it exists), and one produced
+    finding can never cover two expected findings at the same file.
     """
-    expected_at: dict[tuple[str, str], list] = {}
+    expected_at: dict[tuple[str, str], list[Expected]] = {}
     for case in cases.values():
         for item in case.expected:
             expected_at.setdefault((case.id, item.tail), []).append(item)
-    produced_at: dict[tuple[str, str], list] = {}
+    produced_at: dict[tuple[str, str], list[Produced]] = {}
     for finding in produced:
         if finding.case_id is None or finding.tail is None:
             continue
@@ -426,34 +511,35 @@ def _location_metrics(cases: dict[str, BenchCase],
         1 for items in expected_at.values() for item in items
         if item.severity in CRITICAL_MAJOR
     )
-    true_positive = 0
-    for key, items in produced_at.items():
-        true_positive += min(len(items), len(expected_at.get(key, [])))
     detected = cm_detected = dim_ok = sev_ok = 0
     for key, items in expected_at.items():
-        here = produced_at.get(key, [])
-        if not here:
-            continue
+        unused = produced_at.get(key, [])
         for expected in items:
+            if not unused:
+                break
+            index = next(
+                (i for i, finding in enumerate(unused)
+                 if finding.rubric_dimension == expected.rubric_dimension),
+                0,
+            )
+            match = unused.pop(index)
             detected += 1
-            if expected.severity in CRITICAL_MAJOR and any(
-                finding.severity in CRITICAL_MAJOR for finding in here
-            ):
+            if (expected.severity in CRITICAL_MAJOR
+                    and match.severity in CRITICAL_MAJOR):
                 cm_detected += 1
-            if any(finding.rubric_dimension == expected.rubric_dimension
-                   for finding in here):
+            if match.rubric_dimension == expected.rubric_dimension:
                 dim_ok += 1
             idx = _SEVERITY_ORDER.index(expected.severity)
             adjacent = {_SEVERITY_ORDER[i] for i in (idx - 1, idx, idx + 1)
                         if 0 <= i < len(_SEVERITY_ORDER)}
-            if any(finding.severity in adjacent for finding in here):
+            if match.severity in adjacent:
                 sev_ok += 1
     return {
         "produced": len(produced),
         "expected": expected_total,
         "detected": detected,
         "detection_recall": round(detected / expected_total, 4) if expected_total else 0.0,
-        "detection_precision": (round(true_positive / len(produced), 4)
+        "detection_precision": (round(detected / len(produced), 4)
                                 if produced else 0.0),
         "critical_major_expected": cm_expected,
         "critical_major_detected": cm_detected,
@@ -484,8 +570,8 @@ def render_text(bench_label: str, report: dict) -> str:
         f"review bench: {bench_label}",
         (
             f"cases: {report['cases']} "
-            f"(defective {report['combined']['defective_cases']}, "
-            f"clean {report['combined']['clean_cases']})"
+            f"(with expected blocker/major {report['combined']['defective_cases']}, "
+            f"without {report['cases'] - report['combined']['defective_cases']})"
         ),
         "",
     ]
@@ -537,6 +623,16 @@ def main(argv: list[str] | None = None) -> int:
         outputs[role] = path
     if not outputs:
         parser.error("at least one --outputs ROLE=FILE is required")
+    # The combined block is the point of the calibration: it refuses a
+    # partial panel, so no run can silently under-report the union.
+    missing = [role for role in LENS_ROLES if role not in outputs]
+    if missing:
+        print(
+            "review bench: combined block requires all three lens roles "
+            f"({', '.join(LENS_ROLES)}): missing {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        return 1
     try:
         cases = load_bench(args.bench)
         produced_by_role = {

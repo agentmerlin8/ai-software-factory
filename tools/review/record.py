@@ -21,8 +21,8 @@ CLI::
 
     record.py render --repo PATH --story ID --pr N --base SHA --head SHA
         --package FILE --findings ROLE=FILE... --dispositions FILE
-        --gate NAME=EXIT:EVIDENCE... [--loop N] [--loop-cap 2]
-        [--prior DIR]... [--out-dir DIR]
+        --model ROLE=MODEL... --gate NAME=EXIT:EVIDENCE... [--loop N]
+        [--loop-cap 2] [--prior DIR]... [--out-dir DIR]
 
     record.py check --record DIR --repo PATH
 
@@ -231,11 +231,12 @@ def verify_cli_range(repo, cli_base: str, cli_head: str, pkg: PackageInfo) -> No
 
 # -- findings documents ----------------------------------------------------
 
-def repo_artifact_path(reference: str) -> str | None:
-    """The bare repo path of a repo-path reference (line suffix stripped);
-    None for ``package:diff@`` references, which are exempt."""
+def repo_artifact_path(reference: str) -> str:
+    """The bare repo path a reference names: the ``package:diff@`` prefix
+    and any ``:line`` suffix are stripped so that touch and withheld rules
+    apply to package-diff references exactly as to plain repo paths."""
     if reference.startswith(PACKAGE_REF_PREFIX):
-        return None
+        reference = reference[len(PACKAGE_REF_PREFIX):]
     stripped = LINE_SUFFIX_RE.match(reference)
     return stripped.group(1) if stripped else reference
 
@@ -274,8 +275,12 @@ def load_review_lens(path: str, role: str, pkg: PackageInfo) -> dict:
 
 
 def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo,
-                      repo: str):
-    """Load every --findings ROLE=FILE pair; returns (reviewers, findings)."""
+                      repo: str, models: dict[str, str]):
+    """Load every --findings ROLE=FILE pair; returns (reviewers, findings).
+
+    Every lens must also have been given a ``--model ROLE=MODEL``: the
+    reviewer model is an input, so the record refuses rather than guess.
+    """
     reviewers: list[dict] = []
     findings: list[dict] = []
     seen: set[str] = set()
@@ -285,9 +290,13 @@ def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo,
         if role in seen:
             fail(f"review record: duplicate reviewer role: {role}")
         seen.add(role)
+        model = models.get(role)
+        if not (isinstance(model, str) and model.strip()):
+            fail(f"review record: missing reviewer model: {role}")
         lens = load_review_lens(path, role, pkg)
         reviewers.append({
             "role": role,
+            "model": model,
             "rubric_version": lens["rubric_version"],
             "document": record_path(path, repo),
             "document_sha256": lens["document_sha256"],
@@ -437,24 +446,25 @@ def fix_sha_violations(entries: list[dict], by_id: dict, repo) -> list[str]:
             continue
         finding = by_id[entry["id"]]
         artifact = repo_artifact_path(finding["artifact_reference"])
-        if artifact is not None:
-            if (Path(repo) / artifact).exists():
-                # The cited artifact exists in the repository: the fix must
-                # touch that file, and only that file counts — paths merely
-                # named in required_change do not widen the rule.
-                targets = [artifact]
-            else:
-                # A doc finding can cite a non-file (a missing statement, a
-                # gap); only then may required_change name the paths that
-                # actually had to change (existence checked).
-                targets = [
-                    named
-                    for named in _paths_in_text(finding.get("required_change", ""))
-                    if (Path(repo) / named).exists()
-                ]
-            if not any(commit_touches_path(repo, full, target)
-                       for target in targets):
-                bad.append(f"{entry['id']} ({sha} does not touch {artifact})")
+        if (Path(repo) / artifact).exists():
+            # The cited artifact exists in the repository: the fix must
+            # touch that file, and only that file counts — paths merely
+            # named in required_change do not widen the rule.  This is
+            # enforced for package:diff@ references too: the prefix and
+            # any line suffix are stripped, never exempted.
+            targets = [artifact]
+        else:
+            # A doc finding can cite a non-file (a missing statement, a
+            # gap); only then may required_change name the paths that
+            # actually had to change (existence checked).
+            targets = [
+                named
+                for named in _paths_in_text(finding.get("required_change", ""))
+                if (Path(repo) / named).exists()
+            ]
+        if not any(commit_touches_path(repo, full, target)
+                   for target in targets):
+            bad.append(f"{entry['id']} ({sha} does not touch {artifact})")
     return bad
 
 
@@ -559,7 +569,20 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
         if not sep or not role or not path:
             parser.error(f"bad --findings spec (expected ROLE=FILE): {spec!r}")
         specs.append((role, path))
-    reviewers, findings = collect_reviewers(specs, pkg, args.repo)
+    models: dict[str, str] = {}
+    for spec in args.model:
+        role, sep, model = spec.partition("=")
+        if not sep or not role or not model.strip():
+            parser.error(f"bad --model spec (expected ROLE=MODEL): {spec!r}")
+        if role not in ROLES:
+            fail(f"review record: unknown model role: {role}")
+        if role in models:
+            fail(f"review record: duplicate model role: {role}")
+        models[role] = model
+    for role in models:
+        if role not in {spec_role for spec_role, _ in specs}:
+            fail(f"review record: model role without findings doc: {role}")
+    reviewers, findings = collect_reviewers(specs, pkg, args.repo, models)
 
     withheld = set(pkg.withheld)
     withheld_ids = [f["id"] for f in findings
@@ -671,11 +694,12 @@ def render_markdown(record: dict) -> str:
         "",
         "## Reviewers",
         "",
-        "| role | rubric | document |",
-        "| --- | --- | --- |",
+        "| role | model | rubric | document |",
+        "| --- | --- | --- | --- |",
     ]
     for reviewer in record["reviewers"]:
         out.append(f"| {md_cell(reviewer['role'])} | "
+                   f"{md_cell(reviewer['model'])} | "
                    f"{md_cell(reviewer['rubric_version'])} | "
                    f"{md_cell(reviewer['document'])} |")
     out += [
@@ -793,6 +817,16 @@ def validate_record(doc: object) -> list[str]:
                 "prior_rounds", "open_findings", "undispositioned"):
         if key in doc and not isinstance(doc[key], list):
             errors.append(f"{key} must be a list")
+    reviewers = doc.get("reviewers")
+    if isinstance(reviewers, list):
+        for index, entry in enumerate(reviewers):
+            if not isinstance(entry, dict):
+                errors.append(f"reviewers[{index}] must be a mapping")
+                continue
+            model = entry.get("model")
+            if not (isinstance(model, str) and model.strip()):
+                errors.append(
+                    f"reviewers[{index}] model must be a non-empty string")
     lane = doc.get("lane")
     if isinstance(lane, dict):
         if lane.get("name") != LANE_NAME:
@@ -952,6 +986,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     render.add_argument("--package", required=True, help="review package file")
     render.add_argument("--findings", action="append", default=[],
                         metavar="ROLE=FILE", help="findings doc per role")
+    render.add_argument("--model", action="append", default=[],
+                        metavar="ROLE=MODEL",
+                        help="reviewer model per role (repeatable, required "
+                             "for every --findings role)")
     render.add_argument("--dispositions", required=True,
                         help="disposition ledger file")
     render.add_argument("--gate", action="append", default=[],

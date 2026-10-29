@@ -1,10 +1,13 @@
 """Deterministic review package builder and checker.
 
 ``tools/review/package.py`` (S3.5a T2) materialises a git commit range into a
-self-describing Markdown review package.  The package is fully determined by
-its inputs: two builds over the same repository state with the same flags
-produce byte-identical output.  Nothing derived from wall-clock time,
-terminal width, or working-tree state enters the package.
+self-describing Markdown review package.  Byte-identical rebuilds hold over
+the same repository state and remote: the diff bytes come from the pinned
+base/head SHAs, and the Identity ``repo:`` line embeds the configured origin
+URL (or the local checkout path when no origin is set), so a different clone,
+directory, or remote may change that line even at the same SHAs.  Nothing
+derived from wall-clock time, terminal width, or working-tree file content
+enters the package.
 
 Package layout (fixed section order)::
 

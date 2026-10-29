@@ -47,7 +47,7 @@ The review gate the kit owns: a deterministic review package, three runtime-neut
 | T1 | Findings schema + strict YAML-subset reader | `tools/review/findings.py` + `tools/review/yamlish.py` + tests | valid document → canonical form; every refusal class named; JSON accepted |
 | T2 | Review package builder | `tools/review/package.py` + tests | byte-identical rebuild at the same SHAs; allowed/withheld honored; deterministic truncation; named refusals |
 | T3 | Record renderer + disposition ledger | `tools/review/record.py` + tests | any blocker/major → CHANGES REQUESTED; undispositioned findings refuse render; `fixed` requires a commit touching the artifact; `deferred` requires an issue link |
-| T4 | Calibration bench + scorer | `tools/review/bench/` (field notes 18–25, the held slice's external findings, clean controls) + `tools/review/score.py` | per-lens and combined precision, critical/major recall, unnecessary-revision rate, approval-escape rate; baseline committed |
+| T4 | Calibration bench + scorer | `tools/review/bench/` (field notes 18–25, the held slice's external findings, clean controls) + `tools/review/bench/score.py` | per-lens and combined precision, critical/major recall, unnecessary-revision rate, approval-escape rate; baseline committed |
 | T5 | Three runtime-neutral role packages | `agents/review-contract\|review-adversary\|review-security.agent.md` | each declares inputs, stay-out boundary, stop rules, structured output contract; no runtime-specific frontmatter |
 | T6 | Docs + install mapping | this section + `architecture.md` §Review lane | command-accuracy read; no contradictory paths |
 | T7 | Lane self-review (dogfood) + PR | record under `kit-v0.1/reviews/S3.5a/` | zero undispositioned findings; package hash pinned |

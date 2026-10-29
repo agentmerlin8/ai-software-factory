@@ -1,10 +1,14 @@
 # Review calibration bench
 
 A stand-alone fixture for calibrating the three review lenses:
-17 ground-truth cases, each a self-contained review artifact that
-*contains* a planted defect, plus the findings a correct review of that
-artifact would produce.  The companion scorer (`score.py`) compares what
-each lens actually produced against that ground truth.
+17 ground-truth cases — 15 defective (13 blocker/major, 2 minor-only)
+plus 2 clean controls. Each case is a self-contained review artifact;
+the defective ones *contain* a planted defect, plus the findings a
+correct review of that artifact would produce. The companion scorer
+(`score.py`) compares what each lens actually produced against that
+ground truth. The combined block requires all three lens roles —
+`review-contract`, `review-adversary`, `review-security` — and the
+scorer refuses a partial panel.
 
 The artifacts are blind-review fixtures: they hold the defect only —
 never the lesson, never the note the case came from.
@@ -51,19 +55,23 @@ Packaging note: package `cases/artifacts/**` for the lenses; never ship
   `{blocker, major}`.
 - **Defective case:** any expected finding with severity blocker or
   major. An **approval escape** is a defective case for which no
-  produced finding has severity blocker or major (the per-case decision
-  stays APPROVED even though changes are required).
-- **Unnecessary revision:** a clean case with at least one produced
-  blocker/major finding (the lens would have requested changes on a case
-  that needs none).
+  produced blocker/major finding sits at any of the case's expected
+  blocker/major artifact locations — protection is computed per
+  expected finding location, so a produced blocker/major at a clean
+  file (or any other file of the same case) protects nothing.
+- **Unnecessary revision:** a case with **no expected blocker/major
+  finding** — a clean case or a minor-only case — for which the lens
+  produced at least one blocker/major finding (it would have requested
+  changes on a case that needs none).
 - **Match rule:** a produced finding's case id is the path component
   immediately after `artifacts/` in its artifact_reference; it matches
   an expected finding when case id, artifact file (the tail of the
-  path), and rubric_dimension all agree.
+  path), and rubric_dimension all agree. Strict `critical_major_*`
+  credit additionally requires the produced finding that made the match
+  to be blocker/major itself.
 - **Per-case decision (combined):** derived from the findings for that
   case — `CHANGES_REQUESTED` if any lens produced blocker/major for it,
-  otherwise `APPROVED`. A case escapes only if **no** lens raised
-  blocker/major for it.
+  otherwise `APPROVED`.
 
 ## Matching rule limits
 
@@ -78,9 +86,15 @@ Packaging note: package `cases/artifacts/**` for the lenses; never ship
 - Duplicates dent precision only: the same expected finding matched
   twice counts once, and the extra produced finding is still counted in
   `produced`.
+- Location-level detection pairs produced and expected findings
+  **one-to-one** per artifact file: two expected findings at one file
+  need two produced findings; a single produced finding cannot cover
+  both. Dimension-agreeing produced findings pair first, so tag
+  agreement is measured when the tag is present.
 - Severity still gates protection: a produced finding that matches an
-  expected major with severity `info` counts as matched but does not
-  protect the case from an approval escape.
+  expected major with severity `info` counts as matched but earns no
+  strict critical/major credit and does not protect the case from an
+  approval escape.
 
 ## Metrics (per lens and combined)
 
@@ -91,22 +105,28 @@ Packaging note: package `cases/artifacts/**` for the lenses; never ship
 | `precision` | matched / produced (0 when nothing produced) |
 | `recall` | matched / all expected findings across cases |
 | `critical_major_expected` | expected findings with severity blocker or major |
-| `critical_major_matched` | of those, how many were matched |
+| `critical_major_matched` | of those, how many were matched **by a produced blocker/major finding** (a produced info/minor match earns no credit) |
 | `critical_major_recall` | critical_major_matched / critical_major_expected |
 | `clean_cases` | cases with an empty expected finding list |
-| `unnecessary_revisions` | clean cases where the lens produced blocker/major |
-| `unnecessary_revision_rate` | unnecessary_revisions / clean_cases |
+| `unnecessary_revisions` | cases **without an expected blocker/major** (clean or minor-only) where the lens produced blocker/major |
+| `unnecessary_revision_rate` | unnecessary_revisions / cases without an expected blocker/major |
 | `defective_cases` | cases with any expected blocker/major finding |
-| `approval_escapes` | defective cases with no produced blocker/major |
+| `approval_escapes` | defective cases with no produced blocker/major at any of their expected blocker/major locations |
 | `approval_escape_rate` | approval_escapes / defective_cases |
 
-Minor-only cases are approvable under the verdict policy: they count toward neither
-`defective_cases` (escape denominator) nor `clean_cases` (unnecessary-revision
-denominator). They still count in `recall` and in severity discipline.
+Minor-only cases are approvable under the verdict policy and stay out of
+`defective_cases` (the escape denominator), but they count in the
+unnecessary-revision denominator: requesting changes on any case with no
+expected blocker/major — a clean control or a minor-only case — is an
+unnecessary revision. They still count in `recall` and in severity
+discipline.
 
 Rates are rounded to 4 decimals in both output modes. The combined block
 is the union of lenses for matching and critical coverage; a case
-escapes only when no lens raised blocker/major for it.
+escapes only when no lens raised blocker/major at one of its expected
+blocker/major locations. The combined block requires **all three lens
+roles** (`review-contract`, `review-adversary`, `review-security`): the
+scorer refuses a partial panel with exit 1.
 
 ## How to run
 

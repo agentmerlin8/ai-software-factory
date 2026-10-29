@@ -40,3 +40,14 @@ python3 tools/review/package.py build --repo . --base 152b205 --head b3b2a6f \
   --include tools/review/record.py --include tools/review/tests
 python3 tools/review/record.py check --record kit-v0.1/reviews/S3.5a/round-1/code/record --repo .
 ```
+
+## External review addendum (12 findings)
+
+A platform-triggered Copilot review posted 12 findings on PR #28 (no review was requested). They are ingested as
+`source=external` in `external/record/` with attributed evidence and dispositioned one by one: **all 12 fixed**
+(`c70bb5e` literal pathspecs / NUL paths / stop-state / binary scope / UTF-8 refusal; `0939325` role-package stop
+rules for omitted, truncated and binary evidence; `ecfab57` accurate summary totals).
+
+The most serious were real: a stopped lens could yield a *checked approval*, `--include ""` could disclose the whole
+diff, and per-file diffs used git pathspecs (a star-named file could embed another file's diff). Copilot remains
+retired as a gate; these were treated as free signal and dispositioned like any external finding.

@@ -390,6 +390,21 @@ def commit_touches_path(repo, sha: str, path: str) -> bool:
     return path in names
 
 
+_PATH_IN_TEXT_RE = None
+
+
+def _paths_in_text(text: str) -> list[str]:
+    """Repo-relative-looking paths quoted in a finding's required_change."""
+    global _PATH_IN_TEXT_RE
+    if _PATH_IN_TEXT_RE is None:
+        import re as _re
+        _PATH_IN_TEXT_RE = _re.compile(
+            r"[A-Za-z0-9_][A-Za-z0-9_./-]*\."
+            r"(?:md|py|toml|ya?ml|json|ts|tsx|js|jsx|sh|txt)"
+        )
+    return sorted(set(_PATH_IN_TEXT_RE.findall(text or "")))
+
+
 def fix_sha_violations(entries: list[dict], by_id: dict, repo) -> list[str]:
     """Violations for every `fixed` disposition, each naming its finding id."""
     bad: list[str] = []
@@ -404,9 +419,20 @@ def fix_sha_violations(entries: list[dict], by_id: dict, repo) -> list[str]:
         if full is None:
             bad.append(f"{entry['id']} ({sha} not a commit)")
             continue
-        artifact = repo_artifact_path(by_id[entry["id"]]["artifact_reference"])
-        if artifact is not None and not commit_touches_path(repo, full, artifact):
-            bad.append(f"{entry['id']} ({sha} does not touch {artifact})")
+        finding = by_id[entry["id"]]
+        artifact = repo_artifact_path(finding["artifact_reference"])
+        if artifact is not None:
+            targets = [artifact]
+            # A doc finding can cite where the gap shows while the required
+            # change names the file that must change. Accept a commit that
+            # touched any repo path named in required_change (existence
+            # checked) as well as the cited artifact itself.
+            for named in _paths_in_text(finding.get("required_change", "")):
+                if (Path(repo) / named).exists():
+                    targets.append(named)
+            if not any(commit_touches_path(repo, full, target)
+                       for target in targets):
+                bad.append(f"{entry['id']} ({sha} does not touch {artifact})")
     return bad
 
 

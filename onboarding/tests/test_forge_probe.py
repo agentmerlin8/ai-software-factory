@@ -751,9 +751,11 @@ class TestRulesetTransportBodyShape(unittest.TestCase):
 
 
 class TestIssueFormTransport404Classification(unittest.TestCase):
-    """F-panel: absence requires 404 AND a (case-insensitive) 'not
-    found' — an unrelated error merely mentioning 404 is a named
-    ProbeError, never silent absence."""
+    """RA-002: absence is ONLY the gh api error grammar — `HTTP 404`
+    at the head of the stderr, case-insensitively. A 'not found' or a
+    '404' anywhere else (host-resolution failure, rate-limit body,
+    template text without the HTTP-404 head) is a named ProbeError,
+    never silent absence."""
 
     @staticmethod
     def _stub_gh_error(stderr: str):
@@ -768,13 +770,35 @@ class TestIssueFormTransport404Classification(unittest.TestCase):
                                "filename": "story.yml"})
         self.assertEqual(result, {"present": False, "path": None})
 
-    def test_case_insensitive_not_found_is_absence(self):
-        stub = self._stub_gh_error("error 404: TEMPLATE NOT FOUND")
+    def test_http_404_head_is_case_insensitive(self):
+        stub = self._stub_gh_error("http 404: not found (GH006)")
         with mock.patch.object(FP.subprocess, "run", stub):
             result = FP.gh_probe_transport(
                 "issue_form", {"repo": "fixture-org/app",
                                "filename": "story.yml"})
         self.assertEqual(result, {"present": False, "path": None})
+
+    def test_not_found_without_http_404_head_is_named_refusal(self):
+        # 'not found' alone is NOT absence — the grammar is anchored.
+        stub = self._stub_gh_error("error 404: TEMPLATE NOT FOUND")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "issue_form", {"repo": "fixture-org/app",
+                                   "filename": "story.yml"})
+        self.assertIn("TEMPLATE NOT FOUND", str(ctx.exception))
+
+    def test_host_not_found_is_named_refusal(self):
+        # the non-404 'not found' the earlier classifier would have
+        # silently reclassified as absence.
+        stub = self._stub_gh_error(
+            "ssh: Could not resolve hostname example.com — host not found")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "issue_form", {"repo": "fixture-org/app",
+                                   "filename": "story.yml"})
+        self.assertIn("hostname", str(ctx.exception))
 
     def test_unrelated_404_error_is_named_refusal(self):
         stub = self._stub_gh_error("pipeline 4041 failed: deploy error")
@@ -785,8 +809,11 @@ class TestIssueFormTransport404Classification(unittest.TestCase):
                                    "filename": "story.yml"})
         self.assertIn("4041", str(ctx.exception))
 
-    def test_404_without_not_found_is_named_refusal(self):
-        stub = self._stub_gh_error("HTTP 404: API rate limit exceeded")
+    def test_404_rate_limit_is_named_refusal(self):
+        # a rate-limit body naming 404 (but not the HTTP-404 head) stays
+        # a ProbeError — absence must never be claimed for a stderr that
+        # is not a real not-found.
+        stub = self._stub_gh_error("error 404: API rate limit exceeded")
         with mock.patch.object(FP.subprocess, "run", stub):
             with self.assertRaises(FP.ProbeError) as ctx:
                 FP.gh_probe_transport(

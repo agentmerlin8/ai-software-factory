@@ -1364,6 +1364,43 @@ class MalformedInputNamedRefusals(unittest.TestCase):
             self.assertIn(f"usage: --command-result {bad}", proc.stderr)
             self.assertIn("JSON object or array", proc.stderr)
 
+    def test_command_result_list_elements_shape_checked(self):
+        """RA-006: a --command-result LIST's elements take the same
+        shape contract — '[42]' is a named rc-2 usage refusal naming
+        the file AND the element index, and never reaches the gate
+        payload walk (no verdict printed)."""
+        d = FIX / "build-valid-manifest"
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "cr-list.json"
+            bad.write_text("[42]", encoding="utf-8")
+            proc = self._cli(
+                ["build", str(d), "--root", str(REPO), "--base", "main",
+                 "--diff-file", str(d / "diff-name-status.txt"),
+                 "--discovery", f"tests={d / 'discovery.txt'}",
+                 "--command-result", str(bad)])
+            self.assertEqual(proc.returncode, 2)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn(f"usage: --command-result {bad}", proc.stderr)
+            self.assertIn("element [0] must be a JSON object",
+                          proc.stderr)
+            self.assertIn("got int", proc.stderr)
+            self.assertNotIn("PRE-REVIEW GATE", proc.stdout)
+
+    def test_command_result_list_of_objects_still_flows(self):
+        # the flipped side of RA-006: a list of objects IS the legal
+        # shape and must still reach the gate (the same CLI surface the
+        # flattened-list repro drives).
+        d = FIX / "build-valid-manifest"
+        proc = self._cli(
+            ["build", str(d), "--root", str(REPO), "--base", "main",
+             "--diff-file", str(d / "diff-name-status.txt"),
+             "--discovery", f"tests={d / 'discovery.txt'}",
+             "--command-result", str(d / "command-results.json")])
+        self.assertEqual(proc.returncode, 0,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("PRE-REVIEW GATE (build): PASS", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -641,6 +641,15 @@ def main(argv: list[str] | None = None) -> int:
             # both shapes legal: a LIST of results (extend) or a single
             # result object (append) — never wrap a list as one element.
             if isinstance(parsed, list):
+                # RA-006: every ELEMENT takes the same shape contract
+                # as the scalar — a non-object element must never flow
+                # into the gate's payload walk as an evidence row.
+                for idx, entry in enumerate(parsed):
+                    if not isinstance(entry, dict):
+                        print(f"usage: --command-result {p} — element "
+                              f"[{idx}] must be a JSON object, got "
+                              f"{type(entry).__name__}", file=sys.stderr)
+                        return 2
                 command_results.extend(parsed)
             elif isinstance(parsed, dict):
                 command_results.append(parsed)

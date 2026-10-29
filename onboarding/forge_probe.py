@@ -327,9 +327,13 @@ def gh_probe_transport(op: str, params: dict) -> dict:
                     "path": data.get("path") if isinstance(data, dict)
                     else path}
         detail = (out.stderr or "").strip()
-        # absent is ONLY a genuine not-found: 404 AND (case-insensitive)
-        # "not found" — a substring hit alone is not absence (F-panel).
-        if "404" in detail and "not found" in detail.lower():
+        # Absent is ONLY the gh api error grammar: `HTTP 404` anchored
+        # at the head of the stderr line (case-insensitive). A 404 or a
+        # 'not found' anywhere else — a host-resolution failure, a
+        # rate-limit body naming 404, a template line without the
+        # HTTP-404 head — drives the gh argv through the named ProbeError
+        # path instead (RA-002; a substring hit alone is never absence).
+        if re.search(r"^HTTP 404\b", detail, re.IGNORECASE):
             return {"present": False, "path": None}
         raise ProbeError(f"probe failed: issue form — {detail}")
     if op == "project":
@@ -626,7 +630,8 @@ class Forge:
         return {"present": present, "missing": missing}
 
     def issue_form(self, repo: str, filename: str) -> dict:
-        """{present, path} for .github/ISSUE_TEMPLATE/<filename>. A 404
+        """{present, path} for .github/ISSUE_TEMPLATE/<filename>. An
+        `HTTP 404` at the head of the stderr (the gh api error grammar)
         is present=False (not an error); other failures are named."""
         data = self._call("issue_form", "issue form",
                           {"repo": repo, "filename": filename})

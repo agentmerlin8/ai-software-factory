@@ -487,6 +487,15 @@ def run_full(args: argparse.Namespace) -> int:
         login = None
         for ln in f"{out.stdout}\n{out.stderr}".splitlines():
             if "Logged in to" in ln:
+                if "account" not in ln:
+                    # the missing-token shape: split("account") would
+                    # silently yield the line's FIRST whitespace token
+                    # (e.g. a check-mark glyph) as the login that names
+                    # `gh repo create` ownership — a named refusal
+                    # instead (RA-003).
+                    raise TestOutError(
+                        "gh-auth — cannot parse the account login from "
+                        f"the line (no 'account' token): {ln.strip()!r}")
                 tail = ln.split("account")[-1].split()
                 if not tail:
                     raise TestOutError(

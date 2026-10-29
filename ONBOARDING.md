@@ -134,7 +134,7 @@ one changes what lands in the config surface:
 
 | Choice | Flag | What it affects |
 |---|---|---|
-| Control-home mode | `--control-home dedicated\|in-repo` | `control_home` in `workspace.toml`. `dedicated` = a separate workspace repo holds the ledger/config and binds product repos; `in-repo` = the target repo is its own control home. Drives which WORKSPACE checks apply in verify. |
+| Control-home mode | `--control-home dedicated\|in-repo` | `control_home` in `workspace.toml`. Default: `dedicated` — a separate workspace repo holds the ledger/config and binds product repos. Use `in-repo` when the target repo should be its own control home (the one-repo case, where a binding to the target's own origin is allowed). Drives which WORKSPACE checks apply in verify. |
 | Workspace name | `--workspace-name N` | The `workspace` slug (`^[a-z0-9][a-z0-9-]*$`, ≤64). Default: slugified target directory name. |
 | Repo binding | `--repo-id ID` / `--repo-url URL` | The primary `repos[]` entry. Id grammar `^[a-z][a-z0-9-]*$`; url is the normalized `host/owner/name` form (default: from the target's origin remote). |
 | Environments | `--envs local,github` | Which `environments/*.toml` are drafted (must exist as kit templates; default `local,github`). **Models are per-environment** — the tier→model table lives in each environment file, never in the workspace. |

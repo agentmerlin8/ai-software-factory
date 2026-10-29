@@ -450,6 +450,21 @@ def cmd_propose(args: argparse.Namespace) -> int:
     # Fail closed with BOTH actionable fixes named. (`in-repo` +
     # self-binding stays allowed — the home IS the target repo.)
     if args.control_home == "dedicated":
+        origin = facts["origin_url"]
+        if origin and normalize_repo_url(origin) is None:
+            # RA-004: an origin remote outside the normalizer's
+            # grammars (ssh:// with a port, a non-forge host) leaves the
+            # home slug unknown, so the self-binding comparison can
+            # neither run nor be trusted — fail closed and name both
+            # actionable fixes.
+            print(f"refused: dedicated control_home with an origin "
+                  f"remote the normalizer cannot resolve ({origin!r}) — "
+                  "the self-binding guard cannot compare the home to "
+                  "the binding; pass --repo-url <distinct target> or "
+                  "use --control-home in-repo")
+            print("NEXT: re-run propose with --repo-url <distinct "
+                  "target repo> (or --control-home in-repo).")
+            return 1
         home_slug = RD.repo_slug_from_url(
             normalize_repo_url(facts["origin_url"]) or "")
         binding_slug = RD.repo_slug_from_url(
@@ -507,6 +522,25 @@ class Installer:
 
     def install_bytes(self, rel: str, data: bytes) -> None:
         dest = self.target / rel
+        # Containment (RA-001): a hostile tree can hide a symlink one
+        # level UP — the destination itself is then a plain path while
+        # the write still escapes. Walk every path component from the
+        # target root down to dest's parent and refuse on the first
+        # symlink; then verify the RESOLVED destination stays under the
+        # control home. Only then do the leaf check and the
+        # never-overwrite law apply.
+        node = self.target
+        try:
+            parts = dest.parent.relative_to(self.target).parts
+        except ValueError:
+            parts = ()  # dest.parent is not lexically under the target
+        for part in parts:
+            node = node / part
+            if node.is_symlink():
+                raise OnboardError(
+                    f"a parent directory of {rel} is a symlink — refusing "
+                    "to install (the never-overwrite law cannot be "
+                    "honored through a symlinked path)")
         if dest.is_symlink():
             # never follow any link at the destination (a dangling one
             # would be created/written through to an outside target; a
@@ -515,6 +549,11 @@ class Installer:
                 f"destination is a symlink — refusing to install {rel} "
                 "(the never-overwrite law cannot be honored through a "
                 "symlink)")
+        resolved = dest.resolve()
+        if not resolved.is_relative_to(self.target.resolve()):
+            raise OnboardError(
+                f"destination resolves outside the control home — "
+                f"refusing to install {rel} (resolves to {resolved})")
         if dest.exists():
             print(f"EXISTS, keeping: {rel}")
         elif self.dry_run:

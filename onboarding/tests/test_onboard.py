@@ -475,6 +475,28 @@ class TestProposeDedicatedSelfBindingGuard(unittest.TestCase):
             self.assertEqual(rc, 0, out)
             self.assertNotIn("self-binding", out)
 
+    def test_unnormalizable_origin_refused(self):
+        # RA-004: a dedicated propose whose origin remote is outside the
+        # normalizer's grammars (ssh:// with a port) must NOT let the
+        # guard pass through — even a self-referential --repo-url is
+        # refused, named, with BOTH remedies in the message and no
+        # drafts written.
+        weird = "ssh://git@example.com:2222/fixture-org/workspace.git"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir, origin=weird)
+            rc, out, _err = capture(OB.main, [
+                "propose", str(home), "--repo-url",
+                "github.com/fixture-org/workspace"])
+            self.assertEqual(rc, 1, out)
+            self.assertIn("refused: dedicated control_home with an "
+                          "origin remote", out)
+            self.assertIn("normalizer cannot resolve", out)
+            self.assertIn(weird, out)
+            self.assertIn("--repo-url", out)
+            self.assertIn("--control-home in-repo", out)
+            self.assertEqual(next_count(out), 1)
+            self.assertFalse((home / "onboarding-drafts").exists())
+
 
 # ------------------------------------------------------------------- apply --
 
@@ -787,6 +809,50 @@ class TestInstallerSymlinkGuard(unittest.TestCase):
             self.assertIn("symlink", out)
             self.assertEqual(next_count(out), 1)
             self.assertFalse(outside.exists())
+
+    def test_installer_refuses_symlinked_parent_directory(self):
+        # RA-001: the escape the review named — the PARENT directory is
+        # itself a symlink to an outside dir, so the leaf check passes
+        # while the write would escape. The component walk refuses it
+        # first and nothing is written outside.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            home = tmp / "control-home"
+            outside = tmp / "outside"
+            outside.mkdir()
+            home.mkdir()
+            (home / "factory").symlink_to(outside)
+            inst = OB.Installer(home, dry_run=False)
+            with self.assertRaises(OB.OnboardError) as ctx:
+                inst.install_bytes("factory/KICKOFF.md", b"KICKOFF\n")
+            self.assertIn("parent directory", str(ctx.exception))
+            self.assertIn("symlink", str(ctx.exception))
+            self.assertFalse((outside / "KICKOFF.md").exists())
+
+    def test_installer_refuses_destination_resolving_outside(self):
+        # the containment half: a rel that lexically escapes the home
+        # resolves outside target.resolve() and is refused named;
+        # nothing is written at the escape path.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            home = tmp / "control-home"
+            home.mkdir()
+            inst = OB.Installer(home, dry_run=False)
+            with self.assertRaises(OB.OnboardError) as ctx:
+                inst.install_bytes("../escape.txt", b"no\n")
+            self.assertIn("resolves outside the control home",
+                          str(ctx.exception))
+            self.assertFalse((tmp / "escape.txt").exists())
+
+    def test_normal_install_succeeds(self):
+        # the guards never fire on a clean tree: the write happens under
+        # the home through real directories.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir) / "control-home"
+            inst = OB.Installer(home, dry_run=False)
+            inst.install_bytes("factory/tools/x.py", b"x = 1\n")
+            self.assertEqual((home / "factory" / "tools" / "x.py")
+                             .read_bytes(), b"x = 1\n")
 
 
 class TestMainCatchAllNextLine(unittest.TestCase):

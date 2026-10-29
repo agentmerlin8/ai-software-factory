@@ -133,6 +133,38 @@ class CheckGenericizationTests(unittest.TestCase):
                           proc.stdout)
             self.assertNotIn("clean.txt", proc.stdout)
 
+    def test_excluded_tree_is_skipped(self):
+        """RA-007 boundary (inside): a seeded banned token under
+        kit-v0.1/reviews/ is carve-out 5 — rejected review evidence the
+        tripwire never sweeps (rc 0, zero hits)."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "kit-v0.1" / "reviews").mkdir(parents=True)
+            (root / "kit-v0.1" / "reviews" / "evidence.md").write_text(
+                "a review evidence quoting podcast vocabulary\n",
+                encoding="utf-8")
+            proc = run_tool(root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("genericization: 0 hit(s) in 0 file(s)",
+                          proc.stdout)
+
+    def test_sibling_path_still_reported(self):
+        """RA-007 boundary (outside): the SAME token one directory over
+        (kit-v0.1/other/, not under the excluded prefix) is still a HIT
+        (rc 1, exact HIT line) — widening EXCLUDED_TREES fails this."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "kit-v0.1" / "other").mkdir(parents=True)
+            (root / "kit-v0.1" / "other" / "notes.md").write_text(
+                "a podcast idea\n", encoding="utf-8")
+            proc = run_tool(root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn(
+                "HIT kit-v0.1/other/notes.md:1: podcast — a podcast idea",
+                proc.stdout)
+            self.assertIn("genericization: 1 hit(s) in 1 file(s)",
+                          proc.stdout)
+
     def test_real_repo_root_is_clean(self):
         """Self-check: the kit tree at HEAD passes its own tripwire."""
         proc = subprocess.run([sys.executable, str(TOOL),

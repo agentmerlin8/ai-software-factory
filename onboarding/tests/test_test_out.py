@@ -291,15 +291,18 @@ class FullStubRunner:
 
 def run_full_stubbed(extra_argv: list[str] | None = None):
     """Run --full --confirm-full-run with the stubbed runner + recorded
-    append_attest. -> (rc, out, err, runner, attest_calls, tmp_path).
-    G8: the live path now runs through run_argv_live — stub BOTH seams
-    so nothing ever executes for real."""
-    runner = FullStubRunner()
+    append_attest. -> (rc, out, err, run_stub, live_stub, attest_calls,
+    tmp_path). G8: the live path now runs through run_argv_live — BOTH
+    seams get their own DISTINCT stub so any test can observe exactly
+    which seam the code under test called (run_argv = the smoke seam;
+    run_argv_live = the live seam). Nothing ever executes for real."""
+    run_stub = FullStubRunner()
+    live_stub = FullStubRunner()
     attest_calls: list[tuple] = []
     original_run, original_live, original_attest = (
         TO.run_argv, TO.run_argv_live, TO.RD.append_attest)
-    TO.run_argv = runner
-    TO.run_argv_live = runner
+    TO.run_argv = run_stub
+    TO.run_argv_live = live_stub
     TO.RD.append_attest = lambda *a, **k: attest_calls.append((a, k))
     try:
         argv = ["--full", "--confirm-full-run", "--repo-name", "fresh-app",
@@ -311,7 +314,7 @@ def run_full_stubbed(extra_argv: list[str] | None = None):
         TO.RD.append_attest = original_attest
     kept = [ln for ln in out.splitlines() if ln.startswith("kept: ")]
     tmp_path = Path(kept[0].split(": ", 1)[1]) if kept else None
-    return rc, out, err, runner, attest_calls, tmp_path
+    return rc, out, err, run_stub, live_stub, attest_calls, tmp_path
 
 
 class TestFullLivePathDiscipline(unittest.TestCase):
@@ -319,7 +322,8 @@ class TestFullLivePathDiscipline(unittest.TestCase):
     RETAINS the checkout with the durable handoff."""
 
     def test_full_run_never_appends_attestations(self):
-        rc, out, _err, _runner, attest_calls, tmp_path = run_full_stubbed()
+        rc, out, _err, _run_stub, _live_stub, attest_calls, tmp_path = (
+            run_full_stubbed())
         try:
             self.assertEqual(rc, 0, out)
             self.assertEqual(attest_calls, [])  # ZERO synthetic rows
@@ -339,7 +343,8 @@ class TestFullLivePathDiscipline(unittest.TestCase):
                 shutil.rmtree(tmp_path, ignore_errors=True)
 
     def test_full_run_retains_checkout_and_handoff(self):
-        rc, out, _err, _runner, _attests, tmp_path = run_full_stubbed()
+        rc, out, _err, _run_stub, _live_stub, _attests, tmp_path = (
+            run_full_stubbed())
         self.assertEqual(rc, 0, out)
         try:
             self.assertIsNotNone(tmp_path)
@@ -556,19 +561,45 @@ class TestLivePathGitAuth(unittest.TestCase):
         self.assertNotEqual(captured[0].get("GIT_CONFIG_GLOBAL"), "/dev/null")
 
     def test_full_live_path_runs_through_run_argv_live(self):
-        # G8 threading: --full's clone/push go through run_argv_live —
-        # the live stub records them (nothing executes for real).
-        rc, out, _err, runner, _attests, tmp_path = run_full_stubbed()
+        # G8 threading: --full's clone/push go through run_argv_live and
+        # NEVER through run_argv. The two stubs are DISTINCT sentinels —
+        # if the full path fell back to the smoke seam, the live stub
+        # would record nothing and this test would fail.
+        rc, out, _err, run_stub, live_stub, _attests, tmp_path = (
+            run_full_stubbed())
         try:
             self.assertEqual(rc, 0, out)
             joined = [" ".join(str(a) for a in call)
-                      for call in runner.calls]
+                      for call in live_stub.calls]
             self.assertTrue(any("clone" in c for c in joined), joined)
             self.assertTrue(any("push" in c for c in joined), joined)
+            self.assertEqual(run_stub.calls, [])  # smoke seam never fired
         finally:
             if tmp_path:
                 import shutil
                 shutil.rmtree(tmp_path, ignore_errors=True)
+
+    def test_smoke_path_runs_through_run_argv_not_live(self):
+        # the SMOKE path must use run_argv (the git-config-isolated
+        # seam); run_argv_live is the live path's seam only. Distinct
+        # recording stubs make the wrong seam observable.
+        run_stub = RecordingRunner()
+        live_stub = RecordingRunner()
+        original_run, original_live = TO.run_argv, TO.run_argv_live
+        TO.run_argv = run_stub
+        TO.run_argv_live = live_stub
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                seed = tiny_seed(Path(tmpdir))
+                rc, out, _err = capture(TO.main, [
+                    "--smoke", "--seed-dir", str(seed),
+                    "--dataset", str(Path(tmpdir) / "absent.json")])
+        finally:
+            TO.run_argv, TO.run_argv_live = original_run, original_live
+        self.assertEqual(rc, 1)  # absent dataset: stops at preflight
+        self.assertTrue(run_stub.calls, "the smoke seam recorded nothing")
+        self.assertEqual(live_stub.calls, [],
+                         "the smoke path must never touch run_argv_live")
 
 
 class TestGhAuthLoginParseGuard(unittest.TestCase):

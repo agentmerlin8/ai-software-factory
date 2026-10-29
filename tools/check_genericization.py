@@ -9,10 +9,12 @@ Usage:
     python3 tools/check_genericization.py [--root DIR]
 
 `--root` defaults to the repository root (this file's parent's parent).
-Scans GIT-TRACKED files (`git -C <root> ls-files -z`, argv-list
-subprocess) when root is a git repo; otherwise walks the tree, skipping
-`.git/` and `__pycache__/`. Text files only: any file that is not valid
-UTF-8 (or is unreadable) is skipped, never crashed on.
+Inside a git repo it scans the UNION of git-tracked files (`git -C
+<root> ls-files -z`, argv-list subprocess) and the plain tree walk
+(deduped, sorted — UNTRACKED files count too, so local leaks surface
+before the first commit); outside a git repo it walks the tree. Either
+way `.git/` and `__pycache__/` are skipped. Text files only: any file
+that is not valid UTF-8 (or is unreadable) is skipped, never crashed on.
 
 Token list (matched case-insensitively, substring — same semantics as
 the manual `grep -rniE` sweep it replaces):
@@ -44,6 +46,10 @@ Documented carve-outs:
        lessons-learned doc), not a product name.
    The allowlist is pair-scoped: any OTHER token in these files, or
    these tokens in any other file, still fails.
+5. EXCLUDED_TREES — the kit-v0.1/reviews/ subtree is inbound review
+   evidence: it necessarily QUOTES the token list and the tripwire's
+   own source as review material, exactly like carve-out 3, so it is
+   never swept.
 
 Output: one line per hit — `HIT <path>:<line>: <token> — <trimmed
 line>` — then the summary `genericization: N hit(s) in M
@@ -63,6 +69,11 @@ SELF_EXCLUDED_PATHS = frozenset({
     "tools/check_genericization.py",
     "tools/tests/test_genericization_check.py",
 })
+
+# Directory-prefix carve-outs: whole subtrees that necessarily CONTAIN
+# the token list as evidence and are never product code — see docstring
+# carve-out 5. A hit anywhere under these prefixes is skipped.
+EXCLUDED_TREES = ("kit-v0.1/reviews",)
 
 # (relative path, token) pairs that are the kit's own public/legal
 # identity or generic ecosystem vocabulary — see docstring carve-out 4.
@@ -140,13 +151,24 @@ def line_hits(rel: str, text: str) -> list[tuple[int, str]]:
 
 
 def scan(root: Path) -> tuple[list[str], int]:
-    """Returns (HIT lines, number of files with at least one hit)."""
-    files = tracked_files(root) if is_git_repo(root) else walked_files(root)
+    """Returns (HIT lines, number of files with at least one hit).
+
+    Inside a git repo the sweep is the UNION of tracked files
+    (`git ls-files`) and the plain tree walk — deduped and sorted.
+    Untracked new files are swept too, so a local leak surfaces before
+    the first commit (tracked-only sweeps blind you to exactly the
+    files under active development). Outside a git repo the walk alone
+    supplies the list."""
+    tracked = tracked_files(root) if is_git_repo(root) else []
+    files = sorted(set(tracked) | set(walked_files(root)))
     out: list[str] = []
     files_with_hits = 0
     for rel in files:
         if rel in SELF_EXCLUDED_PATHS:
             continue  # carve-out 3: self-reference
+        if any(rel == prefix or rel.startswith(prefix + "/")
+               for prefix in EXCLUDED_TREES):
+            continue  # carve-out 5: review evidence, never product code
         path = root / rel
         try:
             text = path.read_text(encoding="utf-8")

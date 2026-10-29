@@ -527,13 +527,29 @@ class TestApply(unittest.TestCase):
             self.assertFalse(list(home.rglob("__pycache__")))
 
     def test_no_pycache_from_tools_copy(self):
-        # the kit's tools/ tree carries a live __pycache__ — apply must
-        # exclude it from factory/tools and factory/gates.
+        # the kit's tools/ tree can carry a live __pycache__ — apply
+        # must exclude it from factory/tools and factory/gates. The
+        # proof seeds a REAL __pycache__ into a temp source tree and
+        # drives the install path (Installer.install_tree — the same
+        # helper cmd_apply uses), so no ambient state is relied on.
         with tempfile.TemporaryDirectory() as tmpdir:
-            _tmp, home, _out, _ds = self._applied(tmpdir)
-            installed = [str(p.relative_to(home)) for p in home.rglob("*")
-                         if "__pycache__" in p.parts]
-            self.assertEqual(installed, [])
+            tmp = Path(tmpdir)
+            src = tmp / "tools"
+            (src / "__pycache__").mkdir(parents=True)
+            (src / "pkg.py").write_text("def pkg():\n    return 1\n",
+                                         encoding="utf-8", newline="\n")
+            (src / "__pycache__"
+             / "pkg.cpython-311.pyc").write_bytes(b"\x00" * 16)
+            dest = tmp / "control-home"
+            inst = OB.Installer(dest, dry_run=False)
+            inst.install_tree("factory/tools", src)
+            installed = sorted(str(p.relative_to(dest))
+                               for p in dest.rglob("*") if p.is_file())
+            self.assertEqual(installed, ["factory/tools/pkg.py"],
+                             "the seeded __pycache__ leaked through "
+                             "install_tree")
+            self.assertFalse((dest / "factory" / "tools"
+                              / "__pycache__").exists())
 
     def test_idempotent_second_apply(self):
         with tempfile.TemporaryDirectory() as tmpdir:

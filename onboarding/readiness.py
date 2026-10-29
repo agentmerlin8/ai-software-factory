@@ -48,7 +48,6 @@ import sys
 sys.dont_write_bytecode = True  # read-only heritage (tools/factory.py law)
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -1272,17 +1271,6 @@ def run_attest(target: str, check_id: str, by: str, note: str,
         return 1
     print(f"attest recorded: {check_id} by {by.strip()}")
     return 0
-
-
-def hash_walk(root: Path) -> dict[str, str]:
-    """Read-only-law helper (used by the hash-walk test): rel path ->
-    sha256 of every regular file under root."""
-    digests: dict[str, str] = {}
-    for path in sorted(root.rglob("*")):
-        if path.is_file():
-            rel = str(path.relative_to(root))
-            digests[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return digests
 
 
 # --------------------------------------------------------------------- CLI --

@@ -101,6 +101,38 @@ class CheckGenericizationTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("usage:", proc.stderr)
 
+    def test_git_repo_untracked_file_is_swept(self):
+        """In a git repo the sweep is tracked ∪ walked (deduped,
+        sorted): an UNTRACKED file carrying a banned token is reported
+        locally, before the first commit — the old tracked-only sweep
+        would have missed it."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(["git", "init", "-b", "main", str(root)],
+                           capture_output=True, check=True)
+            (root / "clean.txt").write_text("committed, clean\n",
+                                             encoding="utf-8")
+            subprocess.run(["git", "-C", str(root),
+                            "-c", "user.name=test",
+                            "-c", "user.email=test@invalid",
+                            "add", "clean.txt"],
+                           capture_output=True, check=True)
+            subprocess.run(["git", "-C", str(root),
+                            "-c", "user.name=test",
+                            "-c", "user.email=test@invalid",
+                            "commit", "-m", "seed"],
+                           capture_output=True, check=True)
+            # untracked: absent from git ls-files, present on disk
+            (root / "untracked_notes.txt").write_text(
+                "a podcast idea\n", encoding="utf-8")
+            proc = run_tool(root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("HIT untracked_notes.txt:1: podcast —",
+                          proc.stdout)
+            self.assertIn("genericization: 1 hit(s) in 1 file(s)",
+                          proc.stdout)
+            self.assertNotIn("clean.txt", proc.stdout)
+
     def test_real_repo_root_is_clean(self):
         """Self-check: the kit tree at HEAD passes its own tripwire."""
         proc = subprocess.run([sys.executable, str(TOOL),

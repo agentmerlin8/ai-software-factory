@@ -2,12 +2,22 @@
 """Tests for docs consistency (S3-T5): the shipped docs name the real
 pipeline surface and never reference deleted assets.
 
-ONE test asserting:
-  * root ONBOARDING.md exists and names every pipeline command
-    (preflight, inspect, propose, apply, verify, attest);
-  * onboarding/README.md contains the preflight command;
-  * no scanned doc contains the deleted-asset strings (onboard.sh,
-    templates/DASHBOARD.md, templates/runbook.md).
+THREE tests:
+
+  * G7 spec freeze: onboarding/templates/KICKOFF.md's human-gate list
+    `Stop and ask a human ONLY for:` names the spec freeze (the single
+    gate list the template body and the kickoff-message block share);
+
+  * EX-005 quickstart: the propose command in BOTH shipped locations
+    (root README.md and onboarding/README.md) carries `--control-home
+    in-repo` and says why (dedicated mode rejects a binding to the
+    target's own origin, which would stop a fresh quickstart);
+
+  * pipeline surface / deleted assets: root ONBOARDING.md exists and
+    names every pipeline command (preflight, inspect, propose, apply,
+    verify, attest); onboarding/README.md contains the preflight
+    command; no scanned doc contains the deleted-asset strings
+    (onboard.sh, templates/DASHBOARD.md, templates/runbook.md).
 
 The scanned file list is built from `git ls-files` (argv list, never a
 shell) filtered to: everything under kit-v0.1/ ending in .md, the root

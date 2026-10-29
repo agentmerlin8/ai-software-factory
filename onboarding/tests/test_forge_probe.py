@@ -21,6 +21,7 @@ purity, stdlib-only imports, and LF endings.
 """
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -1126,20 +1127,47 @@ class TestFixturePerRepoOverrides(unittest.TestCase):
         self.assertEqual(result["enforcement"], "active")
 
 
+def non_stdlib_imports(source: str) -> list[str]:
+    """Scan a SOURCE string: every Import/ImportFrom root that is neither
+    a stdlib module nor the onboarding package -> one entry per leak."""
+    bad: list[str] = []
+    allowed = {"onboarding"}
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root not in sys.stdlib_module_names and root not in allowed:
+                    bad.append(f"import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # relative import (onboarding package)
+                continue
+            if node.module in (None, "__future__"):
+                continue
+            root = node.module.split(".")[0]
+            if root not in sys.stdlib_module_names and root not in allowed:
+                bad.append(f"from {node.module} import ...")
+    return bad
+
+
 class TestHouseLaws(unittest.TestCase):
     def test_module_imports_stdlib_only(self):
-        for name, value in vars(FP).items():
-            if name.startswith("__") or not hasattr(value, "__name__"):
-                continue
-            mod = sys.modules.get(getattr(value, "__module__", ""), None)
-            if value is sys or hasattr(value, "__file__"):
-                continue
-            top = getattr(value, "__module__", name)
-            root = top.split(".")[0]
-            if root in ("onboarding",):
-                continue
-            self.assertIn(root, sys.stdlib_module_names,
-                          f"non-stdlib import leaked: {top}")
+        # a SOURCE AST scan of onboarding/forge_probe.py: every import
+        # root must be stdlib or the onboarding package. (The previous
+        # attribute walk was vacuous — it skipped every value with a
+        # __file__, i.e. every module, and every onboarding-named
+        # function, so it could never fail.)
+        src = (Path(__file__).resolve().parents[1]
+               / "forge_probe.py").read_text(encoding="utf-8")
+        self.assertEqual(non_stdlib_imports(src), [])
+
+    def test_stdlib_scanner_reports_non_stdlib_leaks(self):
+        # scanner self-check: a planted non-stdlib import IS reported —
+        # proving the vacuum test above would catch a real leak.
+        source = ("import requests\nimport pandas as pd\n"
+                  "from numpy import array\nimport json\n")
+        self.assertEqual(
+            sorted(non_stdlib_imports(source)),
+            ["from numpy import ...", "import pandas", "import requests"])
 
     def test_new_files_end_lf_no_crlf(self):
         repo = Path(__file__).resolve().parents[2]

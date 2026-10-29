@@ -3,9 +3,11 @@
 
 Acceptance-#1: `test_good_home_verify_green` drives the REAL CLI
 (readiness.main) against a tmp copy of control_home_good with its forge
-dataset and asserts rc 0 with zero FAILs. Every required check also has
-a FAIL-path test via the make_home/verify_home generator (one defect per
-test, precise detail assertions). Covers: applicability N-A cases,
+dataset and asserts rc 0 with zero FAILs. Every required check EXCEPT
+C-9 (toolchain presence) and W-5 (ledger seed + renders) also has a
+FAIL-path test — mostly via the make_home/verify_home generator (one
+defect per test, precise detail assertions), plus direct W-1 toplevel-
+mismatch coverage. Covers: applicability N-A cases,
 attest semantics (missing/append/supersession/malformed refusal/ledger
 validation), registry drift (version FAIL + kit-sha ADVISORY + record
 missing), the output contract (text shapes, --json sorted-keys + same
@@ -312,6 +314,10 @@ class VerifyGoodHome(unittest.TestCase):
             added = set(after) - set(before)
             self.assertTrue(changed | added <= sanctioned,
                             f"unsanctioned writes: {(changed | added) - sanctioned}")
+            deleted = set(before) - set(after)
+            self.assertEqual(deleted, set(),
+                             f"unsanctioned deletions: {deleted} — a "
+                             "verify run must never unlink a home file")
             self.assertIn("factory/PREFLIGHT.md", added)
             self.assertIn("factory/DASHBOARD.md", added)
 
@@ -1002,6 +1008,28 @@ class FailPathPerCheck(unittest.TestCase):
         # itself (T7-fixed semantics) FAILs W-1 with a named detail
         self.assert_defect(["not-git-root"], "W-1",
                            ["not inside a git repo"])
+
+    def test_w1_fail_toplevel_is_not_the_home(self):
+        # the OTHER branch: rev-parse SUCCEEDS but resolves to a
+        # directory other than the home — the home is a plain
+        # subdirectory of a repo initialized ABOVE it. Deleting the
+        # toplevel comparison in check_w1 would turn this defect into
+        # a PASS, so this test pins the named FAIL detail.
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            wrapper = tmp / "wrapper"
+            wrapper.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(wrapper)],
+                           capture_output=True, check=True,
+                           env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null",
+                                "GIT_CONFIG_SYSTEM": "/dev/null"})
+            home = wrapper / "home"  # plain subdirectory, no own repo
+            shutil.copytree(GOOD, home)
+            rc, _out, data = verify_home(home)
+            self.assertEqual(rc, 1)
+            self.assertEqual(statuses(data)["W-1"], ["FAIL"])
+            self.assertIn("is not the control home",
+                          detail_of(data, "W-1"))
 
     def test_w2_fail_unresolvable_pin(self):
         with tempfile.TemporaryDirectory() as td:

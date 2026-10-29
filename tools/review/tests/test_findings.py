@@ -5,11 +5,13 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from tools.review import findings
+from tools.review import findings, yamlish
 from tools.review.findings import FindingsError
 
 SHA256 = "a" * 64
@@ -596,6 +598,48 @@ class CliTests(_FileFixtureTest):
             code, _, err = self.run_cli(argv)
             self.assertEqual(code, 2, argv)
             self.assertIn("usage", err)
+
+
+class TestDirectCliInvocation(unittest.TestCase):
+    """The documented CLI form is the file path — exercise it as a process.
+
+    In-process ``main()`` coverage cannot catch an import-root defect: a
+    module at ``tools/review/`` needs the repository root on sys.path when
+    invoked directly, and only a real subprocess proves the entry point works.
+    """
+
+    ROOT = Path(__file__).resolve().parents[3]
+    FINDINGS = ROOT / "tools" / "review" / "findings.py"
+    YAMLISH = ROOT / "tools" / "review" / "yamlish.py"
+
+    def _run(self, script: Path, *argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(script), *argv],
+                              capture_output=True, text=True)
+
+    def test_findings_direct_path_validates_and_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            good = Path(td) / "good.yaml"
+            good.write_text(yamlish.dumps(doc_a()), encoding="utf-8")
+            result = self._run(self.FINDINGS, "validate", str(good))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("review findings: OK", result.stdout)
+
+            bad = Path(td) / "bad.json"
+            doc = doc_a()
+            doc["review"]["findings"][0]["severity"] = "critical"
+            bad.write_text(json.dumps(doc), encoding="utf-8")
+            result = self._run(self.FINDINGS, "validate", str(bad))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("invalid severity 'critical'",
+                          result.stdout + result.stderr)
+
+    def test_yamlish_direct_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "doc.yaml"
+            path.write_text("a:\n  - b\n", encoding="utf-8")
+            result = self._run(self.YAMLISH, "loads", str(path))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["a"][0], "b")
 
 
 if __name__ == "__main__":

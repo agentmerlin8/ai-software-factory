@@ -42,6 +42,11 @@ import re
 import sys
 from pathlib import Path
 
+if __package__ in (None, ""):  # direct CLI: python3 tools/review/findings.py
+    # The kit root (kit) and the installed root (factory/) both contain
+    # `tools/`, so the module's grandparent is the import root in both layouts.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from tools.review.yamlish import YamlishError, loads as yamlish_loads
 
 SCHEMA = "review.findings.v1"

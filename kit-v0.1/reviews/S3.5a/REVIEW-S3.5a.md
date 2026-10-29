@@ -8,18 +8,18 @@ Panels: `pkg-code` (`133698dd…`, tools/review modules + tests) and `pkg-conten
 
 ## Round 1
 
+Derived from the two committed records (`round-1/{code,content}/record/review.json`).
+
 | area | findings | blocker | major | minor | fixed | rejected | deferred | verdict |
 |---|---|---|---|---|---|---|---|---|
-| code | 22 | 3 | 14 | 5 | 20 | 0 | 2 | CHANGES_REQUESTED |
-| content | 14 | 0 | 8 | 6 | 11 | 2 | 1* | CHANGES_REQUESTED |
-| **total** | **36** | **3** | **22** | **11** | **31** | **2** | **3** | |
+| code | 22 | 3 | 15 | 4 | 19 | 1 | 2 | CHANGES_REQUESTED |
+| content | 14 | 1 | 10 | 3 | 9 | 2 | 3 | CHANGES_REQUESTED |
+| **total** | **36** | **4** | **25** | **7** | **28** | **3** | **5** | |
 
-\* content has one deferred; plus two deferred in code, all tracked in issue #27.
-
-The three blockers were real and fixed after the reviewed head: withheld files still appeared in the package diff,
-`record.py check` did not re-derive the record, and `fixed@` dispositions citing `package:diff@…` were exempt from
-the touch rule. The fixes are committed on this branch (`f2fc448`, `eaa65c4`); the calibration baseline was
-regenerated with the corrected metric definitions (`96f3ef1`).
+Four blockers: three real defects in the package builder and record check (withheld files still in the diff,
+`record.py check` not re-deriving, `package:diff@` touch exemption) — all fixed after the reviewed head
+(`f2fc448`, `eaa65c4`); and one package-scope artifact (the scorer's import of `tools/review/findings.py`, which
+ships in the code package) — rejected with evidence. Five deferred items are tracked in issues #26/#27.
 
 ## What this run proves (and what it does not)
 

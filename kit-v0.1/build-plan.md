@@ -38,6 +38,24 @@ Acceptance: ported control-plane suite green in CI; the read-path commands run r
 
 Deterministic scripts (preflight → inspect → propose → apply idempotent → verify fail-closed) + the guided-session brief (`ONBOARDING.md` consumed by any agent runtime) + the readiness registry (target + workspace checks) + the **fresh-repo test-out scripts** (the from-scratch test-out **run** gates v0.1.x hardening — per the vision and PRD FR-11). Acceptance (S3 gate, fixture-scoped): verify green on a fixture control-home repo (every check the S3 registry implements); precise FAILs on a deliberately non-compliant repo; the test-out scripts ship and run green against `benchmark-app` as a smoke. The full `benchmark-app` conformance smoke — verify green on a real onboarding, which requires C-7's installed runbook and adapter packages — is explicitly scheduled **after S4**, where those prerequisites ship; it stays a v0.1 criterion per C3, sequenced after its prerequisites.
 
+### S3.5a — Review lane v1 (owner-inserted 2026-10-28, before S4)
+
+The review gate the kit owns: a deterministic review package, three runtime-neutral adversarial lenses, structured findings, and a dispositioned record at the pinned head. Copilot code review is retired as a gate (owner decision) — the lane must be reproducible and blind rather than another checklist.
+
+| # | Task | Deliverable | Acceptance |
+|---|---|---|---|
+| T1 | Findings schema + strict YAML-subset reader | `tools/review/findings.py` + `tools/review/yamlish.py` + tests | valid document → canonical form; every refusal class named; JSON accepted |
+| T2 | Review package builder | `tools/review/package.py` + tests | byte-identical rebuild at the same SHAs; allowed/withheld honored; deterministic truncation; named refusals |
+| T3 | Record renderer + disposition ledger | `tools/review/record.py` + tests | any blocker/major → CHANGES REQUESTED; undispositioned findings refuse render; `fixed` requires a commit touching the artifact; `deferred` requires an issue link |
+| T4 | Calibration bench + scorer | `tools/review/bench/` (field notes 18–25, the held slice's external findings, clean controls) + `tools/review/score.py` | per-lens and combined precision, critical/major recall, unnecessary-revision rate, approval-escape rate; baseline committed |
+| T5 | Three runtime-neutral role packages | `agents/review-contract\|review-adversary\|review-security.agent.md` | each declares inputs, stay-out boundary, stop rules, structured output contract; no runtime-specific frontmatter |
+| T6 | Docs + install mapping | this section + `architecture.md` §Review lane | command-accuracy read; no contradictory paths |
+| T7 | Lane self-review (dogfood) + PR | record under `kit-v0.1/reviews/S3.5a/` | zero undispositioned findings; package hash pinned |
+
+**Pilot:** run the panel on the held S3 slice (PR #23) at its head SHA; disposition the five external findings and every panel finding; the S3 merge decision reads that record. No external review is requested.
+
+**Explicitly NOT in S3.5a:** state-machine evidence changes, the required CI check, ruleset changes (all S3.5b); the rest of S4's runbook/process/agent/adapter packages; any model spend beyond local adapter dispatch; any change to the owner merge gate.
+
 ### S4 — Runbook + process + agents + adapter packages
 
 `runbook.md` (idea → merged PR; human and orchestrator modes; contained-mode section) + `process/` (process rules — the single source: planning, adversarial reviews, grill, recovery, UI-approval gate) + `agents/` (runtime-neutral role packages: instruction + inputs + outputs + stop rules, each with the per-role output contract the D-1 parity comparison uses) + `adapters/human` + `adapters/hermes` packages (`adapter.toml` + README). S4 acceptance includes the packages installed under `factory/` per C-7's canonical layout (`factory/process/`, `factory/agents/`, `factory/adapters/`, `factory/runbook.md`) and every `agents/` per-role output contract reading clean from a fresh clone. The hermes adapter's **live** leg: one real local dispatch through the standard dispatch mechanism (small token cost — no cloud), recorded as "live dispatch, non-sealed mechanism"; the sealed-mechanism re-run follows when the launch increment is authorized.

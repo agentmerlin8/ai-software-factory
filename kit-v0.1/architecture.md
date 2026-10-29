@@ -156,7 +156,7 @@ Installed layout differs — see §Canonical layouts below.
 
 ### Canonical layouts
 
-Kit repo (this repo — the distribution): `agents/` · `process/` · `tools/` (incl. `tools/gates/`) · `adapters/` · `templates/` · `onboarding/` · `runbook.md` · `docs/` · `kit-v0.1/`.
+Kit repo (this repo — the distribution): `agents/` · `process/` · `tools/` (incl. `tools/gates/`, `tools/review/` + `tools/review/bench/`) · `adapters/` · `templates/` · `onboarding/` · `runbook.md` · `docs/` · `kit-v0.1/` (incl. `kit-v0.1/reviews/` — the kit's own self-build review records).
 
 Installed control home (Mode 1 target repo, or Mode 2 workspace repo):
 
@@ -223,6 +223,24 @@ Notes:
 - Fixtures policy: a gate change is not deployed until the acceptance harness rejects every seeded-invalid fixture and accepts every valid-but-unusual one.
 - Machine-readable form: `tools/gate_catalog.py` (`GATES`).
 - Project-specific build-check extensions (source-grammar API parsing, live UI renderers, fidelity/ORM seed checks) are **project-declared**: the generic families activate only when a project declares the surface — the reference's seed checks are not ported.
+
+## Review lane (v1 — S3.5a)
+
+The review gate is **owned and reproducible**; no external/bot reviewer is a factory gate. Mechanical gates run first (mechanical-before-judgment law); the LLM panel judges only what a deterministic check cannot.
+
+**Composition** — three fresh-context lenses, run blind (the package and pinned SHAs only — never the author's reasoning): `review-contract` (AC/plan fidelity, deviations, scope) · `review-adversary` (behavioral: for each key assertion/guard/state transition, name the production change that keeps it green; boundaries/state/error paths) · `review-security` (input validation, authorization, secrets, containment, failure modes). Role packages: `agents/review-*.agent.md`.
+
+**Review package** — `tools/review/package.py` builds ONE package file from a pinned base/head pair plus the story contract, deterministic gate evidence, and the allowed/withheld file lists. Sections, in order: Identity, Scope, Contract inputs, Gate evidence, Diff stat, Diff. The package is a pure function of its inputs at the pinned SHAs: a re-run at the same SHAs is byte-identical, and the recorded `package_sha256` (sha256 over the body below the header line) is recomputed and enforced by the record renderer. Stat is numstat-derived (never terminal-width `--stat`); diff inclusion is capped deterministically with an explicit omitted list; inlined inputs are sha256-pinned over the full file and truncated with a named marker. A package is never hand-edited.
+
+**Findings** — one YAML (or JSON) document per lens under `review.findings.v1`: reviewer role, rubric version, package hash, base/head SHAs, decision, and findings with id, severity (`blocker|major|minor|info`), rubric dimension, artifact reference, evidence, required change, actionable. A lens that cannot review emits a `stop` block instead of inventing findings. Free-form-only findings are refused.
+
+**Record + dispositions** — `tools/review/record.py` renders `review.json` + `REVIEW-<pr>.md` at the pinned head. Verdict policy: any blocker or major → CHANGES REQUESTED. Every finding carries exactly one disposition — `fixed@sha` (the commit must exist and touch the finding's artifact), `rejected` (reason + evidence), or `deferred` (issue link). A record will not render with an undispositioned finding: zero is enforced, not reported. Loop cap 2; a re-review is scoped to the diff plus the prior findings (the reviewer sees its own prior artifact).
+
+**Paths** — kit: `tools/review/` (incl. `bench/`); install: `factory/tools/review/` (same module tree; the kit root and the installed `factory/` are both import roots). Control-home records: `stories/<id>/review/`. Kit self-build records: `kit-v0.1/reviews/<slice>/`. External historical findings are ingested with `source=external`; they are evidence, not a live gate.
+
+**Calibration** — `tools/review/bench/` holds adjudicated seed cases (field notes 18–25, the held slice's external findings, and clean controls); `tools/review/score.py` reports per-lens and combined precision, critical/major recall, unnecessary-revision rate, and approval-escape rate. A frozen baseline is committed; a lane change is promoted only against it.
+
+**Boundary (S3.5a)** — records are not ledger events yet; state-machine evidence changes, the required CI check, and ruleset changes are S3.5b. The owner merge gate is unchanged.
 
 ## State machine
 

@@ -258,6 +258,63 @@ class _GitFixtureTest(unittest.TestCase):
                       "withheld_files:\n- bin.dat\n"
                       "omitted_files: none\n", self.pkg)
 
+    def test_withheld_excluded_from_diff_stat_and_diff(self) -> None:
+        """P1: --withheld must filter the shipped Diff stat and Diff, with
+        names and directory prefixes both matching."""
+        withheld = self.dir / "withheld.txt"
+        withheld.write_text("bin.dat\nsub\nroot.txt\n", encoding="utf-8")
+        self.build_ok("--withheld", str(withheld))
+        self.assertIn("withheld_files:\n- bin.dat\n- sub\n- root.txt\n",
+                      self.pkg)
+        for line in self.stat_section(self.pkg):
+            self.assertNotIn("bin.dat", line)
+            self.assertNotIn("sub/b.txt", line)
+            self.assertNotIn("root.txt", line)
+        self.assertIn("total: 2 files, +4 -0", "".join(
+            self.stat_section(self.pkg)))
+        for missing in ("### bin.dat (", "### root.txt (", "### sub/b.txt ("):
+            self.assertNotIn(missing, self.pkg)
+        self.assertIn("### a.txt (", self.pkg)
+        self.assertIn("### c.md (", self.pkg)
+        proc = self.check_proc(self.out, "--withheld", str(withheld))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_allowed_restricts_diff_stat_and_diff(self) -> None:
+        """P1: --allowed keeps only the listed paths in stat and diff."""
+        allowed = self.dir / "allowed.txt"
+        allowed.write_text("a.txt\nsub\n", encoding="utf-8")
+        self.build_ok("--allowed", str(allowed))
+        stat = "".join(self.stat_section(self.pkg))
+        self.assertIn("a.txt", stat)
+        self.assertIn("sub/b.txt", stat)
+        for excluded in ("bin.dat", "c.md", "root.txt"):
+            self.assertNotIn(excluded, stat)
+        self.assertIn("total: 2 files, +1 -1", stat)
+        self.assertIn("### a.txt (", self.pkg)
+        self.assertIn("### sub/b.txt (", self.pkg)
+        for missing in ("### bin.dat (", "### c.md (", "### root.txt ("):
+            self.assertNotIn(missing, self.pkg)
+
+    def test_allowed_matching_nothing_refused(self) -> None:
+        """P1: filtering away every changed file is a named refusal."""
+        allowed = self.dir / "allowed-none.txt"
+        allowed.write_text("nothing.md\nunseen.py\n", encoding="utf-8")
+        proc = self.build_proc(self.dir / "x.md", "--allowed", str(allowed))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review package: no reviewable files after "
+                      "allowed/withheld filtering", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_withheld_everything_refused(self) -> None:
+        withheld = self.dir / "withheld-all.txt"
+        withheld.write_text("a.txt\nbin.dat\nc.md\nroot.txt\nsub\n",
+                            encoding="utf-8")
+        proc = self.build_proc(self.dir / "x.md", "--withheld", str(withheld))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review package: no reviewable files after "
+                      "allowed/withheld filtering", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
     def test_diff_blocks_statuses_and_rename_as_delete_add(self) -> None:
         self.build_ok()
         self.assertIn("### a.txt (M)\n", self.pkg)
@@ -459,6 +516,107 @@ class _GitFixtureTest(unittest.TestCase):
         pkg = (self.dir / "pkg-weird.md").read_text(encoding="utf-8")
         self.assertIn("### weird \u00fc.txt (A)\n", pkg)
         self.assertNotIn("\\303\\274", pkg)
+
+    # -- P4: remote origin security ----------------------------------------
+
+    def test_remote_origin_userinfo_stripped(self) -> None:
+        """P4: an https origin with user:token@host must not leak the token."""
+        self.git("remote", "add", "origin",
+                 "https://alice:s3cret-token@example.com/owner/repo.git")
+        self.build_ok()
+        self.assertNotIn("alice:s3cret-token", self.pkg)
+        self.assertNotIn("s3cret-token", self.pkg)
+        self.assertNotIn("@example.com", self.pkg)
+        self.assertIn("repo: https://example.com/owner/repo.git\n", self.pkg)
+        self.assertIn("# Review package — repo ", self.pkg)
+
+    def test_remote_origin_with_user_only_rebuilt_without_userinfo(self) -> None:
+        """P4: any userinfo (username or password) is rebuilt away."""
+        self.git("remote", "add", "origin",
+                 "ssh://git@example.com:2222/owner/repo.git")
+        self.build_ok()
+        self.assertIn("repo: ssh://example.com:2222/owner/repo.git\n", self.pkg)
+
+    def test_scp_style_origin_without_userinfo_kept(self) -> None:
+        """P4: scp-style origins carry no parsed userinfo and pass through."""
+        self.git("remote", "add", "origin", "git@github.com:owner/repo.git")
+        self.build_ok()
+        self.assertIn("repo: git@github.com:owner/repo.git\n", self.pkg)
+
+
+class FenceIntegrityTests(unittest.TestCase):
+    """P3: content containing backtick runs must never close its own fence."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="s35a-t2-fence-")
+        self.dir = Path(self._tmp.name)
+        self.repo = self.dir / "repo"
+        self.repo.mkdir()
+        self.env = {**os.environ, "LC_ALL": "C",
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_SYSTEM": os.devnull}
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.name", "Test")
+        self.git("config", "user.email", "test@example.invalid")
+        self.git("config", "commit.gpgsign", "false")
+        (self.repo / "tricky.txt").write_text(
+            "line one\n```\n```diff\n````\nline five\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.base = self.rev("HEAD")
+        (self.repo / "tricky.txt").write_text(
+            "line one changed\n```\n```diff\n````\nclosing\n",
+            encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "head")
+        self.head = self.rev("HEAD")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def git(self, *args: str) -> subprocess.CompletedProcess:
+        proc = subprocess.run(["git", "-C", str(self.repo), *args],
+                              capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def rev(self, ref: str) -> str:
+        return self.git("rev-parse", ref).stdout.strip()
+
+    def build(self, *extra: str) -> str:
+        out = self.dir / "pkg.md"
+        proc = subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build", "--repo", str(self.repo),
+             "--base", self.base, "--head", self.head, "--out", str(out),
+             *extra], capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return out.read_text(encoding="utf-8")
+
+    def test_diff_content_with_fences_gets_a_longer_fence(self) -> None:
+        pkg = self.build()
+        # The diff content contains runs of 3 and 4 backticks; the block
+        # must open with a 5-marker fence and never a term-bearing line.
+        lines = pkg.splitlines()
+        self.assertIn("`````diff", lines)
+        self.assertNotIn("```diff", lines)
+        self.assertEqual(lines.count("`````"), 1, "closing fence only")
+        open_index = lines.index("`````diff")
+        body = lines[open_index + 1:]
+        close_index = body.index("`````")
+        inside = body[:close_index]
+        self.assertTrue(inside, "diff content must be inside the fence")
+        for line in inside:
+            self.assertNotEqual(line, "`````")
+        self.assertIn(" ```diff", inside)  # the hostile line stays content
+
+    def test_input_content_with_fences_gets_a_longer_fence(self) -> None:
+        contract = self.dir / "contract.txt"
+        contract.write_text("```\ninside\n```\n", encoding="utf-8")
+        pkg = self.build("--contract", str(contract))
+        self.assertIn("````txt\n```\ninside\n```\n````\n", pkg)
+        lines = pkg.splitlines()
+        self.assertIn("````txt", lines)
+        self.assertNotIn("```txt", lines)
 
 
 class IncludeScopeTests(unittest.TestCase):

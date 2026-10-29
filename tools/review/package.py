@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import NoReturn
 
@@ -112,6 +113,49 @@ def repo_name_from_url(url: str) -> str:
     if name.endswith(".git"):
         name = name[: -len(".git")]
     return name or "repo"
+
+
+def strip_userinfo(url: str) -> str:
+    """Rebuild ``url`` without any userinfo component.
+
+    An https origin carrying credentials (``user:token@host``) would leak
+    that token into the review package verbatim; the package instead
+    embeds the origin with the userinfo removed.  Unparseable URLs pass
+    through unchanged.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.username is None and parsed.password is None:
+            return url
+        hostname = parsed.hostname
+    except ValueError:
+        return url
+    if not hostname:
+        return url
+    if ":" in hostname and not hostname.startswith("["):  # IPv6 literal
+        hostname = f"[{hostname}]"
+    netloc = f"{hostname}:{parsed.port}" if parsed.port else hostname
+    return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path,
+                                    parsed.query, parsed.fragment))
+
+
+def fence_marker(text: str) -> str:
+    """A fence marker longer than any backtick run in ``text`` (minimum 3).
+
+    Fencing content with the longest-inside run plus one guarantees no
+    content line can close the block early, no matter what the content
+    contains.
+    """
+    longest = 0
+    run = 0
+    for char in text:
+        if char == "`":
+            run += 1
+            if run > longest:
+                longest = run
+        else:
+            run = 0
+    return "`" * max(3, longest + 1)
 
 
 def changed_statuses(repo, base: str, head: str):
@@ -220,7 +264,9 @@ def render_input_block(path: str, label: str, data: bytes,
     if not payload.endswith("\n"):
         payload += "\n"
     lang = FENCE_LANGUAGES.get(Path(path).suffix.lower(), "")
-    return f"### {label} — {path} (sha256 {digest})\n\n```{lang}\n{payload}```\n"
+    marker = fence_marker(payload)
+    return (f"### {label} — {path} (sha256 {digest})\n\n"
+            f"{marker}{lang}\n{payload}{marker}\n")
 
 
 def render_inputs(specs: list[str], max_input_bytes: int) -> str:
@@ -240,19 +286,26 @@ def diff_section_block(path: str, status: str, text: str, binary: bool) -> str:
         return heading + "[binary]\n"
     if not text.endswith("\n"):
         text += "\n"
-    return heading + "```diff\n" + text + "```\n"
+    marker = fence_marker(text)
+    return heading + f"{marker}diff\n" + text + marker + "\n"
 
 
-def matches_include(path: str, includes: list[str]) -> bool:
-    """A path is inside an --include scope when it equals the scope path or
-    sits beneath it (component-wise, never a bare string prefix)."""
-    for include in includes:
-        scope = include.rstrip("/")
+def matches_entry(path: str, entries: list[str]) -> bool:
+    """True when path equals one of ``entries`` or sits beneath it
+    (component-wise, never a bare string prefix)."""
+    for entry in entries:
+        scope = entry.rstrip("/")
         if not scope:
             continue
         if path == scope or path.startswith(scope + "/"):
             return True
     return False
+
+
+def matches_include(path: str, includes: list[str]) -> bool:
+    """A path is inside an --include scope when it equals the scope path or
+    sits beneath it (component-wise, never a bare string prefix)."""
+    return matches_entry(path, includes)
 
 
 def render_scope(allowed: list[str] | None, withheld: list[str] | None,
@@ -319,6 +372,23 @@ def compose_package(args) -> tuple[str, str]:
         if not statuses:
             fail("review package: --include matched no changed files: "
                  + ", ".join(includes))
+    # --allowed/--withheld constrain what actually ships, not just the
+    # Scope section: withheld entries (names or directory prefixes) must
+    # not appear in the Diff stat or the Diff, and an allowed list keeps
+    # only the listed paths.  Withheld wins over allowed when both match.
+    if allowed is not None:
+        statuses = [(status, path) for status, path in statuses
+                    if matches_entry(path, allowed)]
+        stats = [(a, d, path) for a, d, path in stats
+                 if matches_entry(path, allowed)]
+    if withheld is not None:
+        statuses = [(status, path) for status, path in statuses
+                    if not matches_entry(path, withheld)]
+        stats = [(a, d, path) for a, d, path in stats
+                 if not matches_entry(path, withheld)]
+    if not statuses:
+        fail("review package: no reviewable files after "
+             "allowed/withheld filtering")
     num_by_path = {}
     for added, deleted, path in stats:
         num_by_path[path] = (added, deleted)
@@ -348,6 +418,7 @@ def compose_package(args) -> tuple[str, str]:
 
     origin = remote_origin_url(args.repo)
     if origin is not None:
+        origin = strip_userinfo(origin)
         identity_repo = origin
         repo_name = repo_name_from_url(origin)
     else:

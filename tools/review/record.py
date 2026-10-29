@@ -165,8 +165,21 @@ def record_path(path: str, repo: str) -> str:
 
 
 def resolve_record_path(path: str, repo: str) -> str:
-    """Resolve a stored record path for reading (relative -> repo-joined)."""
-    return path if os.path.isabs(path) else os.path.join(repo, path)
+    """Resolve a stored record path for reading, confined to the repository.
+
+    A record is a committed artifact; a stored absolute path or a relative
+    one that escapes the repository (``..``) could steer ``check`` into
+    arbitrary files.  Both are refused by name; inside-repo paths resolve
+    under ``os.path.realpath(repo)`` so symlink tricks cannot escape
+    either.
+    """
+    if os.path.isabs(path):
+        fail(f"review record: unconfined record path: {path}")
+    root = os.path.realpath(repo)
+    resolved = os.path.realpath(os.path.join(root, path))
+    if resolved != root and not resolved.startswith(root + os.sep):
+        fail(f"review record: unconfined record path: {path}")
+    return resolved
 
 
 def parse_package(path: str) -> PackageInfo:
@@ -310,11 +323,14 @@ def collect_gates(specs: list[str], parser: argparse.ArgumentParser,
         if not path_sep or not path or not exit_text.isdigit():
             parser.error(f"bad --gate spec (expected NAME=EXIT:EVIDENCE): {spec!r}")
         parsed.append({"gate": name, "exit": int(exit_text),
-                       "evidence_path": record_path(path, repo)})
+                       "evidence_path": record_path(path, repo),
+                       "_input_path": path})
     missing: list[str] = []
     for item in parsed:
         try:
-            data = Path(item["evidence_path"]).read_bytes()
+            # Hash the file the caller actually pointed at (the stored
+            # evidence_path is repo-relative and only for the record).
+            data = Path(item["_input_path"]).read_bytes()
         except OSError:
             missing.append(item["gate"])
             continue
@@ -422,14 +438,20 @@ def fix_sha_violations(entries: list[dict], by_id: dict, repo) -> list[str]:
         finding = by_id[entry["id"]]
         artifact = repo_artifact_path(finding["artifact_reference"])
         if artifact is not None:
-            targets = [artifact]
-            # A doc finding can cite where the gap shows while the required
-            # change names the file that must change. Accept a commit that
-            # touched any repo path named in required_change (existence
-            # checked) as well as the cited artifact itself.
-            for named in _paths_in_text(finding.get("required_change", "")):
-                if (Path(repo) / named).exists():
-                    targets.append(named)
+            if (Path(repo) / artifact).exists():
+                # The cited artifact exists in the repository: the fix must
+                # touch that file, and only that file counts — paths merely
+                # named in required_change do not widen the rule.
+                targets = [artifact]
+            else:
+                # A doc finding can cite a non-file (a missing statement, a
+                # gap); only then may required_change name the paths that
+                # actually had to change (existence checked).
+                targets = [
+                    named
+                    for named in _paths_in_text(finding.get("required_change", ""))
+                    if (Path(repo) / named).exists()
+                ]
             if not any(commit_touches_path(repo, full, target)
                        for target in targets):
                 bad.append(f"{entry['id']} ({sha} does not touch {artifact})")
@@ -484,7 +506,7 @@ def validate_disposition_content(entries: list[dict], findings: list[dict]):
 
 # -- prior rounds ----------------------------------------------------------
 
-def load_prior_rounds(dirs: list[str]) -> list[dict]:
+def load_prior_rounds(dirs: list[str], repo: str) -> list[dict]:
     rounds: list[dict] = []
     for directory in dirs:
         json_path = Path(directory) / "review.json"
@@ -514,7 +536,9 @@ def load_prior_rounds(dirs: list[str]) -> list[dict]:
                  "(review.json has no usable verdict/findings/dispositions)")
         rounds.append({
             "loop": loop,
-            "path": os.path.abspath(directory),
+            # Records are committed artifacts: store the repo-relative form
+            # so a record moved to another checkout stays portable.
+            "path": record_path(directory, repo),
             "decision": decision,
             "findings": len(finding_list),
             "dispositioned": fixed_count,
@@ -553,7 +577,7 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
         fail("review record: bad fixed sha: " + "; ".join(bad_sha))
     validate_disposition_content(matched, findings)
 
-    prior_rounds = load_prior_rounds(args.prior)
+    prior_rounds = load_prior_rounds(args.prior, args.repo)
 
     counts = {severity: 0 for severity in SEVERITIES}
     for finding in findings:
@@ -805,13 +829,58 @@ def cmd_check(args) -> int:
     if withheld_ids:
         fail("review record: withheld artifact: " + ", ".join(withheld_ids))
 
+    # The record is re-derived, not trusted: findings come back out of the
+    # reviewer documents themselves, dispositions re-run their rules against
+    # those findings, and the verdict is recomputed from severities.
+    derived_findings: list[dict] = []
+    seen_roles: set[str] = set()
     for reviewer in data["reviewers"]:
-        raw = read_bytes(resolve_record_path(reviewer["document"], args.repo),
-                         "review record: findings doc mismatch: "
-                         f"{reviewer['role']}")
+        role = reviewer.get("role")
+        doc_path = resolve_record_path(reviewer["document"], args.repo)
+        raw = read_bytes(doc_path,
+                         f"review record: findings doc mismatch: {role}")
         if hashlib.sha256(raw).hexdigest() != reviewer["document_sha256"]:
-            fail(f"review record: findings doc mismatch: {reviewer['role']} "
+            fail(f"review record: findings doc mismatch: {role} "
                  f"({reviewer['document']})")
+        lens = load_review_lens(doc_path, role, pkg)
+        if lens["rubric_version"] != reviewer.get("rubric_version"):
+            fail(f"review record: findings doc mismatch: {role} "
+                 "(rubric version changed)")
+        if role in seen_roles:
+            fail(f"review record: findings doc mismatch: duplicate role "
+                 f"{role}")
+        seen_roles.add(role)
+        for finding in lens["findings"]:
+            derived_findings.append({
+                "id": finding["id"],
+                "source": "external" if role == "external" else "internal",
+                "lens": role,
+                "severity": finding["severity"],
+                "rubric_dimension": finding["rubric_dimension"],
+                "artifact_reference": finding["artifact_reference"],
+                "evidence": finding["evidence"],
+                "required_change": finding["required_change"],
+                "actionable": finding["actionable"],
+            })
+
+    FINDING_KEYS = ("id", "source", "lens", "severity", "rubric_dimension",
+                    "artifact_reference", "evidence", "required_change",
+                    "actionable")
+    derived_findings.sort(key=lambda f: f["id"])
+    stored_findings = sorted(data["findings"], key=lambda f: f.get("id") or "")
+    problems: list[str] = []
+    if len(stored_findings) != len(derived_findings):
+        problems.append(f"{len(stored_findings)} finding(s) stored but "
+                        f"documents derive {len(derived_findings)}")
+    for stored, derived in zip(stored_findings, derived_findings):
+        for key in FINDING_KEYS:
+            if stored.get(key) != derived[key]:
+                problems.append(f"{derived['id']}: {key} stored "
+                                f"{stored.get(key)!r} != document "
+                                f"{derived[key]!r}")
+                break
+    if problems:
+        fail("review record: findings mismatch: " + "; ".join(problems))
 
     for gate in data["gate_results"]:
         try:
@@ -823,10 +892,35 @@ def cmd_check(args) -> int:
             fail(f"review record: gate evidence mismatch: {gate['gate']} "
                  f"({gate['evidence_path']})")
 
-    by_id = {f["id"]: f for f in data["findings"]}
-    bad_sha = fix_sha_violations(data["dispositions"], by_id, args.repo)
+    if data["undispositioned"]:
+        fail("review record: undispositioned findings: "
+             + ", ".join(str(value) for value in data["undispositioned"]))
+
+    by_id = {f["id"]: f for f in stored_findings}
+    matched = match_dispositions(data["dispositions"], stored_findings)
+    bad_sha = fix_sha_violations(matched, by_id, args.repo)
     if bad_sha:
         fail("review record: bad fixed sha: " + "; ".join(bad_sha))
+    validate_disposition_content(matched, stored_findings)
+
+    counts = {severity: 0 for severity in SEVERITIES}
+    for finding in stored_findings:
+        counts[finding["severity"]] += 1
+    decision = ("CHANGES_REQUESTED"
+                if counts["blocker"] or counts["major"] else "APPROVED")
+    verdict = data["verdict"]
+    verdict_problems: list[str] = []
+    if verdict.get("decision") != decision:
+        verdict_problems.append(f"decision stored {verdict.get('decision')!r} "
+                                f"!= computed {decision!r}")
+    for key, severity in (("blockers", "blocker"), ("majors", "major"),
+                          ("minors", "minor"), ("infos", "info")):
+        if verdict.get(key) != counts[severity]:
+            verdict_problems.append(f"{key} stored {verdict.get(key)!r} "
+                                    f"!= computed {counts[severity]!r}")
+    if verdict_problems:
+        fail("review record: verdict mismatch: "
+             + "; ".join(verdict_problems))
 
     expected = render_markdown(data)
     markdown_path = Path(args.record) / f"REVIEW-{data['pr']}.md"

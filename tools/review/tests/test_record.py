@@ -87,8 +87,10 @@ class _GitFixtureTest(unittest.TestCase):
 
         # Gate evidence files are content-addressed into the record, so the
         # default one must be created exactly once and reused (repeat renders
-        # must stay byte-identical).
-        self.gate_path = self.dir / "gate-lint.txt"
+        # must stay byte-identical).  It lives INSIDE the repository: records
+        # store repo-relative paths and ``check`` confines every stored path
+        # to the repo, so a default asset must resolve there.
+        self.gate_path = self.repo / "gate-lint.txt"
         self.gate_path.write_text("lint: ok\n", encoding="utf-8")
 
     # -- helpers ----------------------------------------------------------
@@ -108,8 +110,12 @@ class _GitFixtureTest(unittest.TestCase):
                               env=self.env, cwd=cwd)
 
     def build_package(self, *extra: str, out: Path | None = None):
-        """Build a review package; returns (path, sha256)."""
-        self.pkg = out or (self.dir / "package.md")
+        """Build a review package; returns (path, sha256).
+
+        The default output lives inside the repository so the record stores
+        a repo-relative package path that ``check`` can resolve.
+        """
+        self.pkg = out or (self.repo / "package.md")
         proc = subprocess.run(
             [sys.executable, str(PACKAGE_PY), "build", "--repo", str(self.repo),
              "--base", self.base, "--head", self.head, "--out", str(self.pkg),
@@ -155,7 +161,8 @@ class _GitFixtureTest(unittest.TestCase):
                        path: Path | None = None, **overrides) -> Path:
         if not hasattr(self, "pkg_sha"):
             self.build_package()
-        out = path or (self.dir / f"findings-{reviewer}.yaml")
+        # Default location is inside the repo (repo-relative stored path).
+        out = path or (self.repo / f"findings-{reviewer}.yaml")
         out.write_text(yamlish_dumps(self.findings_doc(reviewer, findings,
                                                        **overrides)),
                        encoding="utf-8")
@@ -217,7 +224,7 @@ class _GitFixtureTest(unittest.TestCase):
         return self.cli(*args)
 
     def gate_file(self, name: str = "lint") -> Path:
-        path = self.dir / f"gate-{name}.txt"
+        path = self.repo / f"gate-{name}.txt"
         path.write_text(f"{name}: ok\n", encoding="utf-8")
         return path
 
@@ -563,7 +570,7 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertEqual(data["gate_results"], [{
             "gate": "tests",
             "exit": 1,
-            "evidence_path": str(gate),
+            "evidence_path": record.record_path(str(gate), str(self.repo)),
             "evidence_sha256": hashlib.sha256(
                 gate.read_bytes()).hexdigest(),
         }])
@@ -731,7 +738,7 @@ class _GitFixtureTest(unittest.TestCase):
 
     def test_check_detects_missing_gate_evidence(self) -> None:
         out, data, _ = self.render_ok()
-        Path(data["gate_results"][0]["evidence_path"]).unlink()
+        (self.repo / data["gate_results"][0]["evidence_path"]).unlink()
         proc = self.check_proc(out)
         self.assertEqual(proc.returncode, 1)
         self.assertIn("review record: gate evidence path missing: lint",
@@ -740,7 +747,7 @@ class _GitFixtureTest(unittest.TestCase):
 
     def test_check_detects_removed_findings_doc(self) -> None:
         out, data, _ = self.render_ok()
-        Path(data["reviewers"][0]["document"]).unlink()
+        (self.repo / data["reviewers"][0]["document"]).unlink()
         proc = self.check_proc(out)
         self.assertEqual(proc.returncode, 1)
         self.assertIn("review record: findings doc mismatch:", proc.stderr)
@@ -755,6 +762,179 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("review record: package hash mismatch:", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
+
+    # -- P2: check re-derives the record -----------------------------------
+
+    def rewrite_record(self, out: Path, mutate) -> None:
+        """Apply ``mutate(data)`` to out/review.json and write it back."""
+        record_path = out / "review.json"
+        data = json.loads(record_path.read_text(encoding="utf-8"))
+        mutate(data)
+        record_path.write_text(json.dumps(data, indent=2, sort_keys=True),
+                               encoding="utf-8")
+
+    def test_check_refuses_dropped_finding(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def drop(data):
+            data["findings"] = []
+            data["dispositions"] = []
+            data["open_findings"] = []
+
+        self.rewrite_record(out, drop)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: findings mismatch:", proc.stderr)
+        self.assertIn("0 finding(s) stored but documents derive 1",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_weakened_severity(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def weaken(data):
+            data["findings"][0]["severity"] = "info"
+
+        self.rewrite_record(out, weaken)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: findings mismatch:", proc.stderr)
+        self.assertIn("severity stored 'info' != document 'minor'",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_removed_disposition(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def remove(data):
+            data["dispositions"] = []
+
+        self.rewrite_record(out, remove)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: undispositioned findings: RA-001",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_wrong_verdict_decision(self) -> None:
+        out, _, _ = self.render_ok()  # only minors -> computed APPROVED
+
+        def flip(data):
+            data["verdict"]["decision"] = "CHANGES_REQUESTED"
+
+        self.rewrite_record(out, flip)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: verdict mismatch:", proc.stderr)
+        self.assertIn("decision stored 'CHANGES_REQUESTED' "
+                      "!= computed 'APPROVED'", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_wrong_verdict_counts(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def tamper(data):
+            data["verdict"]["minors"] = 7
+
+        self.rewrite_record(out, tamper)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: verdict mismatch:", proc.stderr)
+        self.assertIn("minors stored 7 != computed 1", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_nonempty_undispositioned_list(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def tamper(data):
+            data["undispositioned"] = ["RA-001"]
+
+        self.rewrite_record(out, tamper)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: undispositioned findings: RA-001",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    # -- P5: stored paths are confined at check ----------------------------
+
+    def test_check_refuses_stored_absolute_path(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def absolutize(data):
+            data["package"]["path"] = "/etc/passwd"
+
+        self.rewrite_record(out, absolutize)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: unconfined record path: /etc/passwd",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_stored_escaping_path(self) -> None:
+        out, _, _ = self.render_ok()
+
+        def escape(data):
+            data["package"]["path"] = "../../secret.md"
+
+        self.rewrite_record(out, escape)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: unconfined record path: ../../secret.md",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    # -- P6: prior round paths stay repo-relative ---------------------------
+
+    def test_prior_round_path_stored_repo_relative(self) -> None:
+        loop1_dir = self.repo / "records" / "loop1"
+        _, _, _ = self.render_ok(out_dir=str(loop1_dir))
+        _, second_data, second_md = self.render_ok(
+            out_dir=str(self.dir / "record2"), loop=2,
+            prior=[str(loop1_dir)])
+        self.assertEqual(second_data["prior_rounds"][0]["path"],
+                         record.record_path(str(loop1_dir), str(self.repo)))
+        self.assertEqual(second_data["prior_rounds"][0]["path"],
+                         "records/loop1")
+        self.assertNotIn(str(self.repo), second_md)
+
+    # -- P7: the touch rule is not widened by required_change ----------------
+
+    def test_fixed_refused_when_artifact_exists_and_only_named_path_touched(
+            self) -> None:
+        """P7: when the cited artifact exists, a commit touching only a path
+        named in required_change must be refused."""
+        (self.repo / "src" / "app.py").write_text(
+            "def main(): pass\n# repair\n", encoding="utf-8")
+        self.git("add", "src/app.py")
+        self.git("commit", "-q", "-m", "repair src/app.py")
+        fix_src = self.rev_parse("HEAD")
+        finding = self.finding("RA-001", artifact="a.txt:2")
+        finding["required_change"] = "Repair the logic in src/app.py."
+        doc = self.write_findings("review-adversary", [finding])
+        disp = self.write_dispositions(
+            [{"id": "RA-001", "disposition": "fixed", "fix_sha": fix_src}])
+        proc = self.render(findings=[("review-adversary", str(doc))],
+                           dispositions=str(disp))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: bad fixed sha:", proc.stderr)
+        self.assertIn("does not touch a.txt", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_fixed_accepted_when_missing_artifact_names_existing_path(
+            self) -> None:
+        """P7: a finding citing a non-file may name the real target alone."""
+        finding = self.finding("RC-001", artifact="docs/missing.md:3")
+        finding["required_change"] = ("Add the missing statement to a.txt "
+                                      "(the file that must change).")
+        doc = self.write_findings("review-contract", [finding])
+        disp = self.write_dispositions(
+            [{"id": "RC-001", "disposition": "fixed",
+              "fix_sha": self.fix_a}])
+        _, data, _ = self.render_ok(
+            findings=[("review-contract", str(doc))],
+            dispositions=str(disp))
+        self.assertEqual(data["dispositions"][0]["fix_sha"], self.fix_a)
 
     # -- usage / invocation ------------------------------------------------
 
@@ -865,8 +1045,26 @@ class RecordPathTests(unittest.TestCase):
             self.assertTrue(os.path.isabs(record.record_path(str(target), str(repo))))
 
     def test_resolve_record_path_joins_relative(self) -> None:
-        self.assertEqual(record.resolve_record_path("a/b.yaml", "/tmp/r"),
-                         os.path.join("/tmp/r", "a/b.yaml"))
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "r"
+            repo.mkdir()
+            resolved = record.resolve_record_path("a/b.yaml", str(repo))
+            self.assertEqual(resolved,
+                             os.path.realpath(str(repo / "a" / "b.yaml")))
+
+    def test_resolve_record_path_refuses_absolute(self) -> None:
+        repo = str(Path(tempfile.mkdtemp()) / "r")
+        with self.assertRaises(SystemExit) as ctx:
+            record.resolve_record_path("/etc/passwd", repo)
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_resolve_record_path_refuses_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            with self.assertRaises(SystemExit) as ctx:
+                record.resolve_record_path("../secret.txt", str(root))
+            self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == "__main__":

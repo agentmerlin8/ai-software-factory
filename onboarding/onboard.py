@@ -333,8 +333,10 @@ def render_workspace_draft(facts: dict, args: argparse.Namespace) -> str:
     text = text.replace('pin = "<kit tag/sha>"', f'pin = "{args.pin}"')
     text = text.replace('id = "app"', f'id = "{args.repo_id}"', 1)
     if args.repo_url:
+        safe_url = (args.repo_url.replace("\\", "\\\\")
+                                 .replace('"', '\\"'))
         text = text.replace('url = "github.com/ORG/app"',
-                            f'url = "{args.repo_url}"', 1)
+                            f'url = "{safe_url}"', 1)
     # the template's example member binding is illustrative only — a
     # drafted workspace declares the ONE inspected primary binding.
     text = _MEMBER_BLOCK_RE.sub("", text)
@@ -411,8 +413,30 @@ def cmd_propose(args: argparse.Namespace) -> int:
               f"(got {args.pin!r})")
         print("NEXT: re-run propose with --pin <kit tag/sha>.")
         return 1
+    if args.repo_url is not None:
+        # validate via the SAME normalizer every other repo-url use
+        # shares (https URL or host/owner/name; quotes/newlines never
+        # match) — then substitute the NORMALIZED value only.
+        normalized_url = normalize_repo_url(args.repo_url)
+        if normalized_url is None:
+            print(f"refused: bad repo-url — must be an https URL or "
+                  f"host/owner/name (got {args.repo_url!r})")
+            print("NEXT: re-run propose with --repo-url "
+                  "<https url or host/owner/name>.")
+            return 1
+        args.repo_url = normalized_url
     env_names = [n.strip() for n in args.envs.split(",") if n.strip()]
     for name in env_names:
+        # each --envs value must be a SINGLE path component (it is
+        # joined onto a template dir later) — anything else is a named
+        # refusal BEFORE any path use.
+        if (not name or "/" in name or "\\" in name
+                or name in (".", "..")):
+            print(f"refused: bad environment name — each --envs value "
+                  f"must be a single path component (got {name!r})")
+            print("NEXT: re-run propose with --envs <name,...> from the "
+                  "kit templates.")
+            return 1
         if not (WS_TEMPLATES / "environments" / f"{name}.toml").is_file():
             print(f"refused: unknown environment template: {name} "
                   f"(no templates/workspace/environments/{name}.toml)")
@@ -430,7 +454,8 @@ def cmd_propose(args: argparse.Namespace) -> int:
             normalize_repo_url(facts["origin_url"]) or "")
         binding_slug = RD.repo_slug_from_url(
             normalize_repo_url(args.repo_url) or args.repo_url or "")
-        if home_slug and binding_slug and home_slug == binding_slug:
+        if home_slug and binding_slug and \
+                home_slug.casefold() == binding_slug.casefold():
             print(f"refused: dedicated control_home with a self-binding "
                   f"({home_slug}) — pass --repo-url <distinct target> or "
                   "use --control-home in-repo")
@@ -482,6 +507,14 @@ class Installer:
 
     def install_bytes(self, rel: str, data: bytes) -> None:
         dest = self.target / rel
+        if dest.is_symlink():
+            # never follow any link at the destination (a dangling one
+            # would be created/written through to an outside target; a
+            # live one would bypass the never-overwrite law).
+            raise OnboardError(
+                f"destination is a symlink — refusing to install {rel} "
+                "(the never-overwrite law cannot be honored through a "
+                "symlink)")
         if dest.exists():
             print(f"EXISTS, keeping: {rel}")
         elif self.dry_run:
@@ -730,9 +763,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         return DISPATCH[command](args)
     except OnboardError as exc:
         print(f"refused: {exc}")
+        print(f"NEXT: fix the reported refusal, then re-run "
+              f"python3 onboarding/onboard.py {command}.")
         return 1
     except OSError as exc:
         print(f"refused: {exc}")
+        print(f"NEXT: fix the reported refusal, then re-run "
+              f"python3 onboarding/onboard.py {command}.")
         return 1
 
 

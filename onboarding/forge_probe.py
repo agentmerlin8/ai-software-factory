@@ -265,7 +265,8 @@ def gh_probe_transport(op: str, params: dict) -> dict:
             if not isinstance(batch, list):
                 raise ProbeError(
                     "probe failed: ruleset — cannot parse gh output: "
-                    "expected an array of rulesets")
+                    "expected an array of rulesets "
+                    f"(got {type(batch).__name__})")
             summaries.extend(entry for entry in batch
                              if isinstance(entry, dict))
             if len(batch) < 100:
@@ -299,7 +300,8 @@ def gh_probe_transport(op: str, params: dict) -> dict:
             if not isinstance(batch, list):
                 raise ProbeError(
                     "probe failed: labels — cannot parse gh output: "
-                    "expected an array of labels")
+                    "expected an array of labels "
+                    f"(got {type(batch).__name__})")
             for entry in batch:
                 if isinstance(entry, dict):
                     labels.append({"name": entry.get("name"),
@@ -325,7 +327,9 @@ def gh_probe_transport(op: str, params: dict) -> dict:
                     "path": data.get("path") if isinstance(data, dict)
                     else path}
         detail = (out.stderr or "").strip()
-        if "404" in detail:  # absent template is a finding, not a failure
+        # absent is ONLY a genuine not-found: 404 AND (case-insensitive)
+        # "not found" — a substring hit alone is not absence (F-panel).
+        if "404" in detail and "not found" in detail.lower():
             return {"present": False, "path": None}
         raise ProbeError(f"probe failed: issue form — {detail}")
     if op == "project":
@@ -366,7 +370,22 @@ def gh_probe_transport(op: str, params: dict) -> dict:
                   .get("fields") or {"nodes": []})
         return {"node_id": node_id, "fields": fields}
     if op == "label_ensure":
-        argv = params["argv"]
+        # argv is built HERE from the named params (never taken from
+        # params — a caller-supplied argv is refused; F-panel).
+        if "argv" in params:
+            raise ProbeError(
+                "probe failed: label ensure — a caller-supplied argv is "
+                "refused; the transport builds it from the named params "
+                "(repo, name, color, description)")
+        repo, name, color = (params.get("repo"), params.get("name"),
+                             params.get("color"))
+        description = params.get("description") or ""
+        if not all(isinstance(v, str) and v for v in (repo, name, color)) \
+                or not isinstance(description, str):
+            raise ProbeError(
+                "probe failed: label ensure — repo/name/color must be "
+                "non-empty strings and description a string")
+        argv = build_label_ensure_argv(repo, name, color, description)
         try:
             out = subprocess.run(argv, capture_output=True, text=True)
         except OSError as exc:
@@ -648,10 +667,12 @@ class Forge:
     def label_ensure(self, repo: str, name: str, color: str,
                      description: str) -> dict:
         """Upsert one label via `gh label create ... --force` (the ONLY
-        mutation in this module). argv built by the pure builder; the
-        transport receives it verbatim in params."""
+        mutation in this module). The argv is built by the pure builder
+        and returned verbatim; the transport builds the SAME argv
+        internally from the named params (repo, name, color,
+        description) and refuses a caller-supplied `argv` key."""
         argv = build_label_ensure_argv(repo, name, color, description)
         data = self._call("label_ensure", "label ensure",
                           {"repo": repo, "name": name, "color": color,
-                           "description": description, "argv": argv})
+                           "description": description})
         return {"argv": argv, "ok": bool(data.get("ok"))}

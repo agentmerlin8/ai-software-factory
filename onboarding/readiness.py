@@ -533,8 +533,12 @@ def validator_findings(ctx: Context, *, workspace: bool,
 
 def env_ref_problems(ctx: Context) -> list[str]:
     """W-3: credential refs are checked for PRESENCE only — values are
-    never read. Deferred `<...>` refs are fine."""
+    never read. Deferred `<...>` refs are fine. A `file:` ref must
+    resolve INSIDE the control home — an absolute path, a `..` escape
+    or any outside-home target is a named problem (values are never
+    read, but the FILE path must stay confined to the home)."""
     problems: list[str] = []
+    home = ctx.home.resolve()
     for name, doc, err in ctx.env_docs:
         if err or not isinstance(doc, dict):
             continue
@@ -550,7 +554,13 @@ def env_ref_problems(ctx: Context) -> list[str]:
                     problems.append(
                         f"environments/{name}: missing credential ref: {ref}")
             elif ref.startswith("file:"):
-                if not (ctx.home / ref[5:]).exists():
+                target = ctx.home / ref[5:]
+                resolved = target.resolve()
+                if not resolved.is_relative_to(home):
+                    problems.append(
+                        f"environments/{name}: credential ref escapes "
+                        f"the control home: {ref}")
+                elif not target.exists():
                     problems.append(
                         f"environments/{name}: missing credential ref: {ref}")
     return problems
@@ -770,12 +780,25 @@ def check_c11(ctx: Context, row: dict) -> tuple[str, str]:
 
 def check_c12(ctx: Context, row: dict) -> tuple[str, str]:
     secrets = ctx.home / "factory" / "SECRETS.md"
-    if not secrets.is_file() or not secrets.read_text(encoding="utf-8").strip():
+    if not secrets.is_file():
+        return FAIL, "missing or empty factory/SECRETS.md"
+    try:
+        secrets_text = secrets.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return FAIL, f"factory/SECRETS.md is not valid UTF-8 — cannot read ({exc})"
+    except OSError as exc:
+        return FAIL, f"factory/SECRETS.md unreadable — {exc}"
+    if not secrets_text.strip():
         return FAIL, "missing or empty factory/SECRETS.md"
     gitignore = ctx.home / ".gitignore"
     if not gitignore.is_file():
         return FAIL, "missing .gitignore"
-    text = gitignore.read_text(encoding="utf-8").lower()
+    try:
+        text = gitignore.read_text(encoding="utf-8").lower()
+    except UnicodeDecodeError as exc:
+        return FAIL, f".gitignore is not valid UTF-8 — cannot read ({exc})"
+    except OSError as exc:
+        return FAIL, f".gitignore unreadable — {exc}"
     if not any(pat in text for pat in SECRETISH_PATTERNS):
         return FAIL, (".gitignore carries no secret-ish ignore pattern "
                       "(.env / *secret* / *.pem / *token*)")
@@ -1132,7 +1155,11 @@ def write_preflight(ctx: Context, results: list[dict], summary: dict,
         "|----|----------|--------|--------|",
     ]
     for r in results:
-        detail = (r.get("detail") or "").replace("|", "\\|")
+        # CR/LF collapse to one space FIRST (a detail must never break
+        # the markdown table row), then escape pipes (F-panel: newline
+        # injection via a FAIL detail).
+        raw = re.sub(r"[\r\n]+", " ", r.get("detail") or "")
+        detail = raw.replace("|", "\\|")
         lines.append(f"| {r['id']} | {r['category']} | {r['status']} | {detail} |")
     lines += [""]
     lines += summary_lines(summary, green)[:2]

@@ -119,6 +119,10 @@ def apply_defects(home: Path, defects: list[str]) -> None:
         elif defect == "bad-gitignore":
             (home / ".gitignore").write_text("__pycache__/\n",
                                              encoding="utf-8", newline="\n")
+        elif defect == "gitignore-not-utf8":
+            (home / ".gitignore").write_bytes(b"\xff\xfe\x00\xff\n")
+        elif defect == "secrets-not-utf8":
+            (home / "factory" / "SECRETS.md").write_bytes(b"\xff\xfe\x00\xff")
         elif defect == "drop-attest":
             # strip every answered attest for the check named via suffix
             pass  # handled by drop_attest_* below
@@ -820,6 +824,23 @@ class FailPathPerCheck(unittest.TestCase):
         self.assert_defect(["bad-gitignore"], "C-12",
                            ["no secret-ish ignore pattern"])
 
+    def test_c12_fail_gitignore_not_utf8_named_fail_no_traceback(self):
+        # non-UTF-8 bytes must never produce a raw traceback — a named
+        # FAIL names the file and the decode problem.
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td), defects=["gitignore-not-utf8"])
+            rc, out, data = verify_home(home)
+            self.assertEqual(rc, 1, out)
+            self.assertIn("FAIL C-12", out)
+            self.assertNotIn("Traceback", out)
+            detail = detail_of(data, "C-12")
+            self.assertIn(".gitignore", detail)
+            self.assertIn("not valid UTF-8", detail)
+
+    def test_c12_fail_secrets_not_utf8_named_fail(self):
+        self.assert_defect(["secrets-not-utf8"], "C-12",
+                           ["factory/SECRETS.md", "not valid UTF-8"])
+
     def test_gitignore_template_does_not_ignore_override(self):
         # F7: the controller requires factory/locks/OVERRIDE COMMITTED
         # (HEAD:factory/locks/OVERRIDE) — an ignore entry would make the
@@ -1013,6 +1034,51 @@ class FailPathPerCheck(unittest.TestCase):
                 "missing credential ref: env:S3T2_DEFINITELY_UNSET_VAR",
                 detail_of(data, "W-3"))
 
+    def test_w3_fail_file_ref_dotdot_escape_named(self):
+        # a file: ref that would resolve OUTSIDE the control home is a
+        # named problem (never followed, never read).
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            env = home / "environments" / "local.toml"
+            env.write_text(env.read_text(encoding="utf-8").replace(
+                'refs = ["file:secrets/token.txt"]',
+                'refs = ["file:../escape.bin"]'),
+                encoding="utf-8", newline="\n")
+            rc, _out, data = verify_home(home)
+            self.assertEqual(rc, 1)
+            detail = detail_of(data, "W-3")
+            self.assertIn("escapes the control home", detail)
+            self.assertIn("file:../escape.bin", detail)
+
+    def test_w3_fail_file_ref_absolute_named(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            env = home / "environments" / "local.toml"
+            env.write_text(env.read_text(encoding="utf-8").replace(
+                'refs = ["file:secrets/token.txt"]',
+                'refs = ["file:/etc/hostname"]'),
+                encoding="utf-8", newline="\n")
+            rc, _out, data = verify_home(home)
+            self.assertEqual(rc, 1)
+            detail = detail_of(data, "W-3")
+            self.assertIn("escapes the control home", detail)
+            self.assertIn("file:/etc/hostname", detail)
+
+    def test_w3_file_ref_staying_inside_home_is_valid(self):
+        # a '..' that STAYS inside still resolves under the home — no
+        # problem, W-3 stays PASS.
+        with tempfile.TemporaryDirectory() as td:
+            home = make_home(Path(td))
+            env = home / "environments" / "local.toml"
+            env.write_text(env.read_text(encoding="utf-8").replace(
+                'refs = ["file:secrets/token.txt"]',
+                'refs = ["file:secrets/../secrets/token.txt"]'),
+                encoding="utf-8", newline="\n")
+            rc, _out, data = verify_home(home)
+            self.assertEqual(rc, 0)
+            w3 = next(r for r in data["checks"] if r["id"] == "W-3")
+            self.assertEqual(w3["status"], "PASS")
+
     def test_w4_fail_binding_unreachable(self):
         with tempfile.TemporaryDirectory() as td:
             home = make_home(Path(td))
@@ -1075,6 +1141,59 @@ class FailPathPerCheck(unittest.TestCase):
     def test_a2_fail_no_attest(self):
         self.assert_defect(["drop-attest-A-2"], "A-2",
                            ["no answered attest recorded"])
+
+
+class WritePreflightDetailSanitizing(unittest.TestCase):
+    """F-panel: a FAIL detail containing CR/LF must be collapsed to a
+    space AND pipes escaped so a detail can never break the markdown
+    table row of factory/PREFLIGHT.md."""
+
+    class _Ctx:
+        """Minimal write_preflight context (home/mode/registry/kit_sha)."""
+
+    @staticmethod
+    def _ctx(home: Path):
+        ctx = WritePreflightDetailSanitizing._Ctx()
+        ctx.home = home
+        ctx.mode = "dedicated"
+        ctx.registry = {"registry_version": 1}
+        ctx.kit_sha = "0" * 40
+        return ctx
+
+    def _summary(self, failed: int) -> dict:
+        return {"passed": 0, "failed": failed, "na": 0, "advisory": 0}
+
+    def test_detail_newlines_and_pipes_cannot_break_the_table(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            results = [{
+                "id": "C-1", "category": "CORE", "status": "FAIL",
+                "detail": "line one\nline two\r\nline|three",
+            }]
+            path = RD.write_preflight(self._ctx(home), results,
+                                      self._summary(1), green=False)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("line one line two line\\|three", text)
+            self.assertNotIn("line one\nline two", text)
+            self.assertNotIn("line two\r\nline|three", text)
+            # every table row stays ONE line: with one result row there are
+            # exactly three table lines, each starting+ending in a pipe
+            # pair (a leaked newline would add a continuation line).
+            rows = [ln for ln in text.splitlines() if ln.startswith("|")]
+            self.assertEqual(len(rows), 3, rows)
+            for row in rows:
+                self.assertTrue(row.endswith("|"), row)
+
+    def test_clean_detail_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            results = [{"id": "C-2", "category": "CORE", "status": "PASS",
+                        "detail": "authenticated as fixture-bot"}]
+            path = RD.write_preflight(self._ctx(home), results,
+                                      self._summary(0), green=True)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("authenticated as fixture-bot", text)
+            self.assertIn("verify status: GREEN", text)
 
 
 class Applicability(unittest.TestCase):

@@ -571,6 +571,48 @@ class TestLivePathGitAuth(unittest.TestCase):
                 shutil.rmtree(tmp_path, ignore_errors=True)
 
 
+class TestGhAuthLoginParseGuard(unittest.TestCase):
+    """F-panel: `ln.split("account")[-1].split()[0]` IndexErrors when a
+    `Logged in to` line ends AT `account` — the empty tail is a named
+    TestOutError refusal (rc 1, one NEXT, no traceback)."""
+
+    class EmptyTailAuthRunner(FullStubRunner):
+        def __call__(self, argv):
+            if "auth" in argv and "status" in argv:
+                return subprocess.CompletedProcess(
+                    argv, 0, "",
+                    "\u2713 Logged in to github.com account\n")
+            return super().__call__(argv)
+
+    def test_auth_line_ending_at_account_named_refusal(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp_home = Path(td) / "held"
+            tmp_home.mkdir()
+            runner = self.EmptyTailAuthRunner()
+            attest_calls: list[tuple] = []
+            original_run, original_live, original_attest = (
+                TO.run_argv, TO.run_argv_live, TO.RD.append_attest)
+            original_mkdtemp = TO.tempfile.mkdtemp
+            TO.run_argv = runner
+            TO.run_argv_live = runner
+            TO.RD.append_attest = lambda *a, **k: attest_calls.append((a, k))
+            TO.tempfile.mkdtemp = lambda prefix: str(tmp_home)
+            try:
+                rc, out, err = capture(TO.main, [
+                    "--full", "--confirm-full-run", "--repo-name",
+                    "fresh-app", "--project-id", "fixture-org/projects/7"])
+            finally:
+                TO.run_argv, TO.run_argv_live = original_run, original_live
+                TO.RD.append_attest = original_attest
+                TO.tempfile.mkdtemp = original_mkdtemp
+            self.assertEqual(rc, 1)
+            self.assertEqual(err, "")
+            self.assertNotIn("Traceback", out)
+            self.assertIn("refused: ", out)
+            self.assertIn("cannot parse the account login", out)
+            self.assertEqual(next_count(out), 1)
+
+
 class TestSeedGitignoreDecode(unittest.TestCase):
     """G9: a non-UTF-8 seed .gitignore is a NAMED operator-review
     StepFailure — never a raw UnicodeDecodeError traceback."""

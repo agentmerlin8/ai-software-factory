@@ -487,7 +487,13 @@ def run_full(args: argparse.Namespace) -> int:
         login = None
         for ln in f"{out.stdout}\n{out.stderr}".splitlines():
             if "Logged in to" in ln:
-                login = ln.split("account")[-1].split()[0]
+                tail = ln.split("account")[-1].split()
+                if not tail:
+                    raise TestOutError(
+                        "gh-auth — cannot parse the account login from "
+                        "the line (nothing after 'account'): "
+                        f"{ln.strip()!r}")
+                login = tail[0]
         owner = login or "<owner>"
         argv = ["gh", "repo", "create", args.repo_name, visibility]
         print(f"RUN: {argv!r}")
@@ -581,6 +587,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.full:
             return run_full(args)
         return run_smoke(args)
+    except TestOutError as exc:
+        print(f"refused: {exc}")
+        print(FAIL_NEXT)
+        return 1
     except OSError as exc:
         print(f"refused: {exc}")
         print(FAIL_NEXT)

@@ -362,6 +362,39 @@ class TestPropose(unittest.TestCase):
                     self.assertIn(needle, out)
                     self.assertEqual(next_count(out), 1)
 
+    def test_envs_traversal_refused_before_path_use(self):
+        # each --envs value must be a single path component — a
+        # traversal name is a named refusal (no draft, one NEXT line).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            for bad in ("../local", "sub/dir", "..", "."):
+                with self.subTest(env=bad):
+                    rc, out, _err = capture(
+                        OB.main, ["propose", str(home),
+                                  *DISTINCT_ARGS, "--envs", bad])
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("bad environment name", out)
+                    self.assertEqual(next_count(out), 1)
+                    self.assertFalse((home / "onboarding-drafts").exists())
+
+    def test_bad_repo_url_refused_before_substitution(self):
+        # a value containing a quote/newline (or any non-URL shape) is a
+        # named refusal — it is never substituted into the TOML draft.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            bad_values = (
+                'github.com/acme/app"\n[[repos]]\nid = "evil"',
+                "not a url with spaces",
+            )
+            for bad in bad_values:
+                with self.subTest(value=bad):
+                    rc, out, _err = capture(
+                        OB.main, ["propose", str(home), "--repo-url", bad])
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("bad repo-url", out)
+                    self.assertEqual(next_count(out), 1)
+                    self.assertFalse((home / "onboarding-drafts").exists())
+
 
 class TestProposeDedicatedSelfBindingGuard(unittest.TestCase):
     """G4: dedicated mode must never draft a self-binding — propose
@@ -396,6 +429,18 @@ class TestProposeDedicatedSelfBindingGuard(unittest.TestCase):
             self.assertIn(
                 "refused: dedicated control_home with a self-binding "
                 "(fixture-org/workspace)", out)
+            self.assertEqual(next_count(out), 1)
+
+    def test_case_variant_self_binding_refused(self):
+        # slugs compare CASE-INSENSITIVELY — a mixed-case variant of the
+        # home's own slug cannot bypass the self-binding refusal.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            rc, out, _err = capture(OB.main, [
+                "propose", str(home), "--repo-url",
+                "https://github.com/Fixture-Org/Workspace.git"])
+            self.assertEqual(rc, 1, out)
+            self.assertIn("self-binding", out)
             self.assertEqual(next_count(out), 1)
 
     def test_dedicated_with_distinct_url_ok(self):
@@ -615,8 +660,14 @@ class TestApply(unittest.TestCase):
             expected = [(lbl["name"], FP.build_label_ensure_argv(
                 "fixture-org/workspace", lbl["name"], lbl["color"],
                 lbl["description"])) for lbl in registry["labels"]]
-            self.assertEqual([(c["name"], c["argv"]) for c in recorder.calls],
-                             expected)
+            # the transport builds argv inside; params carry the named
+            # fields only — the same argv it would build is reconstructed.
+            self.assertEqual(
+                [(c["name"], FP.build_label_ensure_argv(
+                    c["repo"], c["name"], c["color"], c["description"]))
+                 for c in recorder.calls],
+                expected)
+            self.assertTrue(all("argv" not in c for c in recorder.calls))
             for name, _argv in expected:
                 self.assertIn(f"ENSURED: label {name}", out)
 
@@ -668,6 +719,91 @@ class TestApply(unittest.TestCase):
             self.assertIn(
                 "EXISTS, keeping: factory/onboarding-registry.json", out)
             self.assertEqual(rec.read_bytes(), before)  # still ui:false
+
+
+class TestInstallerSymlinkGuard(unittest.TestCase):
+    """F-panel: install_bytes NEVER follows a symlink at dest (a
+    dangling one would be created through to an outside target; a live
+    one would bypass the never-overwrite law)."""
+
+    def test_installer_refuses_dangling_symlink_directly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            home = tmp / "control-home"
+            outside = tmp / "outside.txt"
+            (home / "factory").mkdir(parents=True)
+            (home / "factory" / "KICKOFF.md").symlink_to(outside)
+            inst = OB.Installer(home, dry_run=False)
+            with self.assertRaises(OB.OnboardError) as ctx:
+                inst.install_bytes("factory/KICKOFF.md", b"KICKOFF\n")
+            self.assertIn("symlink", str(ctx.exception))
+            self.assertFalse(outside.exists())  # nothing written outside
+
+    def test_installer_refuses_symlink_to_existing_file(self):
+        # never-overwrite through a link: even a LIVE symlink is refused,
+        # the link target's bytes are untouched.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            home = tmp / "control-home"
+            real = home / "user-file.md"
+            (home / "factory").mkdir(parents=True)
+            real.write_text("user content\n", encoding="utf-8", newline="\n")
+            (home / "factory" / "KICKOFF.md").symlink_to(real)
+            inst = OB.Installer(home, dry_run=False)
+            with self.assertRaises(OB.OnboardError):
+                inst.install_bytes("factory/KICKOFF.md", b"KICKOFF\n")
+            self.assertEqual(real.read_bytes(), b"user content\n")
+
+    def test_apply_refuses_dangling_symlink_dest(self):
+        # the CLI path: apply hits the dangling symlink, prints a named
+        # refusal + exactly one NEXT line, rc 1, outside target absent.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp, home = make_tmp_target(tmpdir)
+            ds = dataset_with_label_ensure(tmp)
+            capture(OB.main, ["propose", str(home), *DISTINCT_ARGS])
+            outside = tmp / "escape.txt"
+            (home / "factory").mkdir(exist_ok=True)
+            (home / "factory" / "KICKOFF.md").symlink_to(outside)
+            rc, out, _err = capture(OB.main, ["apply", str(home),
+                                              "--forge-fixture", str(ds)])
+            self.assertEqual(rc, 1, out)
+            self.assertIn("refused:", out)
+            self.assertIn("symlink", out)
+            self.assertEqual(next_count(out), 1)
+            self.assertFalse(outside.exists())
+
+
+class TestMainCatchAllNextLine(unittest.TestCase):
+    """F-panel: a refusal escaping a dispatched command still prints
+    exactly ONE NEXT line (the every-command-one-NEXT law)."""
+
+    def test_onboard_error_refusal_prints_next(self):
+        original = OB.DISPATCH["preflight"]
+
+        def boom(args):
+            raise OB.OnboardError("synthetic refusal")
+        OB.DISPATCH["preflight"] = boom
+        try:
+            rc, out, _err = capture(OB.main, ["preflight", "x"])
+        finally:
+            OB.DISPATCH["preflight"] = original
+        self.assertEqual(rc, 1)
+        self.assertIn("refused: synthetic refusal", out)
+        self.assertEqual(next_count(out), 1)
+
+    def test_oserror_refusal_prints_next(self):
+        original = OB.DISPATCH["preflight"]
+
+        def boom(args):
+            raise OSError("synthetic io failure")
+        OB.DISPATCH["preflight"] = boom
+        try:
+            rc, out, _err = capture(OB.main, ["preflight", "x"])
+        finally:
+            OB.DISPATCH["preflight"] = original
+        self.assertEqual(rc, 1)
+        self.assertIn("refused: synthetic io failure", out)
+        self.assertEqual(next_count(out), 1)
 
 
 # ------------------------------------------------------------- integration --

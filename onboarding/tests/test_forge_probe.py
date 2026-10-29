@@ -732,6 +732,68 @@ class TestRealTransportRulesetDetailMerge(unittest.TestCase):
         self.assertEqual(entry["enforcement"], "active")
 
 
+class TestRulesetTransportBodyShape(unittest.TestCase):
+    """F-panel: a non-array listing body (e.g. a rate-limit object at
+    rc 0) is a named ProbeError naming the label AND the observed type
+    — never a silent 'no rulesets'."""
+
+    def test_object_body_named_refusal(self):
+        stub = _stub_run(json.dumps({"message": "API rate limit exceeded"}))
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "ruleset", {"repo": "fixture-org/app", "branch": "main"})
+        msg = str(ctx.exception)
+        self.assertIn("ruleset", msg)
+        self.assertIn("expected an array of rulesets", msg)
+        self.assertIn("dict", msg)
+
+
+class TestIssueFormTransport404Classification(unittest.TestCase):
+    """F-panel: absence requires 404 AND a (case-insensitive) 'not
+    found' — an unrelated error merely mentioning 404 is a named
+    ProbeError, never silent absence."""
+
+    @staticmethod
+    def _stub_gh_error(stderr: str):
+        return mock.Mock(side_effect=lambda argv, **kw:
+                         subprocess.CompletedProcess(argv, 1, "", stderr))
+
+    def test_true_404_not_found_is_absence(self):
+        stub = self._stub_gh_error("HTTP 404: Not Found (GH006)")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "issue_form", {"repo": "fixture-org/app",
+                               "filename": "story.yml"})
+        self.assertEqual(result, {"present": False, "path": None})
+
+    def test_case_insensitive_not_found_is_absence(self):
+        stub = self._stub_gh_error("error 404: TEMPLATE NOT FOUND")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "issue_form", {"repo": "fixture-org/app",
+                               "filename": "story.yml"})
+        self.assertEqual(result, {"present": False, "path": None})
+
+    def test_unrelated_404_error_is_named_refusal(self):
+        stub = self._stub_gh_error("pipeline 4041 failed: deploy error")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "issue_form", {"repo": "fixture-org/app",
+                                   "filename": "story.yml"})
+        self.assertIn("4041", str(ctx.exception))
+
+    def test_404_without_not_found_is_named_refusal(self):
+        stub = self._stub_gh_error("HTTP 404: API rate limit exceeded")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "issue_form", {"repo": "fixture-org/app",
+                                   "filename": "story.yml"})
+        self.assertIn("rate limit", str(ctx.exception))
+
+
 class TestLabels(unittest.TestCase):
     def test_all_present_missing_empty(self):
         responses = {"labels": {"labels": [
@@ -821,7 +883,7 @@ class TestLabelEnsure(unittest.TestCase):
              "--repo", "fixture-org/app",
              "--force"])
 
-    def test_records_exactly_one_call_with_that_argv(self):
+    def test_records_exactly_one_call_with_named_params(self):
         recorder = RecorderTransport(
             {"label_ensure": {"ok": True, "stderr": None}})
         forge = FP.Forge(recorder)
@@ -833,7 +895,48 @@ class TestLabelEnsure(unittest.TestCase):
         self.assertEqual(len(recorder.calls), 1)
         op, params = recorder.calls[0]
         self.assertEqual(op, "label_ensure")
-        self.assertEqual(params["argv"], expected)
+        # the caller-supplied argv is NOT forwarded — the transport
+        # builds it from the named params only.
+        self.assertNotIn("argv", params)
+        self.assertEqual(params, {
+            "repo": "fixture-org/app", "name": "factory:run",
+            "color": "0E8A16", "description": "kick off"})
+
+
+class TestGhTransportLabelEnsureBuildsArgv(unittest.TestCase):
+    """F-panel: the transport builds the label-ensure argv INSIDE from
+    the named params — a caller-supplied `argv` key is refused."""
+
+    def test_transport_builds_argv_internally(self):
+        stub = _stub_run("")
+        with mock.patch.object(FP.subprocess, "run", stub):
+            result = FP.gh_probe_transport(
+                "label_ensure", {"repo": "fixture-org/app",
+                                 "name": "factory:run", "color": "0E8A16",
+                                 "description": "kick off"})
+        self.assertEqual(result, {"ok": True, "stderr": None})
+        executed = stub.call_args_list[0].args[0]
+        self.assertEqual(
+            executed, FP.build_label_ensure_argv(
+                "fixture-org/app", "factory:run", "0E8A16", "kick off"))
+
+    def test_caller_supplied_argv_refused_nothing_runs(self):
+        stalker = list()  # noqa: F823 (deliberate name — assertion target)
+
+        def noop_run(argv, **kwargs):
+            stalker.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        hostile = ["gh", "label", "create", "pwned", "--repo", "evil/x"]
+        with mock.patch.object(FP.subprocess, "run", side_effect=noop_run):
+            with self.assertRaises(FP.ProbeError) as ctx:
+                FP.gh_probe_transport(
+                    "label_ensure", {"repo": "fixture-org/app",
+                                     "name": "factory:run",
+                                     "color": "0E8A16",
+                                     "description": "x",
+                                     "argv": hostile})
+        self.assertIn("caller-supplied argv", str(ctx.exception))
+        self.assertEqual(stalker, [])  # the hostile argv never executed
 
 
 class TestReadPurity(unittest.TestCase):

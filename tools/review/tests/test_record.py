@@ -799,6 +799,32 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stderr)
         self.assertIn("review record: OK (", check.stdout)
 
+    def test_fixed_accepted_when_commit_touches_a_named_path(self) -> None:
+        finding = self.finding("RC-001", artifact="docs/missing.md:3")
+        finding["required_change"] = ("Add the missing statement to a.txt "
+                                      "(the file that must change).")
+        doc = self.write_findings("review-contract", [finding])
+        disp = self.write_dispositions(
+            [{"id": "RC-001", "disposition": "fixed",
+              "fix_sha": self.fix_a, "evidence": "a.txt gained the statement"}])
+        _, data, _ = self.render_ok(
+            findings=[("review-contract", str(doc))],
+            dispositions=str(disp))
+        self.assertEqual(data["dispositions"][0]["fix_sha"], self.fix_a)
+
+    def test_fixed_refused_when_no_named_path_is_touched(self) -> None:
+        finding = self.finding("RC-001", artifact="docs/missing.md:3")
+        finding["required_change"] = "Add the missing statement to absent.md."
+        doc = self.write_findings("review-contract", [finding])
+        disp = self.write_dispositions(
+            [{"id": "RC-001", "disposition": "fixed",
+              "fix_sha": self.fix_a, "evidence": "unrelated commit"}])
+        proc = self.render(findings=[("review-contract", str(doc))],
+                           dispositions=str(disp))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("does not touch", proc.stderr)
+
+
 
 class TestDispositionShaCoercion(unittest.TestCase):
     """An unquoted all-digit short SHA arrives as an int; it is still a SHA."""
@@ -841,35 +867,6 @@ class RecordPathTests(unittest.TestCase):
     def test_resolve_record_path_joins_relative(self) -> None:
         self.assertEqual(record.resolve_record_path("a/b.yaml", "/tmp/r"),
                          os.path.join("/tmp/r", "a/b.yaml"))
-
-
-class RequiredChangePathTests(_GitFixtureTest):
-    """A doc finding may be fixed in a file named by its required_change."""
-
-    def test_fixed_accepted_when_commit_touches_a_named_path(self) -> None:
-        finding = self.finding("RC-001", artifact="docs/missing.md:3")
-        finding["required_change"] = ("Add the missing statement to a.txt "
-                                      "(the file that must change).")
-        doc = self.write_findings("review-contract", [finding])
-        disp = self.write_dispositions(
-            [{"id": "RC-001", "disposition": "fixed",
-              "fix_sha": self.fix_a, "evidence": "a.txt gained the statement"}])
-        _, data, _ = self.render_ok(
-            findings=[("review-contract", str(doc))],
-            dispositions=str(disp))
-        self.assertEqual(data["dispositions"][0]["fix_sha"], self.fix_a)
-
-    def test_fixed_refused_when_no_named_path_is_touched(self) -> None:
-        finding = self.finding("RC-001", artifact="docs/missing.md:3")
-        finding["required_change"] = "Add the missing statement to absent.md."
-        doc = self.write_findings("review-contract", [finding])
-        disp = self.write_dispositions(
-            [{"id": "RC-001", "disposition": "fixed",
-              "fix_sha": self.fix_a, "evidence": "unrelated commit"}])
-        proc = self.render(findings=[("review-contract", str(doc))],
-                           dispositions=str(disp))
-        self.assertEqual(proc.returncode, 1)
-        self.assertIn("does not touch", proc.stderr)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,44 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: 27cbfea787a79eb3215b6b432ce40ecf43e897984242ab0203872f1845328f60
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: b3b2a6f8faa991cddf2c6f580accf49e36fb4473
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: docs_process
+      artifact_reference: "package:diff@kit-v0.1/architecture.md:241"
+      evidence: "architecture.md §Review lane, Calibration bullet: \"`tools/review/score.py` reports per-lens and combined precision, critical/major recall, unnecessary-revision rate, and approval-escape rate\" — but the Diff stat ships the scorer only as `tools/review/bench/score.py` (new, 558 lines), and every runnable command in the package uses that path: bench README \"python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\" and gate evidence \"command: python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\". build-plan §S3.5a T4 also names the deliverable \"`tools/review/bench/` (...) + `tools/review/score.py`\". T6 acceptance requires \"command-accuracy read; no contradictory paths\"; no scorer exists at the documented path anywhere in the package."
+      required_change: "Resolve the contradictory scorer path: either update kit-v0.1/architecture.md §Review lane (Calibration bullet) and kit-v0.1/build-plan.md §S3.5a T4 to cite tools/review/bench/score.py — the path the bench README and gate evidence actually run — or ship the scorer at the documented tools/review/score.py, so the docs match the shipped commands."
+      actionable: true
+    - id: RC-002
+      severity: blocker
+      rubric_dimension: contract_fidelity
+      artifact_reference: "package:diff@tools/review/bench/score.py:47"
+      evidence: "The shipped scorer imports \"from tools.review.findings import DIMENSIONS, ROLES, SEVERITIES, FindingsError\" (and `load` on the next line), yet no hunk in the Diff ships tools/review/findings.py, tools/review/yamlish.py, tools/review/package.py, or tools/review/record.py — the Diff stat's only tools/review entries are under tools/review/bench/, and Scope records \"allowed_files: all changed files / withheld_files: none / omitted_files: none\" over all 42 changed files, so these modules do not exist in base..head. The frozen plan makes them this slice's deliverables: \"| T1 | Findings schema + strict YAML-subset reader | `tools/review/findings.py` + `tools/review/yamlish.py` + tests |\", \"| T2 | Review package builder | `tools/review/package.py` + tests |\", \"| T3 | Record renderer + disposition ledger | `tools/review/record.py` + tests |\" — no recorded deviation excuses their absence, and architecture.md §Review lane documents them as shipped (\"`tools/review/package.py` builds ONE package file\", \"`tools/review/record.py` renders `review.json` + `REVIEW-<pr>.md`\"). Meanwhile the gate evidence claims verification through the broken import: \"command: python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\" / \"result: baseline frozen in tools/review/bench/baseline.json (17 cases; combined CM detection recall 1.0)\". At the pinned head SHA the scorer cannot import its dependency, so the package's own evidence does not show the calibration baseline — or the acceptance criterion \"Package for a fixture PR is deterministic (byte-identical re-run at the same SHA)\", which depends on the unshipped package.py — was verified."
+      required_change: "Ship the frozen T1–T3 deliverables (tools/review/findings.py, tools/review/yamlish.py, tools/review/package.py, tools/review/record.py with their tests) inside the reviewed base..head range so the scorer's import and the documented builder/renderer resolve at the head SHA and the calibration-baseline and determinism gate claims are reproducible from the shipped tree; or, if they landed outside this range, record the deviation and re-pin the gate evidence to a head SHA at which they exist."
+      actionable: true
+    - id: RC-003
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: "package:diff@tools/review/bench/README.md:4"
+      evidence: "README opening: \"17 ground-truth cases, each a self-contained review artifact that *contains* a planted defect\" — contradicted by the same README's provenance table (\"clean-01 | control — authored clean fixture (guard change)\", \"clean-02 | control — authored clean fixture (docs-only change)\"), its frozen-baseline line \"(17 cases: 13 defective, 2 minor-only, 2 clean)\", and the shipped clean-01.json / clean-02.json answer keys \"\\\"findings\\\": []\". Two of the seventeen cases contain no planted defect."
+      required_change: "Qualify the README's opening sentence so it matches the shipped bench: state that the seed set is 13 defective cases, 2 minor-only cases, and 2 clean controls, rather than asserting every case contains a planted defect."
+      actionable: true
+    - id: RC-004
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: "package:diff@agents/review-contract.agent.md:11"
+      evidence: "The three role packages leave the `architecture` dimension owned by no lens. review-contract: \"You own the judgment for the contract_fidelity, scope, and docs_process dimensions. Behavior, test_quality, security, operational, and architecture are other lenses' dimensions: do not judge them here.\" review-adversary owns \"behavior, test_quality, and operational\" and defers: \"Whatever is wrong under contract_fidelity, scope, docs_process, security, or architecture is a different lens's finding; leave it to that lens.\" review-security owns \"security, behavior, and operational\" and defers: \"Whatever is wrong under contract_fidelity, scope, docs_process, test_quality, or architecture is a different lens's finding; leave it to that lens.\" The union of the three ownership declarations covers every dimension except architecture, which all three route to a lens that does not exist."
+      required_change: "Assign the architecture dimension an owner among the three role packages (or state in each package's stay-out boundary that architecture is deliberately unjudged by the v1 panel), so no dimension is silently dropped by mutual deferral."
+      actionable: true
+    - id: RC-005
+      severity: major
+      rubric_dimension: scope
+      artifact_reference: "package:diff@kit-v0.1/build-plan.md:55"
+      evidence: "The frozen contract's acceptance requires: \"Pilot record for PR #23 exists at the head SHA with zero undispositioned findings; every disposition carries evidence (commit sha or issue link)\" and \"Zero Copilot review requests anywhere in the pilot\"; build-plan §S3.5a adds \"**Pilot:** run the panel on the held S3 slice (PR #23) at its head SHA; disposition the five external findings and every panel finding\" and T7 \"record under `kit-v0.1/reviews/S3.5a/` | zero undispositioned findings; package hash pinned\". No hunk in the Diff touches any pilot record: the Diff stat's 42 files are the three agents/review-*.agent.md role packages, the two docs, and tools/review/bench/** only — nothing under kit-v0.1/reviews/ or stories/<id>/review/ for PR #23 exists at the pinned head SHA in this package. This acceptance criterion is untouched; it is missing scope, not a recorded deviation."
+      required_change: "Ship the PR #23 pilot record (the dispositioned review.json + REVIEW-<pr>.md at the pilot's pinned head SHA, every finding dispositioned with a commit sha or issue link, and evidence of zero external review requests) inside the reviewed range, or record an explicit deviation deferring the pilot acceptance criterion to a named follow-up commit."
+      actionable: true

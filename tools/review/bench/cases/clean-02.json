@@ -1,0 +1,9 @@
+{
+  "id": "clean-02",
+  "title": "Docs-only consistent flag rename",
+  "provenance": "control \u2014 authored clean fixture (docs-only change)",
+  "artifact": "artifacts/clean-02/doc_change.md",
+  "expected": {
+    "findings": []
+  }
+}

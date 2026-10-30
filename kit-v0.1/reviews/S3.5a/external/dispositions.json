@@ -1,0 +1,76 @@
+{
+  "dispositions": [
+    {
+      "id": "EX-001",
+      "disposition": "fixed",
+      "fix_sha": "0939325",
+      "evidence": "All three role packages now stop on Scope.omitted_files (rule omitted-diff) or issue a retrieval request before any verdict."
+    },
+    {
+      "id": "EX-002",
+      "disposition": "fixed",
+      "fix_sha": "0939325",
+      "evidence": "Contract lens carries the omitted-files stop rule and reads omitted_files in its procedure."
+    },
+    {
+      "id": "EX-003",
+      "disposition": "fixed",
+      "fix_sha": "0939325",
+      "evidence": "Security lens carries the omitted-files stop rule and reads omitted_files in its procedure."
+    },
+    {
+      "id": "EX-004",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "record.load_review_lens refuses a stop-block document (render and check); the bench loader refuses a stopped lens instead of scoring zero."
+    },
+    {
+      "id": "EX-005",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "Per-file diffs run under --literal-pathspecs; a star-named file no longer selects siblings or withheld files."
+    },
+    {
+      "id": "EX-006",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "The truncated-input stop rule landed in 0939325 (all three role packages, rule truncated-input); c70bb5e carries the package-side evidence-surface changes this finding's anchor cites."
+    },
+    {
+      "id": "EX-007",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "Scope lists binary_files explicitly; the role packages refuse to count a binary block as reviewed (rule binary-unavailable)."
+    },
+    {
+      "id": "EX-008",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "Empty or whitespace-only --include values are refused by name instead of packaging the whole diff."
+    },
+    {
+      "id": "EX-009",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "Incomplete diffs are explicit in Scope (omitted_files) and the role packages refuse a verdict on them (rule omitted-diff, 0939325); c70bb5e carries the package-side surface change this anchor cites."
+    },
+    {
+      "id": "EX-010",
+      "disposition": "fixed",
+      "fix_sha": "ecfab57",
+      "evidence": "REVIEW-S3.5a.md totals are derived from the two record JSONs: 4 blockers, 25 majors, 7 minors; 28 fixed, 3 rejected, 5 deferred."
+    },
+    {
+      "id": "EX-011",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "findings.load raises FindingsError naming the file and decode problem; both CLI commands exit 1 with no traceback."
+    },
+    {
+      "id": "EX-012",
+      "disposition": "fixed",
+      "fix_sha": "c70bb5e",
+      "evidence": "changed_statuses and numstat_rows use -z and parse NUL-delimited records; quoted/backslash paths get real diffs and correct matching."
+    }
+  ]
+}

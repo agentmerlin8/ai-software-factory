@@ -1,0 +1,93 @@
+schema: review.findings.v1
+review:
+  reviewer: external
+  rubric_version: external-v1
+  package_sha256: 6b486dd58025b36c4e4e895acba60063c0d1b8531f741a50c3e73c29725fecc5
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: c8f13b47b4f8e683abe0c010a87a19cee18a9be2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: EX-001
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: agents/review-adversary.agent.md:31
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): The builder omits whole files in Scope.omitted_files when the diff cap is exceeded; it does not place a truncation marker in the Diff section, so the stop rule never fires and the lens can approve without seeing the omitted hunks."
+      required_change: "Require retrieval or a stop whenever Scope.omitted_files is non-empty, before producing a verdict."
+      actionable: true
+    - id: EX-002
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: agents/review-contract.agent.md:31
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): Same omission surface in the contract lens: omitted files are listed only in Scope, so the truncation stop rule never fires."
+      required_change: "Add the omitted-files stop/retrieval rule to the contract lens."
+      actionable: true
+    - id: EX-003
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: agents/review-security.agent.md:31
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): Same omission surface in the security lens: omitted files are listed only in Scope, so the truncation stop rule never fires."
+      required_change: "Add the omitted-files stop/retrieval rule to the security lens."
+      actionable: true
+    - id: EX-004
+      severity: blocker
+      rubric_dimension: security
+      artifact_reference: tools/review/findings.py:194
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): The valid stop shape is treated as an empty findings list by record.load_review_lens, and compose_record consequently produces APPROVED; check repeats that conversion. A panel that stopped on a package hash mismatch can yield a checked approval."
+      required_change: "Preserve the stop state and refuse to render/check a record when any lens stopped; the bench loader must not score a stopped lens as zero findings."
+      actionable: true
+    - id: EX-005
+      severity: major
+      rubric_dimension: security
+      artifact_reference: tools/review/package.py:212
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): path is passed to Git as a pathspec, not a literal filename. A changed file named src/*.py also selects src/secret.py, so that file's diff can be embedded even when removed by the withheld/allowed filters."
+      required_change: "Use a literal pathspec for each per-file diff."
+      actionable: true
+    - id: EX-006
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: tools/review/package.py:264
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): A contract or gate input exceeding the cap is silently shortened apart from the inline marker, but the role packages have no stop or retrieval rule for truncated inputs, so a reviewer can approve against only the beginning of the spec."
+      required_change: "Refuse truncated required inputs or require retrieval/stop in the role contracts before a verdict."
+      actionable: true
+    - id: EX-007
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: tools/review/package.py:289
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): Binary diffs are replaced with [binary] but are not listed as omitted and do not trigger any lens stop rule, so a changed binary can get an approval though its contents were never reviewable."
+      required_change: "List binary files explicitly and make them unavailable evidence that requires retrieval or a stopped review."
+      actionable: true
+    - id: EX-008
+      severity: blocker
+      rubric_dimension: security
+      artifact_reference: tools/review/package.py:360
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): An empty or whitespace-only --include becomes an empty list, which skips filtering and packages all changed files while Scope still displays an empty included_paths list."
+      required_change: "Reject empty include values so an invalid restrictive scope cannot disclose the entire diff."
+      actionable: true
+    - id: EX-009
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: tools/review/package.py:420
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): When the byte cap omits files, their names appear only in Scope with no truncation marker in Diff; all three role packages look for a marker in Diff, so they can approve a package without reviewing any omitted file."
+      required_change: "Make incomplete diffs force retrieval or a stop before a verdict, and align the package and role instructions."
+      actionable: true
+    - id: EX-010
+      severity: major
+      rubric_dimension: docs_process
+      artifact_reference: kit-v0.1/reviews/S3.5a/REVIEW-S3.5a.md:17
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): The self-review totals do not match the two committed round-1 records: code has 3/15/4 severities and 19/1/2 dispositions, content has 1/10/3 and 9/2/3; five findings were deferred, not three."
+      required_change: "Derive the summary table from the records so the owner reads accurate numbers."
+      actionable: true
+    - id: EX-011
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: tools/review/findings.py:349
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): A findings file containing invalid UTF-8 raises UnicodeDecodeError, which is not an OSError or FindingsError, so both CLI commands print a traceback instead of the promised named refusal."
+      required_change: "Wrap decoding failures in FindingsError."
+      actionable: true
+    - id: EX-012
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: tools/review/package.py:171
+      evidence: "External review on PR #28 (copilot-pull-request-reviewer): Without -z, Git C-quotes paths containing quotes, backslashes, tabs or newlines; those quoted strings are then used as file paths, so the per-file diff is empty and allowed/withheld matching uses the wrong name."
+      required_change: "Request NUL-delimited output and decode the actual paths in both changed_statuses and numstat_rows."
+      actionable: true

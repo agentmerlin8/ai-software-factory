@@ -1,0 +1,16 @@
+{
+  "id": "pr23-02",
+  "title": "Ruleset listing reads a single page",
+  "provenance": "onboarding PR review note \u2014 forge probe ruleset listing",
+  "artifact": "artifacts/pr23-02/list_rulesets.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "operational",
+        "artifact_reference": "artifacts/pr23-02/list_rulesets.py:9"
+      }
+    ]
+  }
+}

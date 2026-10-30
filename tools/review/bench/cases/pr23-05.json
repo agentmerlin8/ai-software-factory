@@ -1,0 +1,16 @@
+{
+  "id": "pr23-05",
+  "title": "Quickstart omits the in-repo --control-home",
+  "provenance": "onboarding PR review note \u2014 quickstart document",
+  "artifact": "artifacts/pr23-05/quickstart.md",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "minor",
+        "rubric_dimension": "docs_process",
+        "artifact_reference": "artifacts/pr23-05/quickstart.md:9"
+      }
+    ]
+  }
+}

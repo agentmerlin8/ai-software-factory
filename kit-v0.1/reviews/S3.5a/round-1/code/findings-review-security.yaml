@@ -1,0 +1,58 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: 133698dd1f5fb12bddb68b8382b98659a0000ca0234e59d61765a765693baec0
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: b3b2a6f8faa991cddf2c6f580accf49e36fb4473
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/package.py:237
+      evidence: "diff_section_block wraps diff bytes as heading + \"```diff\\n\" + text + \"```\" and render_input_block wraps contract/gate file bytes in a ``` fence, with no escaping or refusal of fence-terminating or heading-looking lines inside the embedded content; a hostile commit or hostile contract/gate input whose bytes contain a ``` line or a '## <section>' line breaks out of its block and forges package structure (fake sections, fake verdict or stop text) inside the reviewers' sole evidence surface"
+      required_change: "make embedded content unable to escape its block: emit a fence longer than any fence run present in the payload (or refuse by name any payload containing a line starting with ``` or '## '), in both diff_section_block and render_input_block"
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/package.py:351
+      evidence: "compose_package sets identity_repo = origin from remote_origin_url, which returns git remote get-url origin verbatim, and embeds it as the 'repo:' Identity line; an origin URL with embedded credentials (https://user:token@host/... — common for CI and automated clones) is copied byte-for-byte into the package, a committed, distributed artifact"
+      required_change: "strip any userinfo component (scheme://user:pass@) from the origin URL before embedding it in the Identity section, or refuse by name when the remote URL carries credentials"
+      actionable: true
+    - id: RS-003
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:169
+      evidence: "resolve_record_path is 'return path if os.path.isabs(path) else os.path.join(repo, path)' with no normalization or confinement, and cmd_check feeds it the package path, every reviewer document path, and every gate evidence_path taken from the on-disk review.json; a tampered or hostile record whose stored paths contain ../ segments makes check read arbitrary files outside the repository, and because each read is compared against a recorded sha256 (pass = exit 0, mismatch = named refusal) the attacker also gets a content-confirmation oracle for the traversed file"
+      required_change: "confine record-stored paths at check time: resolve the joined path and refuse by name when it escapes the repository root, and validate the shape of every path field in review.json (no .. segments, no absolute paths unless record_path explicitly produced one) before reading"
+      actionable: true
+    - id: RS-004
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/review/record.py:781
+      evidence: "cmd_check re-verifies hashes, withheld artifacts, fix shas, and re-renders the markdown with render_markdown(data), but never recomputes the verdict: render derives decision as CHANGES_REQUESTED when counts[blocker] or counts[majors], yet check accepts whatever verdict.decision the file carries and only validates it is in DECISIONS via validate_record; editing review.json to decision APPROVED (with blockers still listed) plus the matching markdown line passes check with exit 0, so the lane's core verdict policy is silently unenforced on the verification path"
+      required_change: "in cmd_check, recompute the decision from the record's finding severities exactly as compose_record does and fail with a named refusal when the recorded verdict disagrees"
+      actionable: true
+    - id: RS-005
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:517
+      evidence: "load_prior_rounds stores 'path': os.path.abspath(directory) into prior_rounds, which is written into the committed review.json and rendered into REVIEW-<pr>.md, while record_path's own docstring states 'Records are committed artifacts, so a local absolute path may not leak into them'; local filesystem layout (usernames, home directories, temp paths) leaks into committed records through this field"
+      required_change: "pass prior-round directories through record_path(directory, repo) like every other stored path, so paths inside the repository are recorded repo-relative"
+      actionable: true
+    - id: RS-006
+      severity: blocker
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/package.py:310
+      evidence: "compose_package reads the --withheld list only to render it into the Scope section ('withheld = read_list_file(args.withheld, ...)' feeds render_scope and nothing else); the ## Diff blocks loop over every changed status and embed each file's full diff text, so a file declared withheld — the mechanism for keeping secrets and sensitive artifacts out of the distributed evidence surface — still appears byte-for-byte in the package's Diff section, and the withholding protection claim is false (removing the withheld handling entirely would leave every test green: test_scope_allowed_and_withheld_lists asserts only the Scope listing)"
+      required_change: "exclude withheld paths from the Diff and Diff stat sections when composing the package (emit at most a named placeholder such as '[withheld]'), and add a test that a withheld file's diff bytes do not appear anywhere in the built package"
+      actionable: true
+    - id: RS-007
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:430
+      evidence: "fix_sha_violations accepts a 'fixed' disposition when the commit touches any target in 'targets', and targets is extended by _paths_in_text over the finding's own required_change string ('for named in _paths_in_text(finding.get(\"required_change\", \"\")): if (Path(repo) / named).exists(): targets.append(named)'); whoever authors the findings document controls that text, so citing any repo file the chosen commit happens to touch (e.g. naming README.md in required_change) satisfies the guard without touching the cited artifact, making the 'fixed requires a commit touching the artifact' evidence check bypassable"
+      required_change: "accept only paths that the fix commit actually changed and that are plausibly the cited artifact: require the commit to touch the finding's artifact_reference path, or confine named-path fallbacks to paths inside the same directory as the artifact, and record which target satisfied the check"
+      actionable: true

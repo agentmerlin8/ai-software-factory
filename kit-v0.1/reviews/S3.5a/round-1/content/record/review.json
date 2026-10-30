@@ -1,0 +1,334 @@
+{
+  "base_sha": "152b205b48937a3a12020c02c8378022d088d86e",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "Approval escape is computed per expected location: a finding at a clean file cannot protect a defect elsewhere in the case.",
+      "fix_sha": "eaa65c4",
+      "id": "RA-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Detection matching consumes distinct produced findings per expected finding, so one file-level finding cannot cover several expected defects.",
+      "fix_sha": "eaa65c4",
+      "id": "RA-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Strict critical/major recall now requires the matched produced finding itself to be blocker/major.",
+      "fix_sha": "eaa65c4",
+      "id": "RA-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Unnecessary-revision denominator now includes every case without an expected blocker/major (minor-only cases included).",
+      "fix_sha": "eaa65c4",
+      "id": "RA-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Vacuous-approval surface in the role packages.",
+      "fix_sha": null,
+      "id": "RA-005",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Baseline freeze script / verifiability.",
+      "fix_sha": null,
+      "id": "RA-006",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "The combined block refuses a partial panel: all three lens roles are required.",
+      "fix_sha": "eaa65c4",
+      "id": "RA-007",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "architecture.md calibration bullet now names tools/review/bench/score.py.",
+      "fix_sha": "eaa65c4",
+      "id": "RC-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "tools/review/findings.py is present in pkg-code.md and in the branch at the reviewed head.",
+      "fix_sha": null,
+      "id": "RC-002",
+      "issue": null,
+      "reason": "Package-scope artifact: the code package (hash 133698dd...) ships tools/review/findings.py and the package.py/record.py modules; the content package was scoped to agents+bench+docs so each lens fits a context. The import resolves in the repository."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Bench README opening corrected: 15 defective cases, 2 minor-only cases and 2 clean controls.",
+      "fix_sha": "eaa65c4",
+      "id": "RC-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "The contract lens now owns the architecture dimension (role package updated).",
+      "fix_sha": "eaa65c4",
+      "id": "RC-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "S3 branch b2b2f4d: kit-v0.1/reviews/S3/REVIEW-23.md + four review.json records; issue #24 links it.",
+      "fix_sha": null,
+      "id": "RC-005",
+      "issue": null,
+      "reason": "The pilot record is the deliverable of a separate branch: PR #23's record lives at kit-v0.1/reviews/S3/ on the S3 branch, committed b2b2f4d, because it records that branch's head. It is referenced from the S3.5a PR body and cannot be inside the lane's own diff."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Bench case artifact paths are resolved and confined under the bench directory; traversal refuses.",
+      "fix_sha": "eaa65c4",
+      "id": "RS-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Answer-key separation remains a documented convention.",
+      "fix_sha": null,
+      "id": "RS-002",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:323",
+      "evidence": "approval-escape protection is satisfiable without detecting anything: 'escapes = sum(1 for case in cases.values() if case.defective and case.id not in critical)' where _critical_ids (line 288) collects 'finding.case_id' from any produced blocker/major, and per the README match rule 'a produced finding's case id is the path component immediately after artifacts/ in its artifact_reference'; _case_of never checks the cited file exists or is the case's artifact, so a lens emitting one blocker per case at 'artifacts/<case>/anything:1' drives approval_escape_rate to 0.0 (the baseline's headline protection) while detecting zero planted defects, and no test fails",
+      "id": "RA-001",
+      "lens": "review-adversary",
+      "required_change": "attribute case-level criticality only when the produced finding's artifact tail matches the case's declared artifact (or an expected finding key), and add a scorer test that a per-case blocker spray citing a non-artifact file leaves approval_escape_rate at 1.0",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:438",
+      "evidence": "every detection metric is inflatable by file-level spray: '_location_metrics' does 'if not here: continue' then 'for expected in items: detected += 1', so one produced finding at a (case, file) key marks ALL expected findings at that file detected; cm_detected needs only 'any(finding.severity in CRITICAL_MAJOR for finding in here)' and dim_ok/sev_ok only 'any(...)' across findings at the key - so one major per artifact file plus one finding per dimension achieves detection_recall, critical_major_detection_recall (the gate evidence's 'combined CM detection recall 1.0'), dimension_agreement and severity_agreement near 1.0 with no defect-specific content; only precision drops, which the README already concedes ('The panel is voluminous; the lane must not be sold as low-noise')",
+      "id": "RA-002",
+      "lens": "review-adversary",
+      "required_change": "credit detection per expected finding only when a produced finding at the key plausibly corresponds to it (at minimum require dimension or a distinct match per expected finding rather than any-finding-at-file), and add a scorer test proving one unrelated finding at the right file does not yield detection_recall 1.0",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:312",
+      "evidence": "strict critical/major recall ignores the produced severity: 'cm_matched = sum(1 for key in matched if expected_index[key].severity in CRITICAL_MAJOR)' credits an expected major matched by an info-severity produced finding (README: 'a produced finding that matches an expected major with severity info counts as matched'), so a lens that downgrades every blocker/major to info still reports critical_major_recall up to 1.0 while every per-case decision stays APPROVED because _critical_ids filters on produced severity",
+      "id": "RA-003",
+      "lens": "review-adversary",
+      "required_change": "count a critical/major expected finding as matched only when the matching produced finding itself carries severity blocker or major, or report severity-deflated matches as a separate metric, with a scorer test for the info-tagged-major case",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:320",
+      "evidence": "false blockers on minor-only cases are invisible to the unnecessary-revision metric and the text render contradicts it: 'unnecessary = sum(1 for case in cases.values() if not case.expected and case.id in critical)' counts only empty-expected cases, while render_text labels minor-only cases as clean ('kind = \"defective\" if report[\"defective_cases_map\"][case_id] else \"clean\"', line 498) and prints '(unnecessary)' when they are CHANGES_REQUESTED - so a produced blocker on fn23 or pr23-05 renders as '(unnecessary)' in the decision list while unnecessary_revisions stays 0 and the frozen rate reads 0.0",
+      "id": "RA-004",
+      "lens": "review-adversary",
+      "required_change": "include minor-only cases in the false-positive denominator (count any produced blocker/major on a non-defective case as an unnecessary revision), align render_text's '(unnecessary)' label with the metric, and add a scorer test for a blocker produced on a minor-only case",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@agents/review-adversary.agent.md:44",
+      "evidence": "a vacuous review fully satisfies the role package: step 9 says 'set the decision - APPROVED only when the findings list is empty', and the output contract requires only the seven finding keys per finding plus the identity fields - a reviewer that skips steps 4-7 entirely and writes the skeleton document with 'findings: []' produces a byte-shape-valid APPROVED document indistinguishable from a genuine clean review; no artifact (per-hunk coverage, enumerated assertions/guards with dispositions, quoted diff evidence of the walk) asserts that the diff was read or that any analysis happened, and the record layer enforces dispositions only, so the failure mode of a never-performed review is unhandled down the lane's own evidence path",
+      "id": "RA-005",
+      "lens": "review-adversary",
+      "required_change": "require a positive review artifact in each lens output contract - e.g. a per-file coverage list or the step-5 assertion/guard enumeration with a one-line disposition each - that the findings loader refuses when absent, so an empty findings list must be earned and is machine-checkable",
+      "rubric_dimension": "operational",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/README.md:158",
+      "evidence": "the frozen baseline that gates lane promotion is hand-stored and unverifiable: 'baseline.json is not written by the scorer - the orchestrator stores it after a lens run', and baseline.json's own bench block cites a package (package_sha256 20cbd558..., base f4e140f4, head ac4b7619) whose lens outputs are nowhere in the package, so the headline numbers (combined CM detection recall 1.0, escape rate 0.0) could be typed by hand and nothing in the diff recomputes or refuses them; the promotion guard architecture.md asserts ('a lane change is promoted only against it') rests on a file no deterministic step produces",
+      "id": "RA-006",
+      "lens": "review-adversary",
+      "required_change": "make the scorer (or a wrapper) the only writer of baseline.json - emit it from --json with the bench identity attached - and add a verify mode that recomputes the stored baseline from committed lens outputs and refuses on drift, with a test that a hand-edited baseline.json fails verification",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:538",
+      "evidence": "the combined block silently accepts a partial panel: main() requires only 'at least one --outputs ROLE=FILE is required' (line 538-539) and evaluate() unions matches and critical ids over whatever lenses were passed, so a run with one or two lenses - or with a lens that emitted a stop block instead of findings, whose handling lives in the un-shipped tools.review.findings.load this file imports (line 47-48) - still prints a 'combined' row and a combined approval_escape_rate with no incomplete-panel signal; the frozen baseline's combined 1.0/0.0 cannot be distinguished from a full three-lens result",
+      "id": "RA-007",
+      "lens": "review-adversary",
+      "required_change": "refuse (or loudly flag in both output modes) a combined report computed from fewer than all three ROLES or from a lens document carrying a stop block, and add a scorer test that a two-lens run cannot present itself as combined",
+      "rubric_dimension": "operational",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@kit-v0.1/architecture.md:241",
+      "evidence": "architecture.md \u00a7Review lane, Calibration bullet: \"`tools/review/score.py` reports per-lens and combined precision, critical/major recall, unnecessary-revision rate, and approval-escape rate\" \u2014 but the Diff stat ships the scorer only as `tools/review/bench/score.py` (new, 558 lines), and every runnable command in the package uses that path: bench README \"python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\" and gate evidence \"command: python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\". build-plan \u00a7S3.5a T4 also names the deliverable \"`tools/review/bench/` (...) + `tools/review/score.py`\". T6 acceptance requires \"command-accuracy read; no contradictory paths\"; no scorer exists at the documented path anywhere in the package.",
+      "id": "RC-001",
+      "lens": "review-contract",
+      "required_change": "Resolve the contradictory scorer path: either update kit-v0.1/architecture.md \u00a7Review lane (Calibration bullet) and kit-v0.1/build-plan.md \u00a7S3.5a T4 to cite tools/review/bench/score.py \u2014 the path the bench README and gate evidence actually run \u2014 or ship the scorer at the documented tools/review/score.py, so the docs match the shipped commands.",
+      "rubric_dimension": "docs_process",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:47",
+      "evidence": "The shipped scorer imports \"from tools.review.findings import DIMENSIONS, ROLES, SEVERITIES, FindingsError\" (and `load` on the next line), yet no hunk in the Diff ships tools/review/findings.py, tools/review/yamlish.py, tools/review/package.py, or tools/review/record.py \u2014 the Diff stat's only tools/review entries are under tools/review/bench/, and Scope records \"allowed_files: all changed files / withheld_files: none / omitted_files: none\" over all 42 changed files, so these modules do not exist in base..head. The frozen plan makes them this slice's deliverables: \"| T1 | Findings schema + strict YAML-subset reader | `tools/review/findings.py` + `tools/review/yamlish.py` + tests |\", \"| T2 | Review package builder | `tools/review/package.py` + tests |\", \"| T3 | Record renderer + disposition ledger | `tools/review/record.py` + tests |\" \u2014 no recorded deviation excuses their absence, and architecture.md \u00a7Review lane documents them as shipped (\"`tools/review/package.py` builds ONE package file\", \"`tools/review/record.py` renders `review.json` + `REVIEW-<pr>.md`\"). Meanwhile the gate evidence claims verification through the broken import: \"command: python3 tools/review/bench/score.py --bench tools/review/bench --outputs ...\" / \"result: baseline frozen in tools/review/bench/baseline.json (17 cases; combined CM detection recall 1.0)\". At the pinned head SHA the scorer cannot import its dependency, so the package's own evidence does not show the calibration baseline \u2014 or the acceptance criterion \"Package for a fixture PR is deterministic (byte-identical re-run at the same SHA)\", which depends on the unshipped package.py \u2014 was verified.",
+      "id": "RC-002",
+      "lens": "review-contract",
+      "required_change": "Ship the frozen T1\u2013T3 deliverables (tools/review/findings.py, tools/review/yamlish.py, tools/review/package.py, tools/review/record.py with their tests) inside the reviewed base..head range so the scorer's import and the documented builder/renderer resolve at the head SHA and the calibration-baseline and determinism gate claims are reproducible from the shipped tree; or, if they landed outside this range, record the deviation and re-pin the gate evidence to a head SHA at which they exist.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/README.md:4",
+      "evidence": "README opening: \"17 ground-truth cases, each a self-contained review artifact that *contains* a planted defect\" \u2014 contradicted by the same README's provenance table (\"clean-01 | control \u2014 authored clean fixture (guard change)\", \"clean-02 | control \u2014 authored clean fixture (docs-only change)\"), its frozen-baseline line \"(17 cases: 13 defective, 2 minor-only, 2 clean)\", and the shipped clean-01.json / clean-02.json answer keys \"\\\"findings\\\": []\". Two of the seventeen cases contain no planted defect.",
+      "id": "RC-003",
+      "lens": "review-contract",
+      "required_change": "Qualify the README's opening sentence so it matches the shipped bench: state that the seed set is 13 defective cases, 2 minor-only cases, and 2 clean controls, rather than asserting every case contains a planted defect.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@agents/review-contract.agent.md:11",
+      "evidence": "The three role packages leave the `architecture` dimension owned by no lens. review-contract: \"You own the judgment for the contract_fidelity, scope, and docs_process dimensions. Behavior, test_quality, security, operational, and architecture are other lenses' dimensions: do not judge them here.\" review-adversary owns \"behavior, test_quality, and operational\" and defers: \"Whatever is wrong under contract_fidelity, scope, docs_process, security, or architecture is a different lens's finding; leave it to that lens.\" review-security owns \"security, behavior, and operational\" and defers: \"Whatever is wrong under contract_fidelity, scope, docs_process, test_quality, or architecture is a different lens's finding; leave it to that lens.\" The union of the three ownership declarations covers every dimension except architecture, which all three route to a lens that does not exist.",
+      "id": "RC-004",
+      "lens": "review-contract",
+      "required_change": "Assign the architecture dimension an owner among the three role packages (or state in each package's stay-out boundary that architecture is deliberately unjudged by the v1 panel), so no dimension is silently dropped by mutual deferral.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@kit-v0.1/build-plan.md:55",
+      "evidence": "The frozen contract's acceptance requires: \"Pilot record for PR #23 exists at the head SHA with zero undispositioned findings; every disposition carries evidence (commit sha or issue link)\" and \"Zero Copilot review requests anywhere in the pilot\"; build-plan \u00a7S3.5a adds \"**Pilot:** run the panel on the held S3 slice (PR #23) at its head SHA; disposition the five external findings and every panel finding\" and T7 \"record under `kit-v0.1/reviews/S3.5a/` | zero undispositioned findings; package hash pinned\". No hunk in the Diff touches any pilot record: the Diff stat's 42 files are the three agents/review-*.agent.md role packages, the two docs, and tools/review/bench/** only \u2014 nothing under kit-v0.1/reviews/ or stories/<id>/review/ for PR #23 exists at the pinned head SHA in this package. This acceptance criterion is untouched; it is missing scope, not a recorded deviation.",
+      "id": "RC-005",
+      "lens": "review-contract",
+      "required_change": "Ship the PR #23 pilot record (the dispositioned review.json + REVIEW-<pr>.md at the pilot's pinned head SHA, every finding dispositioned with a commit sha or issue link, and evidence of zero external review requests) inside the reviewed range, or record an explicit deviation deferring the pilot acceptance criterion to a named follow-up commit.",
+      "rubric_dimension": "scope",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/score.py:202",
+      "evidence": "load_bench validates a case's artifact_reference path with a string prefix check only \u2014 'if not ref_path.startswith(f\"artifacts/{case_id}/\")' at line 197 \u2014 then joins it unnormalized at line 202, 'target = cases_dir / ref_path', and reads the joined path's contents at line 205, 'len(target.read_text(encoding=\"utf-8\").splitlines())'. A case JSON whose artifact_reference is 'artifacts/<id>/../../../../etc/passwd:1' passes every check in the hunk and causes a read of a file outside cases/; the 'artifact' key has the same exposure (segment check at line 155, existence probe '(cases_dir / artifact).is_file()' at line 217). Removing or widening the prefix check leaves no other confinement standing.",
+      "id": "RS-001",
+      "lens": "review-security",
+      "required_change": "confine both 'artifact' and each expected 'artifact_reference' path: reject any path containing a '..' segment, and after joining under cases_dir resolve the result and verify it is cases_dir itself or beneath it (trailing-separator boundary comparison) before is_file()/read_text() is called; refuse the case with a named BenchError otherwise",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/review/bench/README.md:22",
+      "evidence": "the blind-review separation of the answer key from the review input is an unenforced convention: 'Packaging note: package `cases/artifacts/**` for the lenses; never ship `cases/*.json` with the review input (it is the answer key).' No shipped code in the diff checks this \u2014 score.py validates lens outputs (author label, schema) but never verifies the packaged input excluded cases/*.json. Concrete production change that leaves every check green: package cases/*.json alongside the artifacts; a lens can then read each expected.findings answer key, echo the ground truth, and the frozen baseline metrics (combined critical/major detection recall 1.0 in baseline.json) inflate silently while the scorer still exits 0.",
+      "id": "RS-002",
+      "lens": "review-security",
+      "required_change": "make the answer-key containment checkable rather than conventional: have the packaging path record which files were packaged (or hash the packaged input set) and have score.py refuse, with a named error, to score a run whose packaged input included any cases/*.json answer key",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5a/round-1/gate-evidence.md",
+      "evidence_sha256": "0d0c18608d880cb2cc0da61e992035e91dc308bc4cabf0b46c5c36606891bed1",
+      "exit": 0,
+      "gate": "deterministic-gates"
+    }
+  ],
+  "head_sha": "b3b2a6f8faa991cddf2c6f580accf49e36fb4473",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 1
+  },
+  "open_findings": [
+    "RA-005",
+    "RA-006",
+    "RC-002",
+    "RC-005",
+    "RS-002"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3.5a/round-1/pkg-content.md",
+    "sha256": "27cbfea787a79eb3215b6b432ce40ecf43e897984242ab0203872f1845328f60"
+  },
+  "pr": 28,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3.5a/round-1/content/findings-review-adversary.yaml",
+      "document_sha256": "14d347b34227558007e407e1ea067700b8b4b00ebc0a534dd500563fbddb7bda",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5a/round-1/content/findings-review-contract.yaml",
+      "document_sha256": "584c8d12bca0c31c2798a8cee3455d61a8f298e09b37de14d5058f524f15468b",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5a/round-1/content/findings-review-security.yaml",
+      "document_sha256": "b5bbfae1b6df2a5b92f612091bbed839587d0a1c5cb1e8f140774ccfce027cc0",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v1",
+  "story": "S3.5a",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 1,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 0,
+    "loop": 1,
+    "loop_cap": 2,
+    "majors": 10,
+    "minors": 3
+  }
+}

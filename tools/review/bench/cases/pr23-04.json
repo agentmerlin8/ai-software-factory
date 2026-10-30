@@ -1,0 +1,16 @@
+{
+  "id": "pr23-04",
+  "title": "Gate UI reader passes any JSON through to .get",
+  "provenance": "onboarding PR review note \u2014 pre-review gate UI-results reader",
+  "artifact": "artifacts/pr23-04/gate_ui.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "operational",
+        "artifact_reference": "artifacts/pr23-04/gate_ui.py:14"
+      }
+    ]
+  }
+}

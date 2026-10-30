@@ -1,0 +1,16 @@
+{
+  "id": "fn25",
+  "title": "Twin guards with the shared prefix-escape defect",
+  "provenance": "field note 25 \u2014 twin request-path guards note",
+  "artifact": "artifacts/fn25/guards.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "blocker",
+        "rubric_dimension": "security",
+        "artifact_reference": "artifacts/fn25/guards.py:24"
+      }
+    ]
+  }
+}

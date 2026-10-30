@@ -1,0 +1,88 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "architecture.md calibration bullet now names tools/review/bench/score.py."
+    },
+    {
+      "id": "RC-002",
+      "disposition": "rejected",
+      "reason": "Package-scope artifact: the code package (hash 133698dd...) ships tools/review/findings.py and the package.py/record.py modules; the content package was scoped to agents+bench+docs so each lens fits a context. The import resolves in the repository.",
+      "evidence": "tools/review/findings.py is present in pkg-code.md and in the branch at the reviewed head."
+    },
+    {
+      "id": "RC-003",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Bench README opening corrected: 15 defective cases, 2 minor-only cases and 2 clean controls."
+    },
+    {
+      "id": "RC-004",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "The contract lens now owns the architecture dimension (role package updated)."
+    },
+    {
+      "id": "RC-005",
+      "disposition": "rejected",
+      "reason": "The pilot record is the deliverable of a separate branch: PR #23's record lives at kit-v0.1/reviews/S3/ on the S3 branch, committed b2b2f4d, because it records that branch's head. It is referenced from the S3.5a PR body and cannot be inside the lane's own diff.",
+      "evidence": "S3 branch b2b2f4d: kit-v0.1/reviews/S3/REVIEW-23.md + four review.json records; issue #24 links it."
+    },
+    {
+      "id": "RA-001",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Approval escape is computed per expected location: a finding at a clean file cannot protect a defect elsewhere in the case."
+    },
+    {
+      "id": "RA-002",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Detection matching consumes distinct produced findings per expected finding, so one file-level finding cannot cover several expected defects."
+    },
+    {
+      "id": "RA-003",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Strict critical/major recall now requires the matched produced finding itself to be blocker/major."
+    },
+    {
+      "id": "RA-004",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Unnecessary-revision denominator now includes every case without an expected blocker/major (minor-only cases included)."
+    },
+    {
+      "id": "RA-005",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "evidence": "Vacuous-approval surface in the role packages."
+    },
+    {
+      "id": "RA-006",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "evidence": "Baseline freeze script / verifiability."
+    },
+    {
+      "id": "RA-007",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "The combined block refuses a partial panel: all three lens roles are required."
+    },
+    {
+      "id": "RS-001",
+      "disposition": "fixed",
+      "fix_sha": "eaa65c4",
+      "evidence": "Bench case artifact paths are resolved and confined under the bench directory; traversal refuses."
+    },
+    {
+      "id": "RS-002",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/27",
+      "evidence": "Answer-key separation remains a documented convention."
+    }
+  ]
+}

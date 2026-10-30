@@ -1,0 +1,187 @@
+# Review calibration bench
+
+A stand-alone fixture for calibrating the three review lenses:
+17 ground-truth cases — 15 defective (13 blocker/major, 2 minor-only)
+plus 2 clean controls. Each case is a self-contained review artifact;
+the defective ones *contain* a planted defect, plus the findings a
+correct review of that artifact would produce. The companion scorer
+(`score.py`) compares what each lens actually produced against that
+ground truth. The combined block requires all three lens roles —
+`review-contract`, `review-adversary`, `review-security` — and the
+scorer refuses a partial panel.
+
+The artifacts are blind-review fixtures: they hold the defect only —
+never the lesson, never the note the case came from.
+
+## Layout
+
+- `cases/<id>.json` — case metadata (id, title, provenance, artifact)
+  plus the **answer key** (`expected.findings`). This file is scoring
+  data, not review input.
+- `cases/artifacts/<id>/<file>` — the review input. One directory per
+  case id, so the path component right after `artifacts/` in any
+  artifact_reference names the case.
+- `score.py` — the scorer.
+
+Packaging note: package `cases/artifacts/**` for the lenses; never ship
+`cases/*.json` with the review input (it is the answer key).
+
+## Provenance (one line per case)
+
+| case     | provenance |
+|----------|------------|
+| fn18     | field note 18 — UI slice manifest EXTEND review note |
+| fn19     | field note 19 — confirmation dialog review note |
+| fn20     | field note 20 — gate script collision scan review note |
+| fn21     | field note 21 — contract types refresh review note |
+| fn22     | field note 22 — test plan verification review note |
+| fn23     | field note 23 — review lane process note |
+| fn24a    | field note 24 — contract config presence test note (a) |
+| fn24b    | field note 24 — path containment guard note (b) |
+| fn24c    | field note 24 — queue drain helper note (c) |
+| fn25     | field note 25 — twin request-path guards note |
+| pr23-01  | onboarding PR review note — forge probe ruleset selector |
+| pr23-02  | onboarding PR review note — forge probe ruleset listing |
+| pr23-03  | onboarding PR review note — forge probe ruleset selection |
+| pr23-04  | onboarding PR review note — pre-review gate UI-results reader |
+| pr23-05  | onboarding PR review note — quickstart document |
+| clean-01 | control — authored clean fixture (guard change) |
+| clean-02 | control — authored clean fixture (docs-only change) |
+
+## Adjudication rules
+
+- **Severity mapping:** `blocker` counts as critical for every metric
+  bucket. The `critical_major_*` metrics cover severities
+  `{blocker, major}`.
+- **Defective case:** any expected finding with severity blocker or
+  major. An **approval escape** is a defective case for which no
+  produced blocker/major finding sits at any of the case's expected
+  blocker/major artifact locations — protection is computed per
+  expected finding location, so a produced blocker/major at a clean
+  file (or any other file of the same case) protects nothing.
+- **Unnecessary revision:** a case with **no expected blocker/major
+  finding** — a clean case or a minor-only case — for which the lens
+  produced at least one blocker/major finding (it would have requested
+  changes on a case that needs none).
+- **Match rule:** a produced finding's case id is the path component
+  immediately after `artifacts/` in its artifact_reference; it matches
+  an expected finding when case id, artifact file (the tail of the
+  path), and rubric_dimension all agree. Strict `critical_major_*`
+  credit additionally requires the produced finding that made the match
+  to be blocker/major itself.
+- **Per-case decision (combined):** derived from the findings for that
+  case — `CHANGES_REQUESTED` if any lens produced blocker/major for it,
+  otherwise `APPROVED`.
+
+## Matching rule limits
+
+- Matching is path-level: line numbers, severities, and evidence text do
+  not participate. A produced finding on line 3 of the right file still
+  matches the expected finding cited at line 21.
+- One expected finding per (case, artifact file, rubric_dimension); the
+  loader refuses a case that needs two indistinguishable findings.
+- A produced reference without an `artifacts/` component
+  (`package:diff@...` or any repo-root path) is unattributable: it adds
+  to `produced` and lowers precision but can never match.
+- Duplicates dent precision only: the same expected finding matched
+  twice counts once, and the extra produced finding is still counted in
+  `produced`.
+- Location-level detection pairs produced and expected findings
+  **one-to-one** per artifact file: two expected findings at one file
+  need two produced findings; a single produced finding cannot cover
+  both. Dimension-agreeing produced findings pair first, so tag
+  agreement is measured when the tag is present.
+- Severity still gates protection: a produced finding that matches an
+  expected major with severity `info` counts as matched but earns no
+  strict critical/major credit and does not protect the case from an
+  approval escape.
+
+## Metrics (per lens and combined)
+
+| metric | meaning |
+|--------|---------|
+| `produced` | findings the lens emitted (all, including unattributable ones) |
+| `matched` | produced findings that matched an expected finding |
+| `precision` | matched / produced (0 when nothing produced) |
+| `recall` | matched / all expected findings across cases |
+| `critical_major_expected` | expected findings with severity blocker or major |
+| `critical_major_matched` | of those, how many were matched **by a produced blocker/major finding** (a produced info/minor match earns no credit) |
+| `critical_major_recall` | critical_major_matched / critical_major_expected |
+| `clean_cases` | cases with an empty expected finding list |
+| `unnecessary_revisions` | cases **without an expected blocker/major** (clean or minor-only) where the lens produced blocker/major |
+| `unnecessary_revision_rate` | unnecessary_revisions / cases without an expected blocker/major |
+| `defective_cases` | cases with any expected blocker/major finding |
+| `approval_escapes` | defective cases with no produced blocker/major at any of their expected blocker/major locations |
+| `approval_escape_rate` | approval_escapes / defective_cases |
+
+Minor-only cases are approvable under the verdict policy and stay out of
+`defective_cases` (the escape denominator), but they count in the
+unnecessary-revision denominator: requesting changes on any case with no
+expected blocker/major — a clean control or a minor-only case — is an
+unnecessary revision. They still count in `recall` and in severity
+discipline.
+
+Rates are rounded to 4 decimals in both output modes. The combined block
+is the union of lenses for matching and critical coverage; a case
+escapes only when no lens raised blocker/major at one of its expected
+blocker/major locations. The combined block requires **all three lens
+roles** (`review-contract`, `review-adversary`, `review-security`): the
+scorer refuses a partial panel with exit 1.
+
+## How to run
+
+1. Package the bench once per lens (each lens reviews the same packaged
+   `cases/artifacts/**` input and writes one findings document).
+2. Score:
+
+```sh
+python3 tools/review/bench/score.py \
+  --bench tools/review/bench \
+  --outputs review-contract=contract.json \
+  --outputs review-adversary=adversary.json \
+  --outputs review-security=security.json
+```
+
+`--bench` may be any absolute path (the module also runs as a plain file
+path from any working directory). Add `--json` for a single
+`review.bench.v1` object. Exit codes: `0` inputs parsed and metrics
+printed (metrics are data — zero matches is still exit 0), `1`
+unreadable/invalid input, `2` usage errors. A findings document whose
+author (`review.reviewer`) disagrees with the `ROLE=` label is refused.
+
+## Frozen baseline (2026-10-29, metric definitions v1.1)
+
+All three lenses ran on `qwen3.8-max` against the bench package `20cbd558…` (17 cases: 13 blocker/major-defective,
+2 minor-only, 2 clean). The machine copy is `baseline.json`. The first table published here (2026-10-28) used the
+pre-correction scorer; these numbers come from the corrected definitions — escapes are per expected location,
+detection consumes distinct produced findings one-to-one, strict critical/major recall requires the produced finding
+itself to be blocker/major, and the unnecessary-revision denominator includes minor-only cases.
+
+| lens | produced | strict precision | strict CM recall | detection recall | detection precision | CM detection recall | dimension agreement | unnecessary revision | escape rate |
+|---|---|---|---|---|---|---|---|---|---|
+| review-contract | 13 | 0.2308 | 0.1429 | 0.8125 | 1.0000 | 0.7143 | 0.2308 | 0.25 | 0.2308 |
+| review-adversary | 22 | 0.4545 | 0.6429 | 0.8750 | 0.6364 | 0.8571 | 0.6429 | 0.25 | 0.0000 |
+| review-security | 13 | 0.4615 | 0.4286 | 0.6250 | 0.7692 | 0.6429 | 0.6000 | 0.00 | 0.3077 |
+| combined | 48 | 0.2917 | 0.9286 | 0.9375 | 0.3125 | 0.9286 | 0.9333 | 0.25 | 0.0000 |
+
+Reading it honestly:
+
+- **Combined critical/major detection recall is 0.93** — 13 of 14 blocker/major defects were raised at the correct
+  artifact by at least one lens. That is the property the lane exists to hold; it is not perfect.
+- **Combined detection precision is 0.31** — 48 produced findings for 16 expected. The panel is voluminous; the lane
+  must not be sold as low-noise. Volume is the cost of the three-lens union.
+- **Strict recall understates detection** because dimensions are lens-dependent: the contract lens reports true
+  defects at the right file but tags them `contract_fidelity` (dimension agreement 0.23). Strict metrics measure tag
+  choice; promote changes against the detection block first and treat dimension agreement as a separate target.
+- One false blocker landed on a minor-only case (combined unnecessary-revision 0.25); each lens individually escapes
+  on some defective case, and the union closes all of them — that is why the panel is three lenses and not one.
+
+## Refreshing the baseline
+
+`baseline.json` is not written by the scorer — the orchestrator stores
+it after a lens run. To refresh: re-run every lens against the current
+artifact set, capture `--json`, and diff against the stored baseline.
+When a case is re-authored, update its answer key and re-count the
+`artifact_reference` line numbers: the loader refuses out-of-range
+lines, and citations should resolve to the line that actually carries
+the defect.

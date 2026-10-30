@@ -1,0 +1,16 @@
+{
+  "id": "pr23-03",
+  "title": "Ruleset selection ignores the target field",
+  "provenance": "onboarding PR review note \u2014 forge probe ruleset selection",
+  "artifact": "artifacts/pr23-03/select_ruleset.py",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "behavior",
+        "artifact_reference": "artifacts/pr23-03/select_ruleset.py:16"
+      }
+    ]
+  }
+}

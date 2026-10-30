@@ -1,0 +1,16 @@
+{
+  "id": "fn22",
+  "title": "Test plan claims compilation verifies type drift",
+  "provenance": "field note 22 \u2014 test plan verification review note",
+  "artifact": "artifacts/fn22/test-plan.md",
+  "expected": {
+    "findings": [
+      {
+        "id": "E01",
+        "severity": "major",
+        "rubric_dimension": "test_quality",
+        "artifact_reference": "artifacts/fn22/test-plan.md:6"
+      }
+    ]
+  }
+}

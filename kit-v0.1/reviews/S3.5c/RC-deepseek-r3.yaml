@@ -1,0 +1,26 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: 303eb86401cf89e3ba607aec29c1ca5a5eccd1bd13f98cbd7ece70e3659d9f85
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 946bbaef19f8cc0ed5ee504f3dbaf29fa10fc189
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: minor
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/tests/test_record.py:1000
+      evidence: |
+        The acceptance criterion names the concrete default-slice shape: "A 6-document dual panel renders a v2 record; the same defect raised by both models appears twice with agreement: 2, and each entry is dispositioned separately." Every dual panel the Diff's tests actually render is smaller than the named shape — the largest is a four-document panel (two models × two lenses, no review-security doc):
+        ```
+        +        out, _, _ = self.render_ok(
+        +            panel=[("review-contract", "qwen3.8-max", str(a_c)),
+        +                   ("review-adversary", "qwen3.8-max", str(a_a)),
+        +                   ("review-contract", "deepseek-v4-pro-0813", str(b_c)),
+        +                   ("review-adversary", "deepseek-v4-pro-0813", str(b_a))],
+        +            dispositions=str(self.write_dispositions([])))
+        ```
+        No artifact in the package renders the six-document panel (three internal lenses × two models) that the acceptance criterion names and that the lane will actually run; the twin-agreement case is proven with two documents and the symmetry guard with four. The panel mechanics are size-agnostic in code (check_panel_symmetry iterates models), so this is an evidence gap, not an implementation defect.
+      required_change: "Add a suite artifact that renders the six-document dual panel (review-contract, review-adversary, review-security × two models) and asserts a review.record.v2 record with namespaced per-model finding ids, agreement: 2 on the twin pairs, and each twin entry dispositioned independently, matching the acceptance criterion's named shape."
+      actionable: true

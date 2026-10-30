@@ -1,0 +1,51 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: fce6e7b835e9f3f37cf5406868955eaca21e51dbeba9a629d8cbf512a643c8bf
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 6a4c8a073fd1476e2bfee758b62b1c63143c8afc
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:1035
+      evidence: "cmd_check picks its semantics from the record's own text: `legacy = data[\"schema\"] == LEGACY_SCHEMA`, and every v2 guard is behind `if not legacy:` — `check_panel_symmetry(data[\"reviewers\"])`, `annotate_agreement(derived_findings)`, namespaced id derivation, and the model/location_key/agreement keys in FINDING_KEYS. Re-labeling a stored dual-model v2 record as `review.record.v1` (lane version 1, strip `@model` suffixes and the three v2 finding fields) routes it past all of them. The legacy path also replaced v1's duplicate-role refusal with `seen_slots = (role, model)`, so a v1-claiming record with two reviewers of the same role but different models is accepted — real v1 semantics refused `duplicate reviewer role`. The only legacy test, test_check_accepts_legacy_v1_record, downgrades a single-model render, so no test covers a dual-model record claiming v1 and the tamper-evasion stays green."
+      required_change: "make check refuse a record whose schema claim contradicts its own content — e.g. reject `review.record.v1` when any finding id carries an `@model` suffix, when findings carry model/location_key/agreement fields, or when the same role appears under two models on the legacy path (restore the v1 duplicate-role refusal for legacy records) — anchored at the `legacy = data[\"schema\"] == LEGACY_SCHEMA` branch in cmd_check, plus a test that a relabeled dual-model record fails check."
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:1038
+      evidence: "cmd_check re-derives findings from `data[\"reviewers\"]` — the reviewer list stored in the record itself — and `check_panel_symmetry` compares only the models present there. Deleting model B wholesale from stored JSON (its reviewer entries, its `@modelB` findings, its dispositions, and recomputing the verdict over the remaining severities) leaves derivation and storage perfectly consistent: check passes, and a blocker raised only by the second model — which the contract says 'can add a finding, never cancel one' — is silently cancelled. No test in the diff tampers a dual-panel record by dropping a whole model; test_dual_panel_check_rejects_tampered_agreement only weakens an agreement count, so this defeat path stays green."
+      required_change: "add a check-side test that a dual-panel record with one model's reviewers, findings and dispositions deleted fails `check` (e.g. by refusing a verdict recomputation mismatch or requiring symmetric coverage against a named panel roster), and the corresponding enforcement in cmd_check."
+      actionable: true
+    - id: RA-003
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/tests/test_record.py:885
+      evidence: "the contract requires 'each entry is dispositioned separately' for a same-defect pair, but every dual-panel test dispositions the two entries identically: test_reviewer_models_recorded_in_json_and_markdown rejects both `RC-001@qwen3.8-max` and `RC-001@deepseek-v4-pro-0813` with the same reason/evidence, and test_dual_panel_check_rejects_tampered_agreement marks both `fixed` with the same `fix_sha`. A production change that resolves dispositions by `location_key` (collapsing an agreeing pair onto one disposition) instead of by the namespaced id would leave every assertion in both tests green — no test has one entry rejected and its twin deferred/fixed."
+      required_change: "add a dual-panel test where the two same-location findings carry different dispositions (e.g. `RC-001@modelA` rejected, `RC-001@modelB` deferred) and assert both render and check per-entry, so disposition-by-location-key collapse fails."
+      actionable: true
+    - id: RA-004
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:396
+      evidence: "collect_reviewers merges both models' findings into one list and the verdict is computed over it, delivering the contract's 'any blocker/major from either model forces CHANGES REQUESTED; a second model can add a finding, never cancel one' — but no test exercises the asymmetric case: test_reviewer_models_recorded_in_json_and_markdown has only `info` findings from both models, and test_dual_panel_check_rejects_tampered_agreement has `major` from BOTH models. A production change narrowing the verdict to the first model's findings (or requiring severity agreement across models before it counts) would keep every test in the diff green."
+      required_change: "add a test where exactly one model raises a blocker or major (the other model's document approves with zero findings) and assert the record's verdict is CHANGES REQUESTED and survives `check`."
+      actionable: true
+    - id: RA-005
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:313
+      evidence: "check_panel_symmetry builds coverage from every reviewer entry — `coverage.setdefault(reviewer[\"model\"], set()).add(reviewer[\"role\"])` — with no exclusion for the `external` role, while the contract's symmetry rule is scoped to internal lenses ('every internal lens runs once per model'). A legitimate dual panel plus one ingested external findings document under a single model (`external@modelA`) makes the lens sets differ and the render refuses with 'incomplete panel', even though both models fully cover the internal lenses; the only symmetry test uses internal roles, so the false refusal is untested in either direction."
+      required_change: "restrict check_panel_symmetry's coverage map to internal roles (skip `external`), or name the intended external handling, and add a test that a symmetric internal panel with a single-model external document renders."
+      actionable: true
+    - id: RA-006
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:687
+      evidence: "two new CLI guards have no test: (1) `elif args.model: fail(\"review record: --model is not accepted with ROLE@MODEL=FILE documents...\")` — deleting this branch silently ignores `--model` on inline-form runs and nothing fails; (2) `qualify = len({model for _, model, _ in specs}) > 1` — a single-model panel given in ROLE@MODEL form keeps plain ids, and a production change that always qualifies (or never qualifies) ids is only pinned for the two-model and legacy forms, not for the inline single-model form."
+      required_change: "add tests that `--findings ROLE@MODEL=FILE` together with any `--model ROLE=MODEL` exits non-zero with the named refusal, and that a single-model inline panel renders plain (un-namespaced) finding ids."
+      actionable: true

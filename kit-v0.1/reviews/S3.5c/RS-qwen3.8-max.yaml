@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: fce6e7b835e9f3f37cf5406868955eaca21e51dbeba9a629d8cbf512a643c8bf
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 6a4c8a073fd1476e2bfee758b62b1c63143c8afc
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:657
+      evidence: "inline --findings parsing validates the model only as non-blank via strip() ('if not role or not model.strip():', line 651) but then stores and uses the raw unstripped string ('specs.append((role, model, path))', line 657; later 'f\"{finding['id']}@{model}\"'); two slots '(role, \"m\")' and '(role, \"m \")' are distinct tuples, so the duplicate (lens, model) refusal ('if (role, model) in seen: fail') and check_panel_symmetry (equal lens sets per distinct model string, 'len(coverage) <= 1' not taken, sets equal) both pass, rendering one model's document twice as a dual-model panel with 'agreement: 2' - the record no longer 'refuses two documents with the same (lens, model)' as the contract requires, and no test covers a whitespace-aliased model (test_dual_panel_duplicate_slot_refused uses byte-identical model strings)"
+      required_change: "normalize the model string (strip it) before the emptiness check and store/use only the normalized value, or reject a model spec whose raw and stripped forms differ, so alias-differing slot labels cannot bypass the duplicate-slot refusal or manufacture a fake second model"
+      actionable: true
+    - id: RS-002
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:363
+      evidence: "collect_reviewers refuses only identical (role, model) tuples ('if (role, model) in seen: fail') and nothing compares the loaded documents across slots: the same findings file passed twice under two different model labels ('--findings review-contract@m1=F --findings review-contract@m2=F') loads twice, passes check_panel_symmetry (identical lens sets), and annotate_agreement awards 'agreement: 2' to a single document - the dual-panel agreement signal can be produced by one review, which is defense in depth the panel-integrity claim ('structurally enforced') would want but the contract does not literally require"
+      required_change: "refuse a panel in which two slots carry the same findings document (e.g. reject duplicate document sha256 across reviewers), so agreement >= 2 always implies two distinct reviewed documents"
+      actionable: true

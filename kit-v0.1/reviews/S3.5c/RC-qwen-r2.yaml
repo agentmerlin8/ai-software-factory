@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: dc1058c5ed556886621c772fd16f2e7a0f43cc954e755cf1dcc8ae1b9977c9af
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: c1bfa989d5b1f3db499dbdde8c2273e97e8a2583
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: minor
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:536
+      evidence: "+    panel_models = sorted({reviewer[\"model\"] for reviewer in record[\"reviewers\"]}) ... +                f\"{finding.get('agreement')}/{len(panel_models)} | \" — panel_models is taken from ALL reviewers, including ingested external ones, while the frozen contract defines the panel over internal lenses ('every internal lens runs once per model'; the render spec shows agreement as '2/2', '1/2'). An external document ingested under a distinct model label (the diff's own test_external_reviewer_model_recorded uses 'legacy-mapper-v0') inflates the denominator, so a dual-panel pair renders '2/3' and the Panel section's 'models:' line lists a non-panel model."
+      required_change: "Compute the rendered panel size (the agreement denominator and the Panel section's models list) from internal reviewers only, so an ingested external document cannot change the panel size the '2/2'/'1/2' triage column reports; add a test rendering a dual internal panel plus an external document under a distinct model label and asserting the internal findings still render '2/2'."
+      actionable: true
+    - id: RC-002
+      severity: minor
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:378
+      evidence: "+def annotate_agreement(findings: list[dict]) -> None: ... +        models_at.setdefault(finding[\"location_key\"], set()).add(finding[\"model\"]) ... +        finding[\"agreement\"] = len(models_at[finding[\"location_key\"]]) — the contract fixes agreement as 'distinct models raising at that location', but no test in the package exercises two findings from the SAME model at one location: a production change that counts findings instead of distinct models (e.g. models_at becoming a per-location list of findings) leaves every added test green — test_reviewer_models_recorded_in_json_and_markdown and test_location_key_separates_artifacts_and_dimensions only ever place at most one finding per model per location — while rendering a same-model pair as '2/2' and triaging it as a cross-model duplicate."
+      required_change: "Add a test where one model raises two findings at the same artifact + dimension (two location-identical entries in one document, or the same slot's findings plus a twin) alongside a second model's finding at that location, asserting the same-model pair each carry agreement 1 (or 2 only when the second model also raised there), pinning agreement to distinct-model counts."
+      actionable: true

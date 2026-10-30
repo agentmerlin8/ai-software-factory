@@ -1,0 +1,30 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 303eb86401cf89e3ba607aec29c1ca5a5eccd1bd13f98cbd7ece70e3659d9f85
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 946bbaef19f8cc0ed5ee504f3dbaf29fa10fc189
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:860
+      evidence: "the Panel per-model finding count is `count = sum(1 for finding in record[\"findings\"] if finding.get(\"model\") == model)` with no source filter, while every neighbouring panel signal excludes external — panel_models (:840-841) filters `reviewer[\"role\"] != \"external\"`, the lenses column (:857) filters external, agreement counts internal models only; an ingested external document attributed to an internal model inflates that model's Panel findings count, so the round-2 rule that external evidence never distorts the panel holds for the ratio but not for the count column, and no visible test pins the count"
+      required_change: "filter the Panel count to internal findings (e.g. `finding.get(\"source\") != \"external\"`) so it matches the lenses column and the agreement denominator, or state in the Panel attribution note that the count includes ingested external findings; anchor a test on a panel whose external document is attributed to an internal model and pin the rendered per-model count row"
+      actionable: true
+    - id: RA-002
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/tests/test_record.py:1132
+      evidence: "test_external_document_does_not_shift_agreement_ratio attaches the external slot to a model already on the internal panel (`(\"external\", \"qwen3.8-max\", str(ext))`), so the external model is inside `{qwen3.8-max, deepseek-v4-pro-0813}` either way: removing the `reviewer[\"role\"] != \"external\"` filter from panel_models (record.py:840-841) leaves the asserted `models: deepseek-v4-pro-0813, qwen3.8-max` line and the `2/2` ratio byte-identical and this test green — the guard that keeps an external-only model out of the panel list and out of the agreement denominator is not discriminated by any test added in this diff"
+      required_change: "extend the ratio test (or add one) with an external document attributed to a model that is NOT on the internal panel, and assert the `models:` line and the `N/M` denominator exclude it — so deleting the external filter from panel_models fails the suite"
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:1090
+      evidence: "the v1 schema-lie guard has two branches: namespaced-id refusal (:1086-1089) and the v2-finding-field refusal `for key in (\"model\", \"location_key\", \"agreement\")` (:1090-1093); the only test added for this guard, test_check_refuses_v1_record_with_namespaced_ids (test_record.py:1207), relabels a v2 record whose findings carry namespaced ids, so the id branch fires first and the field branch is never reached — deleting the entire v2-field loop leaves the suite green; the prior disposition (qwen RA-003, 'v1 schema-lie refusal was untested. Fixed: test added.') is therefore incomplete: a v1-claiming record with plain ids but a smuggled model/location_key/agreement field is refused by code no test exercises"
+      required_change: "add a check-path test that relabels a record to v1, strips '@model' from finding ids (and dispositions/open_findings), but leaves one v2 finding field in place, and asserts the 'v1 record carries v2 finding field' refusal — so removing the field guard fails the suite"
+      actionable: true

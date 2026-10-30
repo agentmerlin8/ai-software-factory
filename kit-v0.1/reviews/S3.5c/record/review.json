@@ -1,0 +1,176 @@
+{
+  "base_sha": "8d353f83215e1930d252881b01b882cc95af215f",
+  "dispositions": [
+    {
+      "disposition": "deferred",
+      "evidence": null,
+      "fix_sha": null,
+      "id": "RA-001@qwen3.8-max",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/30",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": null,
+      "fix_sha": null,
+      "id": "RA-002@qwen3.8-max",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/30",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": null,
+      "fix_sha": null,
+      "id": "RA-003@qwen3.8-max",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/30",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": null,
+      "fix_sha": null,
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/30",
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/record.py:860",
+      "evidence": "the Panel per-model finding count is `count = sum(1 for finding in record[\"findings\"] if finding.get(\"model\") == model)` with no source filter, while every neighbouring panel signal excludes external \u2014 panel_models (:840-841) filters `reviewer[\"role\"] != \"external\"`, the lenses column (:857) filters external, agreement counts internal models only; an ingested external document attributed to an internal model inflates that model's Panel findings count, so the round-2 rule that external evidence never distorts the panel holds for the ratio but not for the count column, and no visible test pins the count",
+      "id": "RA-001@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "30e24d865af0127744cbaa4c7cd99c9ed77a96280497b86e810bd0ffe55264c3",
+      "model": "qwen3.8-max",
+      "required_change": "filter the Panel count to internal findings (e.g. `finding.get(\"source\") != \"external\"`) so it matches the lenses column and the agreement denominator, or state in the Panel attribution note that the count includes ingested external findings; anchor a test on a panel whose external document is attributed to an internal model and pin the rendered per-model count row",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/tests/test_record.py:1132",
+      "evidence": "test_external_document_does_not_shift_agreement_ratio attaches the external slot to a model already on the internal panel (`(\"external\", \"qwen3.8-max\", str(ext))`), so the external model is inside `{qwen3.8-max, deepseek-v4-pro-0813}` either way: removing the `reviewer[\"role\"] != \"external\"` filter from panel_models (record.py:840-841) leaves the asserted `models: deepseek-v4-pro-0813, qwen3.8-max` line and the `2/2` ratio byte-identical and this test green \u2014 the guard that keeps an external-only model out of the panel list and out of the agreement denominator is not discriminated by any test added in this diff",
+      "id": "RA-002@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "2b53dac0b0aac29d6b65c28c574778c64a150a44e59c4ebe09f4c6dd230fdbea",
+      "model": "qwen3.8-max",
+      "required_change": "extend the ratio test (or add one) with an external document attributed to a model that is NOT on the internal panel, and assert the `models:` line and the `N/M` denominator exclude it \u2014 so deleting the external filter from panel_models fails the suite",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/record.py:1090",
+      "evidence": "the v1 schema-lie guard has two branches: namespaced-id refusal (:1086-1089) and the v2-finding-field refusal `for key in (\"model\", \"location_key\", \"agreement\")` (:1090-1093); the only test added for this guard, test_check_refuses_v1_record_with_namespaced_ids (test_record.py:1207), relabels a v2 record whose findings carry namespaced ids, so the id branch fires first and the field branch is never reached \u2014 deleting the entire v2-field loop leaves the suite green; the prior disposition (qwen RA-003, 'v1 schema-lie refusal was untested. Fixed: test added.') is therefore incomplete: a v1-claiming record with plain ids but a smuggled model/location_key/agreement field is refused by code no test exercises",
+      "id": "RA-003@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "56dcecad0a985cdea965424156e86138040150d25d1644169f5bfda2774fadef",
+      "model": "qwen3.8-max",
+      "required_change": "add a check-path test that relabels a record to v1, strips '@model' from finding ids (and dispositions/open_findings), but leaves one v2 finding field in place, and asserts the 'v1 record carries v2 finding field' refusal \u2014 so removing the field guard fails the suite",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/tests/test_record.py:1000",
+      "evidence": "The acceptance criterion names the concrete default-slice shape: \"A 6-document dual panel renders a v2 record; the same defect raised by both models appears twice with agreement: 2, and each entry is dispositioned separately.\" Every dual panel the Diff's tests actually render is smaller than the named shape \u2014 the largest is a four-document panel (two models \u00d7 two lenses, no review-security doc):\n```\n+        out, _, _ = self.render_ok(\n+            panel=[(\"review-contract\", \"qwen3.8-max\", str(a_c)),\n+                   (\"review-adversary\", \"qwen3.8-max\", str(a_a)),\n+                   (\"review-contract\", \"deepseek-v4-pro-0813\", str(b_c)),\n+                   (\"review-adversary\", \"deepseek-v4-pro-0813\", str(b_a))],\n+            dispositions=str(self.write_dispositions([])))\n```\nNo artifact in the package renders the six-document panel (three internal lenses \u00d7 two models) that the acceptance criterion names and that the lane will actually run; the twin-agreement case is proven with two documents and the symmetry guard with four. The panel mechanics are size-agnostic in code (check_panel_symmetry iterates models), so this is an evidence gap, not an implementation defect.",
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "lens": "review-contract",
+      "location_key": "37dcfca5ef79929f08dcf1a5592953e4f25bb2cc6c20b359adef511cdd0d6cf9",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Add a suite artifact that renders the six-document dual panel (review-contract, review-adversary, review-security \u00d7 two models) and asserts a review.record.v2 record with namespaced per-model finding ids, agreement: 2 on the twin pairs, and each twin entry dispositioned independently, matching the acceptance criterion's named shape.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "minor",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5c/unit.log",
+      "evidence_sha256": "e78763598a8632d964dc133dc9198c0a413209a4b088e5d7d30470bd03b3a700",
+      "exit": 0,
+      "gate": "unit"
+    }
+  ],
+  "head_sha": "946bbaef19f8cc0ed5ee504f3dbaf29fa10fc189",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 2
+  },
+  "open_findings": [
+    "RA-001@qwen3.8-max",
+    "RA-002@qwen3.8-max",
+    "RA-003@qwen3.8-max",
+    "RC-001@deepseek-v4-pro-0813"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3.5c/pkg.md",
+    "sha256": "303eb86401cf89e3ba607aec29c1ca5a5eccd1bd13f98cbd7ece70e3659d9f85"
+  },
+  "pr": 31,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3.5c/RA-deepseek-r3.yaml",
+      "document_sha256": "1a673b28f449833f4ee1fa12c435225e9a4ff96943de3b90ca452510107a7dfe",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5c/RA-qwen-r3.yaml",
+      "document_sha256": "05d89f64366a1b9b003b855a795ad7a54904a96bbbc8c28aa0ad1d0c718a492f",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5c/RC-deepseek-r3.yaml",
+      "document_sha256": "00154f3c92c9ff6df9d64b80d4110e66604c4c3be4727da181d5f67285905e0b",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5c/RC-qwen-r3.yaml",
+      "document_sha256": "c3926c848c7fdb0fabe99bb11a46413bb155c5ca06552cce7c633e5506f7082b",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5c/RS-deepseek-r3.yaml",
+      "document_sha256": "90866fa7fe2e68babf51518fc020398f419ef1e33ab50cd498eb9039b4959b40",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5c/RS-qwen-r3.yaml",
+      "document_sha256": "73bca4053c07a89d7422bbc2d551dac7044a35778b99ef65fc39db9e4bc219f0",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v2",
+  "story": "S3.5c",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 0,
+    "decision": "APPROVED",
+    "infos": 0,
+    "loop": 2,
+    "loop_cap": 2,
+    "majors": 0,
+    "minors": 4
+  }
+}

@@ -1,0 +1,37 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: fce6e7b835e9f3f37cf5406868955eaca21e51dbeba9a629d8cbf512a643c8bf
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 6a4c8a073fd1476e2bfee758b62b1c63143c8afc
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: blocker
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:360
+      evidence: "Frozen record-schema deliverable (Contract inputs, issue-29): 'Record schema `review.record.v2` (lane version 2) — each finding gains `model`; record-level finding ids are namespaced `<lens-id>@<model>` so two models' `RC-001` cannot collide', and 'dispositions key on the namespaced id'. The diff namespaces only conditionally: '+    qualify = len({model for _, model, _ in specs}) > 1' with the added rationale '+    # Namespacing exists to keep two models' RC-001 apart.  A single-model / +    # panel has no collision to prevent, so it keeps the plain lens ids its / +    # operators already read (and that single-model records have always had).' and '+                \"id\": f\"{finding['id']}@{model}\" if qualify else finding[\"id\"],'. A single-model panel still renders under '+SCHEMA = \"review.record.v2\"' and '+LANE_VERSION = 2', so v2 records can carry un-namespaced ids, contradicting the frozen v2 schema definition. No deviation is recorded anywhere in the package — the contract's 'Out of scope (named deferrals)' list does not mention it — and the architecture.md hunk restates the conditional rule ('when two models run the same lens their `RC-001` cannot collide — record ids are namespaced `<lens-id>@<model>`') as if it were the frozen one."
+      required_change: "Either namespace record-level finding ids `<lens-id>@<model>` in every `review.record.v2` record, including single-model panels, in both render (collect_reviewers) and check re-derivation (cmd_check); or record an owner-approved deviation from the frozen schema definition in the story contract before merge."
+      actionable: true
+    - id: RC-002
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:871
+      evidence: "Frozen render deliverable (Contract inputs, issue-29): 'Render — Panel section (models, lens coverage matrix, per-model finding counts) and findings table columns for model and agreement (`2/2`, `1/2`) so duplicate clusters are triaged as pairs.' The diff renders the agreement column as a bare integer count, not the frozen `N/M` form: '+                f\"{md_cell(finding.get('agreement'))} | \"' under the header '+            \"| id | lens | model | severity | dimension | artifact | at | disposition | evidence |\",' and the updated test asserts '+        self.assertIn(f\"| RA-001 | review-adversary | test-model-v1 | minor | \" / +                      f\"behavior | a.txt:2 | 1 | fixed | fixed: {self.fix_a} |\",' — `1`, not `1/2`. Nothing in the diff emits the panel-size denominator, and no deviation from the frozen `2/2`/`1/2` format is recorded in the package."
+      required_change: "Render the agreement column in the frozen `<models-at-location>/<panel-size>` form (e.g. `2/2`, `1/2`) in the v2 findings table, or record an owner-approved deviation from the render deliverable before merge."
+      actionable: true
+    - id: RC-003
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:1078
+      evidence: "Acceptance (Contract inputs, issue-29): '`check` catches a dropped, downgraded, or re-attributed finding, and a panel-symmetry violation introduced into stored JSON.' The diff adds the stored-record guard '+        check_panel_symmetry(data[\"reviewers\"])' in cmd_check, but no test in the package exercises it: the only stored-JSON tamper test added is agreement tampering ('+    def test_dual_panel_check_rejects_tampered_agreement(self) -> None:', which weakens 'data[\"findings\"][0][\"agreement\"]' and is caught by the findings-mismatch comparison, not by symmetry), and the asymmetry test '+    def test_dual_panel_asymmetric_refused(self) -> None:' exercises the render path only. Deleting the cmd_check 'check_panel_symmetry(data[\"reviewers\"])' call leaves the suite and the green unit.log ('Ran 1420 tests ... OK') unchanged, so the green gate is not evidence for the symmetry-in-stored-JSON acceptance clause. Same defect recurs on the CLI guard '+    elif args.model: / +        fail(\"review record: --model is not accepted with ROLE@MODEL=FILE \"' (record.py:686): no test passes --model together with ROLE@MODEL=FILE documents, so deleting that refusal also leaves the suite green, and the 'Refuse mixing the two forms' deliverable is only partially proven (test_mixed_findings_forms_refused covers the --findings/--findings mix only)."
+      required_change: "Add tests that (a) rewrite a stored v2 record to introduce a panel-symmetry violation (e.g. change one reviewer's model so the lens sets diverge) and assert `check` refuses it with the incomplete-panel message, and (b) invoke render with `--model ROLE=MODEL` alongside `--findings ROLE@MODEL=FILE` and assert the refusal; both must fail if the corresponding guard is removed."
+      actionable: true
+    - id: RC-004
+      severity: major
+      rubric_dimension: docs_process
+      artifact_reference: package:gate-evidence@kit-v0.1/reviews/S3.5c/unit.log:1
+      evidence: "Acceptance (Contract inputs, issue-29): 'Unit suite green (`python3 -m unittest`), kit-ci green.' The package's Gate evidence section supplies exactly one artifact — '### unit — kit-v0.1/reviews/S3.5c/unit.log (sha256 25f2c136...)' ending 'Ran 1420 tests in 23.616s ... OK' — which backs only the unittest half of the criterion. No kit-ci artifact appears anywhere in the package, so the kit-ci-green acceptance clause is a process assertion with no corresponding artifact and is not shown satisfied."
+      required_change: "Re-build the review package with the kit-ci gate evidence artifact included in the Gate evidence section (or record an owner-approved waiver of the kit-ci clause); until then the kit-ci acceptance criterion is unverified."
+      actionable: true

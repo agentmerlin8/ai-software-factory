@@ -1,0 +1,124 @@
+................................................................................................................................review record: unconfined record path: /etc/passwd
+.review record: unconfined record path: ../secret.txt
+........................................................................................................................................................................................................................................................................................................................................................usage: config_validator [-h] [--strict] [--repo path] [file ...]
+.....................................................................................................usage: controller [-h] [--root control-home]
+                  {state,request,blocked,validate-story-id,claim,handover,release,dispatch-id,override} ...
+controller: error: the following arguments are required: cmd
+..............................................................................................................................................missing credential reference: env:CLI_WS_TEST_KEY
+missing credential reference: file:secrets/token.txt
+..........usage: factory env show [-h] [--json] name|path
+factory env show: error: the following arguments are required: name|path
+.usage: factory [-h] [--workspace dir] {workspace,env} ...
+.usage: factory [-h] [--workspace dir] {workspace,env} ...
+usage: factory [-h] [--workspace dir] {workspace,env} ...
+.........................................................................................................................................................................................................................................................................error: /home/merlin/.hermes/cache/scratch/tmpxnuy1u4s/bad.jsonl:1: invalid JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+......error: cannot read baseline /home/merlin/.hermes/cache/scratch/tmpj9361wiw/nope.json: [Errno 2] No such file or directory: '/home/merlin/.hermes/cache/scratch/tmpj9361wiw/nope.json'
+..........................................................................................................................................................................................................................error: /home/merlin/.hermes/cache/scratch/tmp6h7rzbkr/bad.jsonl:1: invalid JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+.......................................error: /home/merlin/.hermes/cache/scratch/tmp6jjdnpge/bad.jsonl:1: invalid JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+....................................................................................usage: render_state.py <story-id>... | --all
+error: /home/merlin/.hermes/cache/scratch/tmpkb1bhcgf/bad.jsonl:1: invalid JSON: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+.................................................................................................
+----------------------------------------------------------------------
+Ran 1437 tests in 26.810s
+
+OK
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+snapshot → /home/merlin/.hermes/cache/scratch/tmp9azk8gkm/snap/custom.json
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+froze baseline → /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/baseline-a.json
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+wrote /home/merlin/.hermes/cache/scratch/tmpji2k2sb8/factory/metrics/TOKEN-METRICS.md
+wrote /home/merlin/.hermes/cache/scratch/tmp5o2to2g9/factory/metrics/TOKEN-METRICS.md
+wrote /home/merlin/.hermes/cache/scratch/tmpupu9hww5/factory/metrics/TOKEN-METRICS.md
+rendered /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md (21 events)
+rendered /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md (21 events)
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md
+rendered /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md (21 events)
+dashboard up to date
+rendered /home/merlin/.hermes/cache/scratch/tmpzu6e4kxd/factory/DASHBOARD.md (21 events)
+rendered /home/merlin/.hermes/cache/scratch/tmpzu6e4kxd/factory/DASHBOARD.md (21 events)
+dashboard up to date
+rendered /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md (21 events)
+dashboard up to date
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md
+rendered /home/merlin/.hermes/cache/scratch/tmpjw2l286g/factory/DASHBOARD.md (21 events)
+dashboard up to date
+rendered /home/merlin/.hermes/cache/scratch/tmp8o8zwqwb/factory/DASHBOARD.md (21 events)
+dashboard up to date
+rendered /home/merlin/.hermes/cache/scratch/tmp8o8zwqwb/factory/DASHBOARD.md (21 events)
+rendered /home/merlin/.hermes/cache/scratch/tmp8pbd8kmm/factory/DASHBOARD.md (22 events)
+dashboard up to date
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmp8pbd8kmm/factory/DASHBOARD.md
+rendered /home/merlin/.hermes/cache/scratch/tmp8pbd8kmm/factory/DASHBOARD.md (22 events)
+dashboard up to date
+rendered /home/merlin/.hermes/cache/scratch/tmpkkkwvqqc/stories/STORY-201/PROVENANCE.md
+rendered /home/merlin/.hermes/cache/scratch/tmpkkkwvqqc/stories/STORY-202/PROVENANCE.md
+wrote 2 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-201/PROVENANCE.md
+wrote 1 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-203/PROVENANCE.md
+wrote 1 file(s)
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-203/PROVENANCE.md
+--check: STALE
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-203/PROVENANCE.md
+wrote 1 file(s)
+--check: CLEAN
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-202/PROVENANCE.md
+wrote 1 file(s)
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-202/PROVENANCE.md
+--check: STALE
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-202/PROVENANCE.md
+wrote 1 file(s)
+--check: CLEAN
+--check: CLEAN
+rendered /home/merlin/.hermes/cache/scratch/tmpcgf5_9xw/stories/STORY-201/PROVENANCE.md
+wrote 1 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmpcgf5_9xw/stories/STORY-201/PROVENANCE.md
+wrote 1 file(s)
+--check: CLEAN
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmpbhif2lk5/stories/STORY-201/PROVENANCE.md (missing)
+--check: STALE
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-201/PROVENANCE.md
+rendered /home/merlin/.hermes/cache/scratch/tmpf22i43y9/stories/STORY-202/PROVENANCE.md
+wrote 2 file(s)
+--check: CLEAN
+--check: CLEAN
+wrote 0 file(s)
+--check: CLEAN
+wrote 0 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmp3lr3ll9q/stories/STORY-201/PROVENANCE.md
+wrote 1 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmp_kymcqe2/stories/STORY-203/PROVENANCE.md
+wrote 1 file(s)
+--check: CLEAN
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmp_kymcqe2/stories/STORY-203/PROVENANCE.md
+--check: STALE
+rendered /home/merlin/.hermes/cache/scratch/tmp_kymcqe2/stories/STORY-203/PROVENANCE.md
+wrote 1 file(s)
+--check: CLEAN
+rendered /home/merlin/.hermes/cache/scratch/tmpbtpdmma8/home/stories/STORY-230/PROVENANCE.md
+wrote 1 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmpbtpdmma8/home/stories/STORY-231/PROVENANCE.md
+wrote 1 file(s)
+rendered /home/merlin/.hermes/cache/scratch/tmpf3823yw_/stories/STORY-201/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmpf3823yw_/stories/STORY-202/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-201/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-203/state.md
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-203/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-203/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-202/state.md
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-202/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-202/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmpsgerirxx/stories/STORY-201/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmpsgerirxx/stories/STORY-201/state.md
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmp6pdc6g_0/stories/STORY-201/state.md (missing)
+rendered /home/merlin/.hermes/cache/scratch/tmp8w4rffni/stories/STORY-201/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp7d4dl3t3/stories/STORY-201/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmpd68krjnr/stories/STORY-203/state.md
+OUT OF DATE: /home/merlin/.hermes/cache/scratch/tmpd68krjnr/stories/STORY-203/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmpd68krjnr/stories/STORY-203/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmpkeqtc4wm/home/stories/STORY-230/state.md
+rendered /home/merlin/.hermes/cache/scratch/tmp574x__k0/home/stories/STORY-230/state.md

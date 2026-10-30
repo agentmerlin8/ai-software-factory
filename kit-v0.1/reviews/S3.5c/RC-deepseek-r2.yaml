@@ -1,0 +1,76 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: dc1058c5ed556886621c772fd16f2e7a0f43cc954e755cf1dcc8ae1b9977c9af
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: c1bfa989d5b1f3db499dbdde8c2273e97e8a2583
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:324
+      evidence: >
+        The guard that is supposed to stop a skipped lens first drops external
+        slots from every model's coverage (`if reviewer["role"] == "external":
+        continue`, record.py:321,322) and then returns on `if len(coverage) <=
+        1: return` (record.py:324,325) — so a non-empty panel with NO internal
+        lens coverage (every slot external, or a dual panel whose models cover
+        one shared lens) passes. The only refusal is the no-documents case: `if
+        not reviewers: fail("review record: empty panel: no reviewer documents
+        supplied")` (record.py:314,315). The docstring declares `panel is the
+        maximal skip and is refused for the same reason.` (record.py:312), and
+        the frozen architecture text states the record `refuses an asymmetric
+        panel or a duplicated (lens, model) slot rather than letting a skipped
+        lens read as coverage` (package:diff@kit-v0.1/architecture.md:233).
+        Round 1 fixed the empty-panel variant (RS-002); the internal-lens-empty
+        variant remains: it renders a valid v2 record with an APPROVED verdict.
+        The same unguarded check_panel_symmetry runs on the check path over
+        stored reviewers, and its only citing test
+        (test_render_refuses_empty_panel) exercises the zero-documents case,
+        not a panel whose internal lens coverage is empty.
+      required_change: >
+        In check_panel_symmetry, after excluding `external` reviewers, refuse a
+        panel whose internal coverage is empty — fail by name (e.g. `review
+        record: incomplete panel: no internal lens coverage`) — and refuse a
+        multi-model panel whose shared internal lens set omits an internal
+        role, on both the render and check paths, so a lens cannot be silently
+        dropped from every model and pass as coverage; add tests: an
+        external-only panel is refused, a symmetric dual panel missing a lens
+        is refused, alongside the existing empty-panel test.
+      actionable: true
+    - id: RC-002
+      severity: minor
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:828
+      evidence: >
+        `panel_models = sorted({reviewer["model"] for reviewer in
+        record["reviewers"]})` (record.py:828) builds the Panel section and the
+        findings-table denominator from every reviewer — ingested `external`
+        documents' attribution models included — and the table cell renders
+        `f"{finding.get('agreement')}/{len(panel_models)} |"` (record.py:893);
+        annotate_agreement counts every finding's model, external findings
+        included: `models_at.setdefault(finding["location_key"],
+        set()).add(finding["model"])` (record.py:348,349). The same design
+        scopes only symmetry to internal lenses: `# external findings document
+        belongs to one model and must not make an otherwise symmetric panel
+        look asymmetric.` (record.py:318-320). The frozen contract pins the
+        render semantics as `agreement (2/2, 1/2) so duplicate clusters are
+        triaged as pairs` (Contract inputs, issue-29), while external ingestion
+        is a supported path (`External historical findings are ingested with
+        source=external`, package:diff@kit-v0.1/architecture.md:241).
+        With an external document ingested, the denominator becomes the count
+        of all reviewer models (e.g. 3 with a separately attributed external
+        source), internal findings render 2/3 or 1/3 instead of 2/2 or 1/2, an
+        external finding at a shared location inflates the numerator, and the
+        external source appears as a panel model in the Panel table.
+      required_change: >
+        Build panel_models and the agreement denominator from internal
+        reviewers only, counting agreement over internal models (or list the
+        external document separately, outside the Panel models and table), so a
+        dual panel plus ingested external findings still renders `2/2` and
+        `1/2`; add a test rendering a dual panel with an external document that
+        asserts the external model is absent from the Panel models list and
+        does not change the findings-table ratios.
+      actionable: true

@@ -1,0 +1,30 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: dc1058c5ed556886621c772fd16f2e7a0f43cc954e755cf1dcc8ae1b9977c9af
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: c1bfa989d5b1f3db499dbdde8c2273e97e8a2583
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:307
+      evidence: "check_panel_symmetry refuses an empty panel only when the reviewer list itself is empty ('if not reviewers: fail(\"review record: empty panel...\")'); an external-only panel takes the 'if reviewer[\"role\"] == \"external\": continue' skip for every reviewer, leaves coverage empty, and passes through 'if len(coverage) <= 1: return' — a record with zero internal lenses renders APPROVED (no findings, no blocker/major), which is exactly the 'maximal skip' the guard's docstring says is refused; the fix claimed for deepseek RS-002 is incomplete, and no test in the package supplies an external-only panel (test_render_refuses_empty_panel passes findings=[] models={}; test_external_document_does_not_break_symmetry always includes two internal docs), so removing the empty-panel fail entirely leaves the suite green except for that one zero-document case"
+      required_change: "make the empty-panel guard fire on empty internal coverage, not only on an empty reviewer list: after the external skip, refuse when no internal lens contributed to coverage, and add a test that an external-only panel is refused by name"
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:343
+      evidence: "the round-1 qwen RA-005 fix scoped symmetry to internal lenses, but annotate_agreement was not scoped the same way: it iterates every finding and does models_at[...].add(finding[\"model\"]) with no source check, so an ingested external finding at the same artifact+dimension as one internal model's finding makes agreement 2, and the render's denominator len(panel_models) counts models from all reviewers including external ones — a single-model internal panel plus one external document renders '2/2', the exact false-duplicate-confirmation signal the contract says means 'the same defect raised by both models'; no test in the package combines an external document with internal findings under v2 (test_external_document_does_not_break_symmetry uses only empty documents, and every agreement assertion runs without an external slot), so deleting the internal/external distinction here leaves the suite green"
+      required_change: "exclude source=external findings from the agreement model sets and from the panel-size denominator (or count only models that cover internal lenses), and add a test where an external document sharing an internal finding's location_key keeps agreement at 1 and panel size at the internal model count"
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:1058
+      evidence: "the v1 schema-lie guard added in cmd_check ('if isinstance(fid, str) and \"@\" in fid: fail(... schema mismatch: v1 record carries namespaced finding id ...)' and the model/location_key/agreement key refusal) has no test: test_check_refuses_duplicate_role_in_v1_record builds its v1 record by stripping the id at '@' and popping the v2 fields, so it exercises the duplicate-role refusal but never leaves a namespaced id or a v2 field in a v1-claiming record; deleting the entire schema-lie block would keep every test in the package green while a hand-rewritten v1 record could then smuggle v2 content past the v1 guards — the disposition of round-1 qwen RA-001 claims this refusal exists, and it does in code, but it is unproven by the suite"
+      required_change: "add a check-side test that rewrites a stored record to schema review.record.v1 / lane version 1 while keeping one namespaced finding id, and a second variant keeping a model/location_key/agreement field, asserting both are refused with 'schema mismatch' — the production change named in round 1 must have a test that fails when the guard is removed"
+      actionable: true

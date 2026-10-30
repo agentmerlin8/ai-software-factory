@@ -1,0 +1,33 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: fce6e7b835e9f3f37cf5406868955eaca21e51dbeba9a629d8cbf512a643c8bf
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 6a4c8a073fd1476e2bfee758b62b1c63143c8afc
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: blocker
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:364
+      evidence: |-
+        The reviewer model string enters the record unverified, straight from the CLI slot. compose_record splits each --findings ROLE@MODEL=FILE argument into (role, model, path), and collect_reviewers consumes it: qualify = len({model for _, model, _ in specs}) > 1, then for role, model, path in specs, then lens = load_review_lens(path, role, pkg) — the document loader takes no model, and the findings document schema (review.findings.v1) carries no model field. The slot string is then stamped on the record: "id": f"{finding['id']}@{model}" if qualify else finding["id"], and "model": model on every finding and on the reviewer entry. Nothing anywhere binds that string to the bytes of the document it labels. Mutation pass — the production change that leaves every new guard green: pass one model's findings documents into both models' slots (byte-identical copies are accepted; no content-hash check exists). Panel symmetry holds (two strings covering equal lens sets), the duplicate-slot refusal holds (distinct strings), the mixed-form refusal is untouched, and check re-derives the same false labels — annotate_agreement counts distinct model strings per location_key, so a duplicated document renders agreement 2/2 and a Panel with two models. The record then certifies a two-model panel that never ran: the protection the whole slice exists to add (defense against single-model blindness, single-lens recall 0.14–0.64) is self-asserted, not enforced.
+      required_change: "Refuse a panel in which two slots' findings documents are content-identical (compare document sha256 across slots); and require each findings document to declare the model that produced it, with load_review_lens and cmd_check refusing a slot whose document declares a different model. Until provenance is verifiable, the rendered Panel and agreement counts must be labeled as slot claims, not presented as verified model provenance."
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record.py:314
+      evidence: |-
+        The new panel-symmetry guard is the only structural protection against skipped coverage, and it silently accepts an empty panel: coverage: dict[str, set[str]] = {} is filled from the reviewers list, then if len(coverage) <= 1: return — with zero reviewers the dict is empty and the guard exits. No other path in the rewritten code refuses the zero case: compose_record's new refusals cover mixed forms (if inline_form and legacy_form: fail(...)) and --model alongside inline documents (elif args.model: fail(...)), but --findings is argparse action="append", default=[], so a render invoked with no findings documents reaches collect_reviewers([], ...), passes the symmetry guard, and composes a record with zero reviewers and zero findings. That is the opposite of the protection this hunk claims in the same change: architecture.md adds that the record refuses panel violations "rather than letting a skipped lens read as coverage" — every lens skipped by every model is the maximal skip, and it is let through.
+      required_change: "Refuse a render whose panel has zero internal reviewer slots with a named failure (like the asymmetry refusal), and keep the len(coverage) <= 1 early return only for panels with at least one reviewer. Add a regression test that renders with zero --findings documents and asserts a nonzero exit with no partial record written."
+      actionable: true
+    - id: RS-003
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:302
+      evidence: |-
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12] — the location_key that groups findings across models for agreement counting is a truncated 48-bit digest. Two distinct (artifact, dimension) locations whose digests collide merge into one key silently: annotate_agreement folds their model sets together, no collision check runs, no error is raised, and the record presents the merged agreement count as fact. The truncation buys nothing: keys live in a single per-PR record holding at most dozens of findings.
+      required_change: "Use the full 64-hex sha256 digest as the location key (drop the [:12] slice), or detect and refuse collisions before annotate_agreement groups entries."
+      actionable: true

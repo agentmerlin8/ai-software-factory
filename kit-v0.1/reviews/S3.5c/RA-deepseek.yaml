@@ -1,0 +1,30 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: fce6e7b835e9f3f37cf5406868955eaca21e51dbeba9a629d8cbf512a643c8bf
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 6a4c8a073fd1476e2bfee758b62b1c63143c8afc
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:1078
+      evidence: "The acceptance criterion 'check catches ... a panel-symmetry violation introduced into stored JSON' is enforced in cmd_check only by the added call 'if not legacy: check_panel_symmetry(data[\"reviewers\"])'. No test in this diff drives that statement: the diff's asymmetry test runs through render (test_dual_panel_asymmetric_refused, which exercises check_panel_symmetry via collect_reviewers at record.py:389), and its only check-side v2 test tampers agreement, not panel symmetry (test_dual_panel_check_rejects_tampered_agreement). Named production change: delete the 'check_panel_symmetry(data[\"reviewers\"])' call from cmd_check — every test in the suite stays green, and a stored record whose reviewers were tampered to asymmetric model coverage (finding ids and dispositions rewritten consistently) now passes check with 'review record: OK', because validate_record checks only the presence and type of model/location_key/agreement, never coverage."
+      required_change: "add a check-side test that renders a dual panel, rewrites one stored reviewer's model (and the matchingly namespaced finding ids and dispositions) to make coverage asymmetric, and asserts check exits 1 with 'review record: incomplete panel'; the test must fail when the check_panel_symmetry call at record.py:1078 is removed."
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:1035
+      evidence: "The ruleset check applies is chosen from the stored record's own schema label — 'legacy = data[\"schema\"] == LEGACY_SCHEMA' gates all v2 enforcement (FINDING_KEYS, id namespacing, check_panel_symmetry at 1078, annotate_agreement at 1079), and validate_record validates a v1-labeled record only against v1 requirements (lane version 1, no model/location_key/agreement keys). A tamper of a stored v2 record that (a) deletes one model's reviewer entries, findings, and dispositions, (b) relabels schema to review.record.v1 and lane.version to 1, and (c) flattens the surviving ids to plain form passes check with 'review record: OK': the surviving documents are re-read, derived entries match under legacy keys, and the verdict is recomputed from the surviving findings alone — so a blocker or major raised only by the dropped model vanishes and the union verdict ('any blocker/major from either model forces CHANGES REQUESTED') silently collapses. The shipped test test_check_accepts_legacy_v1_record constructs exactly this shape — a v2 record downgraded to v1 that check accepts — so no test fails; nothing in the record distinguishes a genuine stored v1 record from a downgraded v2 one."
+      required_change: "anchor the panel manifest outside the tamperable record: have check derive the reviewer/findings set from the findings documents on disk (or refuse a v1-labeled record whose directory contains v2-era evidence) so that dropping or re-versioning stored entries cannot shrink the derived panel; add a negative test rendering a v2 dual panel, downgrading it to v1 with one model's entries removed, and asserting check fails."
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record.py:292
+      evidence: "location_key digests repo_artifact_path(artifact_reference) plus the rubric dimension into a 12-hex sha256 prefix; annotate_agreement counts distinct models per key, so two models' genuine agreement on one defect exists only when their independently written artifact_reference strings digest identically, and claims of agreement between different defects exist only when different (artifact, dimension) pairs digest apart. The diff's only pinning test writes both findings documents with the byte-identical artifact string 'src/app.py:1' and asserts len({f['location_key']}) == 1 plus agreement == 2; a degenerate production change — e.g. location_key returning a constant, or digesting the dimension only — leaves that test green while different defects at different artifacts under one dimension falsely read as agreement 2 in production. No test exercises distinct artifacts or distinct dimensions."
+      required_change: "add render tests anchored at the location_key hunk proving the key separates locations: two findings at different artifacts under the same dimension (and one shared artifact across different dimensions) must yield distinct location_keys and agreement 1, so a collapsed or artifact-agnostic digest fails the suite."
+      actionable: true

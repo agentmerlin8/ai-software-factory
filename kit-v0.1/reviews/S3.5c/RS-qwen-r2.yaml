@@ -1,0 +1,41 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: dc1058c5ed556886621c772fd16f2e7a0f43cc954e755cf1dcc8ae1b9977c9af
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: c1bfa989d5b1f3db499dbdde8c2273e97e8a2583
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:893
+      evidence: >-
+        Panel-size denominator and agreement numerator both include external
+        ingestions although symmetry excludes them. render_markdown computes
+        `panel_models = sorted({reviewer["model"] for reviewer in
+        record["reviewers"]})` with no role filter and renders
+        `{finding.get('agreement')}/{len(panel_models)}`, while
+        check_panel_symmetry explicitly skips `reviewer["role"] == "external"`
+        ("the symmetry rule is scoped to internal lenses"). annotate_agreement
+        likewise counts every finding's model with no `source == "external"`
+        filter, so an ingested external finding sharing an artifact+dimension
+        with one live model's finding raises its agreement to 2 and the record
+        claims cross-model confirmation that never happened; an external-only
+        model (e.g. the tested `legacy-mapper-v0`) also inflates the
+        denominator so a fully agreed internal pair renders `2/3`. Mutation:
+        ingest an external document on a third model alongside a symmetric
+        internal panel — every test stays green
+        (test_external_document_does_not_break_symmetry places the external
+        doc on an existing panel model and asserts only returncode 0) while the
+        canonical record's `at` column misstates agreement, the signal S3.5c
+        exists to produce.
+      required_change: >-
+        Exclude external documents from the agreement computation and the
+        panel-size denominator: in annotate_agreement count only findings with
+        source "internal", and in render_markdown derive panel_models from
+        reviewers whose role is not "external"; extend an external-ingest test
+        to assert the internal pair still renders 2/2 and agreement stays 1
+        when an external finding shares the location.
+      actionable: true

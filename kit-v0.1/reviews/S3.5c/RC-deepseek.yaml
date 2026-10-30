@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: fce6e7b835e9f3f37cf5406868955eaca21e51dbeba9a629d8cbf512a643c8bf
+  base_sha: 8d353f83215e1930d252881b01b882cc95af215f
+  head_sha: 6a4c8a073fd1476e2bfee758b62b1c63143c8afc
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: minor
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/review/record.py:851
+      evidence: "Contract deliverable: '- **Render** — Panel section (models, lens coverage matrix, per-model finding counts) and findings table columns for model and agreement (`2/2`, `1/2`) so duplicate clusters are triaged as pairs.' Diff renders the column as a bare integer count under a header named `at`: '| id | lens | model | severity | dimension | artifact | at | disposition | evidence |' with the cell 'f\"{md_cell(finding.get('agreement'))} |\". The rendered value is the raw agreement count (1 or 2), not the `<count>/<models>` pair form the contract's examples show (`2/2`, `1/2`)."
+      required_change: "Render the agreement column in the pair form the contract specifies — e.g. `{agreement}/{panel model count}` and header `agreement` — or amend the frozen render deliverable (and the REVIEW-<pr>.md Notes sentence) to define the bare-count `at` form as canonical before claiming the render deliverable."
+      actionable: true
+    - id: RC-002
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: package:gate-evidence@unit
+      evidence: "Acceptance criterion: '- Unit suite green (`python3 -m unittest`), kit-ci green.' The package's Gate evidence section carries exactly one entry: '### unit — kit-v0.1/reviews/S3.5c/unit.log (sha256 25f2c1…b545e)'. Nothing in the package names a kit-ci artifact or a kit-ci green result (the only result line is the unittest tail: 'Ran 1420 tests in 23.616s / OK'). The kit-ci half of the acceptance line therefore has no corresponding artifact inside the package."
+      required_change: "When recording this slice, add a named kit-ci gate artifact to the package's Gate evidence (or explicitly label the embedded unit.log as the kit-ci run evidence), so the kit-ci half of the acceptance line is supported by an in-package artifact; until then the criterion is only partially shown satisfied."
+      actionable: true

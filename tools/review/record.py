@@ -5,9 +5,15 @@ review package, one findings document per reviewer lens, the disposition
 ledger, and each gate evidence file, then writes the two deterministic
 render outputs:
 
-- ``<out-dir>/review.json``   schema ``review.record.v1`` — the canonical
+- ``<out-dir>/review.json``   schema ``review.record.v2`` — the canonical
   machine-readable record: identity, lane, reviewers, gate results, findings,
   dispositions, verdict, prior rounds, and the open/undispositioned id lists.
+  v2 runs a dual-model panel: every internal lens may appear once per model,
+  each finding id is namespaced ``<lens-id>@<model>``, and each finding
+  carries a ``location_key`` plus an ``agreement`` count (distinct models
+  that raised a finding at the same artifact + dimension) so duplicates
+  across models stay attributable and triage-able. ``review.record.v1``
+  records remain checkable under v1 semantics.
 - ``<out-dir>/REVIEW-<pr>.md`` — the human-readable rendering.
 
 The verdict is *computed* from finding severities (any blocker or major
@@ -20,8 +26,9 @@ touch the artifact), and gate evidence files are hashed into the record.
 CLI::
 
     record.py render --repo PATH --story ID --pr N --base SHA --head SHA
-        --package FILE --findings ROLE=FILE... --dispositions FILE
-        --model ROLE=MODEL... --gate NAME=EXIT:EVIDENCE... [--loop N]
+        --package FILE --dispositions FILE
+        (--findings ROLE@MODEL=FILE... | --findings ROLE=FILE... --model ROLE=MODEL...)
+        --gate NAME=EXIT:EVIDENCE... [--loop N]
         [--loop-cap 2] [--prior DIR]... [--out-dir DIR]
 
     record.py check --record DIR --repo PATH
@@ -51,9 +58,11 @@ if __package__ in (None, ""):
 from tools.review.findings import DECISIONS, FindingsError, load as findings_load
 from tools.review.yamlish import YamlishError, loads as yamlish_loads
 
-SCHEMA = "review.record.v1"
+SCHEMA = "review.record.v2"
+LEGACY_SCHEMA = "review.record.v1"
 LANE_NAME = "review-lane-v1"
-LANE_VERSION = 1
+LANE_VERSION = 2
+LEGACY_LANE_VERSION = 1
 ROLES = ("review-contract", "review-adversary", "review-security", "external")
 DISPOSITIONS = ("fixed", "rejected", "deferred")
 SEVERITIES = ("blocker", "major", "minor", "info")
@@ -280,25 +289,82 @@ def load_review_lens(path: str, role: str, pkg: PackageInfo) -> dict:
     }
 
 
-def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo,
-                      repo: str, models: dict[str, str]):
-    """Load every --findings ROLE=FILE pair; returns (reviewers, findings).
+def location_key(finding: dict) -> str:
+    """Digest of (repo artifact path, rubric dimension) — a triage grouping.
 
-    Every lens must also have been given a ``--model ROLE=MODEL``: the
-    reviewer model is an input, so the record refuses rather than guess.
+    Two models rarely phrase a finding identically, so the record does not
+    merge their findings; it labels them with the same location key and an
+    ``agreement`` count, which is what lets the render show ``2/2`` and a
+    human triage duplicate clusters as pairs.  Location alone is never
+    proof of duplication: distinct defects in one file under one dimension
+    keep separate entries and separate dispositions.
+    """
+    key = f"{repo_artifact_path(finding['artifact_reference'])}\x00" \
+          f"{finding['rubric_dimension']}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+
+
+def check_panel_symmetry(reviewers: list[dict]) -> None:
+    """Every model must cover the same lens set (a dual panel is symmetric).
+
+    An asymmetric panel is refused by name: it means one model silently
+    skipped a lens, which would read as coverage the run never had.
+    """
+    coverage: dict[str, set[str]] = {}
+    for reviewer in reviewers:
+        coverage.setdefault(reviewer["model"], set()).add(reviewer["role"])
+    if len(coverage) <= 1:
+        return
+    models = sorted(coverage)
+    base_model = models[0]
+    base = coverage[base_model]
+    for model in models[1:]:
+        if coverage[model] != base:
+            missing = sorted(base - coverage[model])
+            extra = sorted(coverage[model] - base)
+            detail = []
+            if missing:
+                detail.append("missing " + ", ".join(missing))
+            if extra:
+                detail.append("extra " + ", ".join(extra))
+            fail(f"review record: incomplete panel: {model} covers a "
+                 f"different lens set than {base_model} "
+                 f"({'; '.join(detail)})")
+
+
+def annotate_agreement(findings: list[dict]) -> None:
+    """Set location_key and agreement (distinct models at that location)."""
+    models_at: dict[str, set[str]] = {}
+    for finding in findings:
+        finding["location_key"] = location_key(finding)
+        models_at.setdefault(finding["location_key"], set()).add(
+            finding["model"])
+    for finding in findings:
+        finding["agreement"] = len(models_at[finding["location_key"]])
+
+
+def collect_reviewers(specs: list[tuple[str, str, str]], pkg: PackageInfo,
+                      repo: str):
+    """Load every (role, model, path) panel slot; returns (reviewers, findings).
+
+    The model is part of the slot, not a per-lens afterthought: two models
+    running the same lens are two reviewers, and the record namespaces their
+    finding ids so one model's ``RC-001`` cannot collide with the other's.
     """
     reviewers: list[dict] = []
     findings: list[dict] = []
-    seen: set[str] = set()
-    for role, path in specs:
+    seen: set[tuple[str, str]] = set()
+    # Namespacing exists to keep two models' RC-001 apart.  A single-model
+    # panel has no collision to prevent, so it keeps the plain lens ids its
+    # operators already read (and that single-model records have always had).
+    qualify = len({model for _, model, _ in specs}) > 1
+    for role, model, path in specs:
         if role not in ROLES:
             fail(f"review record: unknown reviewer role: {role}")
-        if role in seen:
-            fail(f"review record: duplicate reviewer role: {role}")
-        seen.add(role)
-        model = models.get(role)
-        if not (isinstance(model, str) and model.strip()):
-            fail(f"review record: missing reviewer model: {role}")
+        if (role, model) in seen:
+            fail(f"review record: duplicate reviewer role/model: "
+                 f"{role}@{model}")
+        seen.add((role, model))
         lens = load_review_lens(path, role, pkg)
         reviewers.append({
             "role": role,
@@ -309,9 +375,10 @@ def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo,
         })
         for finding in lens["findings"]:
             findings.append({
-                "id": finding["id"],
+                "id": f"{finding['id']}@{model}" if qualify else finding["id"],
                 "source": "external" if role == "external" else "internal",
                 "lens": role,
+                "model": model,
                 "severity": finding["severity"],
                 "rubric_dimension": finding["rubric_dimension"],
                 "artifact_reference": finding["artifact_reference"],
@@ -319,8 +386,10 @@ def collect_reviewers(specs: list[tuple[str, str]], pkg: PackageInfo,
                 "required_change": finding["required_change"],
                 "actionable": finding["actionable"],
             })
-    reviewers.sort(key=lambda r: r["role"])
+    check_panel_symmetry(reviewers)
+    reviewers.sort(key=lambda r: (r["role"], r["model"]))
     findings.sort(key=lambda f: f["id"])
+    annotate_agreement(findings)
     return reviewers, findings
 
 
@@ -569,26 +638,54 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
     pkg = parse_package(args.package)
     verify_cli_range(args.repo, args.base, args.head, pkg)
 
-    specs: list[tuple[str, str]] = []
+    specs: list[tuple[str, str, str]] = []
+    inline_form = legacy_form = False
     for spec in args.findings:
-        role, sep, path = spec.partition("=")
-        if not sep or not role or not path:
-            parser.error(f"bad --findings spec (expected ROLE=FILE): {spec!r}")
-        specs.append((role, path))
+        role_part, sep, path = spec.partition("=")
+        if not sep or not role_part or not path:
+            parser.error("bad --findings spec (expected ROLE@MODEL=FILE or "
+                         f"ROLE=FILE): {spec!r}")
+        if "@" in role_part:
+            role, _, model = role_part.partition("@")
+            inline_form = True
+            if not role or not model.strip():
+                parser.error("bad --findings spec (expected ROLE@MODEL=FILE): "
+                             f"{spec!r}")
+        else:
+            role, model = role_part, ""
+            legacy_form = True
+        specs.append((role, model, path))
+    if inline_form and legacy_form:
+        fail("review record: mixed --findings forms: use ROLE@MODEL=FILE for "
+             "every document, or ROLE=FILE with --model for a single-model "
+             "panel")
     models: dict[str, str] = {}
-    for spec in args.model:
-        role, sep, model = spec.partition("=")
-        if not sep or not role or not model.strip():
-            parser.error(f"bad --model spec (expected ROLE=MODEL): {spec!r}")
-        if role not in ROLES:
-            fail(f"review record: unknown model role: {role}")
-        if role in models:
-            fail(f"review record: duplicate model role: {role}")
-        models[role] = model
-    for role in models:
-        if role not in {spec_role for spec_role, _ in specs}:
-            fail(f"review record: model role without findings doc: {role}")
-    reviewers, findings = collect_reviewers(specs, pkg, args.repo, models)
+    if legacy_form:
+        for spec in args.model:
+            role, sep, model = spec.partition("=")
+            if not sep or not role or not model.strip():
+                parser.error(f"bad --model spec (expected ROLE=MODEL): {spec!r}")
+            if role not in ROLES:
+                fail(f"review record: unknown model role: {role}")
+            if role in models:
+                fail(f"review record: duplicate model role: {role}")
+            models[role] = model
+        for role in models:
+            if role not in {spec_role for spec_role, _, _ in specs}:
+                fail(f"review record: model role without findings doc: {role}")
+        resolved: list[tuple[str, str, str]] = []
+        for role, _, path in specs:
+            if role not in ROLES:
+                fail(f"review record: unknown reviewer role: {role}")
+            model = models.get(role)
+            if not (isinstance(model, str) and model.strip()):
+                fail(f"review record: missing reviewer model: {role}")
+            resolved.append((role, model, path))
+        specs = resolved
+    elif args.model:
+        fail("review record: --model is not accepted with ROLE@MODEL=FILE "
+             "documents (the model is part of each slot)")
+    reviewers, findings = collect_reviewers(specs, pkg, args.repo)
 
     withheld = set(pkg.withheld)
     withheld_ids = [f["id"] for f in findings
@@ -708,6 +805,24 @@ def render_markdown(record: dict) -> str:
                    f"{md_cell(reviewer['model'])} | "
                    f"{md_cell(reviewer['rubric_version'])} | "
                    f"{md_cell(reviewer['document'])} |")
+    legacy = record.get("schema") == LEGACY_SCHEMA
+    panel_models = sorted({reviewer["model"] for reviewer in record["reviewers"]})
+    if not legacy:
+        out += [
+            "",
+            "## Panel",
+            "",
+            f"models: {', '.join(panel_models)}",
+            "",
+            "| model | lenses | findings |",
+            "| --- | --- | --- |",
+        ]
+        for model in panel_models:
+            lenses = sorted(reviewer["role"] for reviewer in record["reviewers"]
+                            if reviewer["model"] == model)
+            count = sum(1 for finding in record["findings"]
+                        if finding.get("model") == model)
+            out.append(f"| {md_cell(model)} | {md_cell(', '.join(lenses))} | {count} |")
     out += [
         "",
         "## Gate results",
@@ -723,20 +838,40 @@ def render_markdown(record: dict) -> str:
         "",
         "## Findings",
         "",
-        "| id | lens | severity | dimension | artifact | disposition | evidence |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
+    if legacy:
+        out += [
+            "| id | lens | severity | dimension | artifact | disposition | evidence |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    else:
+        out += [
+            "| id | lens | model | severity | dimension | artifact | at | disposition | evidence |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
     dispositions = {d["id"]: d for d in record["dispositions"]}
     for finding in record["findings"]:
         disposition = dispositions.get(finding["id"], {})
-        out.append(
-            f"| {md_cell(finding['id'])} | {md_cell(finding['lens'])} | "
-            f"{md_cell(finding['severity'])} | "
-            f"{md_cell(finding['rubric_dimension'])} | "
-            f"{md_cell(finding['artifact_reference'])} | "
-            f"{md_cell(disposition.get('disposition'))} | "
-            f"{md_cell(disposition_evidence(disposition))} |"
-        )
+        if legacy:
+            out.append(
+                f"| {md_cell(finding['id'])} | {md_cell(finding['lens'])} | "
+                f"{md_cell(finding['severity'])} | "
+                f"{md_cell(finding['rubric_dimension'])} | "
+                f"{md_cell(finding['artifact_reference'])} | "
+                f"{md_cell(disposition.get('disposition'))} | "
+                f"{md_cell(disposition_evidence(disposition))} |"
+            )
+        else:
+            out.append(
+                f"| {md_cell(finding['id'])} | {md_cell(finding['lens'])} | "
+                f"{md_cell(finding.get('model'))} | "
+                f"{md_cell(finding['severity'])} | "
+                f"{md_cell(finding['rubric_dimension'])} | "
+                f"{md_cell(finding['artifact_reference'])} | "
+                f"{md_cell(finding.get('agreement'))} | "
+                f"{md_cell(disposition.get('disposition'))} | "
+                f"{md_cell(disposition_evidence(disposition))} |"
+            )
     if record["prior_rounds"]:
         out += [
             "",
@@ -749,15 +884,25 @@ def render_markdown(record: dict) -> str:
             out.append(f"| {prior['loop']} | {prior['decision']} | "
                        f"{prior['findings']} | {prior['dispositioned']} | "
                        f"{md_cell(prior['path'])} |")
-    out += [
-        "",
-        "## Notes",
-        "",
+    notes = (
         "Findings with source `external` (lens `external`, ids prefixed `EX-`) "
         "originate from legacy review sources outside the lane and are mapped "
         "onto the lane rubric by dimension; internal panel lenses carry id "
         "prefixes RC- (review-contract), RA- (review-adversary), and RS- "
-        "(review-security).",
+        "(review-security)."
+    )
+    if not legacy:
+        notes += (
+            " Finding ids are namespaced `<lens-id>@<model>`; `at` counts the "
+            "models that raised a finding at the same artifact and dimension "
+            "(a triage grouping, not a merge — every entry carries its own "
+            "disposition)."
+        )
+    out += [
+        "",
+        "## Notes",
+        "",
+        notes,
         "",
     ]
     return "\n".join(out)
@@ -800,8 +945,9 @@ def validate_record(doc: object) -> list[str]:
     errors: list[str] = []
     if not isinstance(doc, dict):
         return ["record must be a mapping"]
-    if doc.get("schema") != SCHEMA:
+    if doc.get("schema") not in (SCHEMA, LEGACY_SCHEMA):
         errors.append(f"invalid schema {doc.get('schema')!r}")
+    legacy = doc.get("schema") == LEGACY_SCHEMA
     for key in RECORD_TOP_KEYS:
         if key not in doc:
             errors.append(f"missing key {key!r}")
@@ -837,8 +983,22 @@ def validate_record(doc: object) -> list[str]:
     if isinstance(lane, dict):
         if lane.get("name") != LANE_NAME:
             errors.append(f"invalid lane name {lane.get('name')!r}")
-        if lane.get("version") != LANE_VERSION:
+        expected_version = LEGACY_LANE_VERSION if legacy else LANE_VERSION
+        if lane.get("version") != expected_version:
             errors.append(f"invalid lane version {lane.get('version')!r}")
+    findings = doc.get("findings")
+    if not legacy and isinstance(findings, list):
+        for index, entry in enumerate(findings):
+            if not isinstance(entry, dict):
+                errors.append(f"findings[{index}] must be a mapping")
+                continue
+            for key in ("model", "location_key"):
+                value = entry.get(key)
+                if not (isinstance(value, str) and value.strip()):
+                    errors.append(
+                        f"findings[{index}] {key} must be a non-empty string")
+            if not isinstance(entry.get("agreement"), int):
+                errors.append(f"findings[{index}] agreement must be an integer")
     return errors
 
 
@@ -872,10 +1032,14 @@ def cmd_check(args) -> int:
     # The record is re-derived, not trusted: findings come back out of the
     # reviewer documents themselves, dispositions re-run their rules against
     # those findings, and the verdict is recomputed from severities.
+    legacy = data["schema"] == LEGACY_SCHEMA
+    qualify = len({reviewer.get("model")
+                   for reviewer in data["reviewers"]}) > 1
     derived_findings: list[dict] = []
-    seen_roles: set[str] = set()
+    seen_slots: set[tuple[str, str]] = set()
     for reviewer in data["reviewers"]:
         role = reviewer.get("role")
+        model = reviewer.get("model")
         doc_path = resolve_record_path(reviewer["document"], args.repo)
         raw = read_bytes(doc_path,
                          f"review record: findings doc mismatch: {role}")
@@ -886,13 +1050,13 @@ def cmd_check(args) -> int:
         if lens["rubric_version"] != reviewer.get("rubric_version"):
             fail(f"review record: findings doc mismatch: {role} "
                  "(rubric version changed)")
-        if role in seen_roles:
-            fail(f"review record: findings doc mismatch: duplicate role "
-                 f"{role}")
-        seen_roles.add(role)
+        slot = (role, model)
+        if slot in seen_slots:
+            fail(f"review record: findings doc mismatch: duplicate "
+                 f"role/model {role}@{model}")
+        seen_slots.add(slot)
         for finding in lens["findings"]:
-            derived_findings.append({
-                "id": finding["id"],
+            entry = {
                 "source": "external" if role == "external" else "internal",
                 "lens": role,
                 "severity": finding["severity"],
@@ -901,11 +1065,24 @@ def cmd_check(args) -> int:
                 "evidence": finding["evidence"],
                 "required_change": finding["required_change"],
                 "actionable": finding["actionable"],
-            })
+            }
+            if legacy:
+                entry["id"] = finding["id"]
+            else:
+                entry["id"] = (f"{finding['id']}@{model}" if qualify
+                               else finding["id"])
+                entry["model"] = model
+            derived_findings.append(entry)
+
+    if not legacy:
+        check_panel_symmetry(data["reviewers"])
+        annotate_agreement(derived_findings)
 
     FINDING_KEYS = ("id", "source", "lens", "severity", "rubric_dimension",
                     "artifact_reference", "evidence", "required_change",
                     "actionable")
+    if not legacy:
+        FINDING_KEYS = FINDING_KEYS + ("model", "location_key", "agreement")
     derived_findings.sort(key=lambda f: f["id"])
     stored_findings = sorted(data["findings"], key=lambda f: f.get("id") or "")
     problems: list[str] = []
@@ -991,11 +1168,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     render.add_argument("--head", required=True, help="head commit sha")
     render.add_argument("--package", required=True, help="review package file")
     render.add_argument("--findings", action="append", default=[],
-                        metavar="ROLE=FILE", help="findings doc per role")
+                        metavar="ROLE@MODEL=FILE",
+                        help="one findings doc per panel slot (repeatable); "
+                             "ROLE=FILE with --model is the single-model form")
     render.add_argument("--model", action="append", default=[],
                         metavar="ROLE=MODEL",
-                        help="reviewer model per role (repeatable, required "
-                             "for every --findings role)")
+                        help="reviewer model per role for the ROLE=FILE form "
+                             "(repeatable; not accepted with ROLE@MODEL=FILE)")
     render.add_argument("--dispositions", required=True,
                         help="disposition ledger file")
     render.add_argument("--gate", action="append", default=[],

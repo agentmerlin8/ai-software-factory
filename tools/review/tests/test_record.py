@@ -29,7 +29,7 @@ REVIEW_DIR = Path(__file__).resolve().parents[1]
 RECORD_PY = REVIEW_DIR / "record.py"
 PACKAGE_PY = REVIEW_DIR / "package.py"
 
-SCHEMA = "review.record.v1"
+SCHEMA = "review.record.v2"
 
 
 class _GitFixtureTest(unittest.TestCase):
@@ -204,6 +204,7 @@ class _GitFixtureTest(unittest.TestCase):
         out_dir, extra (list of str), models (dict role->model)."""
         if "package" not in overrides:
             overrides["package"] = str(self.build_package()[0])
+        panel = overrides.pop("panel", None)
         if "findings" not in overrides:
             doc = self.write_findings("review-adversary",
                                       [self.finding("RA-001")])
@@ -239,9 +240,14 @@ class _GitFixtureTest(unittest.TestCase):
                 "--pr", str(kw["pr"]), "--base", kw["base"], "--head", kw["head"],
                 "--package", kw["package"], "--dispositions", kw["dispositions"]]
         for role, path in kw["findings"]:
-            args += ["--findings", f"{role}={path}"]
-        for role, model in sorted(kw["models"].items()):
-            args += ["--model", f"{role}={model}"]
+            if panel is None:
+                args += ["--findings", f"{role}={path}"]
+        if panel is not None:
+            for role, model, path in panel:
+                args += ["--findings", f"{role}@{model}={path}"]
+        else:
+            for role, model in sorted(kw["models"].items()):
+                args += ["--model", f"{role}={model}"]
         for gate in kw["gates"]:
             args += ["--gate", gate]
         if kw["loop"] is not None:
@@ -291,7 +297,7 @@ class _GitFixtureTest(unittest.TestCase):
         raw = (out / "review.json").read_bytes().decode("utf-8")
         self.assertEqual(raw, json.dumps(data, indent=2, sort_keys=True) + "\n")
         self.assertEqual(data["schema"], SCHEMA)
-        self.assertEqual(data["lane"], {"name": "review-lane-v1", "version": 1})
+        self.assertEqual(data["lane"], {"name": "review-lane-v1", "version": 2})
         self.assertEqual(data["undispositioned"], [])
         self.assertEqual(data["story"], "S35A")
         self.assertEqual(data["pr"], 42)
@@ -564,7 +570,7 @@ class _GitFixtureTest(unittest.TestCase):
         proc = self.render(findings=[("review-adversary", str(doc)),
                                      ("review-adversary", str(doc))])
         self.assertEqual(proc.returncode, 1)
-        self.assertIn("review record: duplicate reviewer role: "
+        self.assertIn("review record: duplicate reviewer role/model: "
                       "review-adversary", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
@@ -731,13 +737,14 @@ class _GitFixtureTest(unittest.TestCase):
              "issue": "https://github.com/org/repo/issues/9"}])
         _, _, md = self.render_ok(findings=[("review-adversary", str(doc))],
                                   dispositions=str(disp))
-        self.assertIn(f"| RA-001 | review-adversary | minor | behavior | "
-                      f"a.txt:2 | fixed | fixed: {self.fix_a} |", md)
-        self.assertIn("| RA-002 | review-adversary | info | behavior | "
-                      "extra/new.txt:1 | rejected | reason: not now "
-                      "evidence: log 42 |", md)
-        self.assertIn("| RA-003 | review-adversary | info | behavior | "
-                      "src/app.py:1 | deferred | issue: "
+        self.assertIn(f"| RA-001 | review-adversary | test-model-v1 | minor | "
+                      f"behavior | a.txt:2 | 1 | fixed | fixed: {self.fix_a} |",
+                      md)
+        self.assertIn("| RA-002 | review-adversary | test-model-v1 | info | "
+                      "behavior | extra/new.txt:1 | 1 | rejected | "
+                      "reason: not now evidence: log 42 |", md)
+        self.assertIn("| RA-003 | review-adversary | test-model-v1 | info | "
+                      "behavior | src/app.py:1 | 1 | deferred | issue: "
                       "https://github.com/org/repo/issues/9 |", md)
 
     def test_external_source_and_lens(self) -> None:
@@ -799,28 +806,124 @@ class _GitFixtureTest(unittest.TestCase):
     # -- reviewer models (RC-004) ------------------------------------------
 
     def test_reviewer_models_recorded_in_json_and_markdown(self) -> None:
-        contract = self.write_findings(
+        """Dual panel: two models on one lens are two reviewers, both named,
+        with namespaced ids and a shared location (agreement 2)."""
+        a = self.write_findings(
             "review-contract",
             [self.finding("RC-001", "info", artifact="src/app.py:1",
-                          dimension="contract_fidelity")])
-        adversary = self.write_findings("review-adversary", [])
-        disp = self.write_dispositions(
-            [{"id": "RC-001", "disposition": "rejected", "reason": "no",
-              "evidence": "e"}])
+                          dimension="contract_fidelity")],
+            path=self.repo / "findings-contract-a.yaml")
+        b = self.write_findings(
+            "review-contract",
+            [self.finding("RC-001", "info", artifact="src/app.py:1",
+                          dimension="contract_fidelity")],
+            path=self.repo / "findings-contract-b.yaml")
+        disp = self.write_dispositions([
+            {"id": "RC-001@qwen3.8-max", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "RC-001@deepseek-v4-pro-0813", "disposition": "rejected",
+             "reason": "no", "evidence": "e"}])
         _, data, md = self.render_ok(
-            findings=[("review-adversary", str(adversary)),
-                      ("review-contract", str(contract))],
-            models={"review-contract": "gpt-4o-2025-11",
-                    "review-adversary": "qwen3.8-max"},
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b))],
             dispositions=str(disp))
-        by_role = {r["role"]: r for r in data["reviewers"]}
-        self.assertEqual(by_role["review-contract"]["model"], "gpt-4o-2025-11")
-        self.assertEqual(by_role["review-adversary"]["model"], "qwen3.8-max")
+        self.assertEqual({r["model"] for r in data["reviewers"]},
+                         {"qwen3.8-max", "deepseek-v4-pro-0813"})
+        self.assertEqual({f["id"] for f in data["findings"]},
+                         {"RC-001@qwen3.8-max",
+                          "RC-001@deepseek-v4-pro-0813"})
+        self.assertTrue(all(f["agreement"] == 2 for f in data["findings"]))
+        self.assertEqual(len({f["location_key"] for f in data["findings"]}), 1)
         self.assertIn("| role | model | rubric | document |", md)
-        self.assertIn("| review-contract | gpt-4o-2025-11 | "
+        self.assertIn("| review-contract | qwen3.8-max | "
                       "review-contract-v1 |", md)
-        self.assertIn("| review-adversary | qwen3.8-max | "
-                      "review-adversary-v1 |", md)
+        self.assertIn("| review-contract | deepseek-v4-pro-0813 | "
+                      "review-contract-v1 |", md)
+        self.assertIn("models: deepseek-v4-pro-0813, qwen3.8-max", md)
+
+    # -- dual panel (S3.5c) -------------------------------------------------
+
+    def dual_docs(self, findings_a=None, findings_b=None, role="review-contract"):
+        a = self.write_findings(role, findings_a if findings_a is not None else [],
+                                path=self.repo / f"findings-{role}-a.yaml")
+        b = self.write_findings(role, findings_b if findings_b is not None else [],
+                                path=self.repo / f"findings-{role}-b.yaml")
+        return a, b
+
+    def test_dual_panel_asymmetric_refused(self) -> None:
+        a = self.write_findings("review-contract", [],
+                                path=self.repo / "findings-asym-a.yaml")
+        b = self.write_findings("review-adversary", [],
+                                path=self.repo / "findings-asym-b.yaml")
+        proc = self.render(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-adversary", "deepseek-v4-pro-0813", str(b))],
+            dispositions=str(self.write_dispositions([])))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: incomplete panel:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_dual_panel_duplicate_slot_refused(self) -> None:
+        a, _ = self.dual_docs()
+        proc = self.render(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "qwen3.8-max", str(a))],
+            dispositions=str(self.write_dispositions([])))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: duplicate reviewer role/model: "
+                      "review-contract@qwen3.8-max", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_mixed_findings_forms_refused(self) -> None:
+        a, b = self.dual_docs()
+        proc = self.render(
+            findings=[("review-contract", str(a))],
+            extra=["--findings", f"review-contract@qwen3.8-max={b}"])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: mixed --findings forms:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_dual_panel_check_rejects_tampered_agreement(self) -> None:
+        a, b = self.dual_docs(
+            [self.finding("RC-001", "major", artifact="a.txt:2")],
+            [self.finding("RC-001", "major", artifact="a.txt:2")])
+        disp = self.write_dispositions([
+            {"id": "RC-001@qwen3.8-max", "disposition": "fixed",
+             "fix_sha": self.fix_a},
+            {"id": "RC-001@deepseek-v4-pro-0813", "disposition": "fixed",
+             "fix_sha": self.fix_a}])
+        out, data, _ = self.render_ok(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b))],
+            dispositions=str(disp))
+        self.assertTrue(all(f["agreement"] == 2 for f in data["findings"]))
+
+        def weaken(data):
+            data["findings"][0]["agreement"] = 1
+
+        self.rewrite_record(out, weaken)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: findings mismatch:", proc.stderr)
+        self.assertIn("agreement", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_accepts_legacy_v1_record(self) -> None:
+        """A stored review.record.v1 record stays verifiable under v1 rules."""
+        out, data, _ = self.render_ok()
+        data["schema"] = "review.record.v1"
+        data["lane"]["version"] = 1
+        for finding in data["findings"]:
+            finding.pop("model", None)
+            finding.pop("location_key", None)
+            finding.pop("agreement", None)
+        (out / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (out / "REVIEW-42.md").write_text(record.render_markdown(data),
+                                          encoding="utf-8")
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("review record: OK", proc.stdout)
 
     def test_external_reviewer_model_recorded(self) -> None:
         doc = self.write_findings("external", [self.finding("EX-001", "info",

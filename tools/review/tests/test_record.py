@@ -750,12 +750,16 @@ class _GitFixtureTest(unittest.TestCase):
 
     def test_external_source_and_lens(self) -> None:
         doc = self.write_findings("external", [self.finding("EX-001", "info",
-                                                           artifact="a.txt:1")])
+                                                           artifact="a.txt:1")],
+                                  path=self.repo / "f-ex.yaml")
+        contract = self.write_findings("review-contract", [],
+                                       path=self.repo / "f-c.yaml")
         disp = self.write_dispositions(
             [{"id": "EX-001@test-model-v1", "disposition": "rejected",
               "reason": "legacy", "evidence": "wire log"}])
-        _, data, _ = self.render_ok(findings=[("external", str(doc))],
-                                    dispositions=str(disp))
+        _, data, _ = self.render_ok(
+            findings=[("external", str(doc)), ("review-contract", str(contract))],
+            dispositions=str(disp))
         self.assertEqual(data["findings"][0]["source"], "external")
         self.assertEqual(data["findings"][0]["lens"], "external")
         self.assertEqual(data["reviewers"][0]["role"], "external")
@@ -1095,6 +1099,93 @@ class _GitFixtureTest(unittest.TestCase):
                       proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
+    def test_external_only_panel_refused(self) -> None:
+        doc = self.write_findings("external", [],
+                                  path=self.repo / "f-ext-only.yaml")
+        proc = self.render(findings=[("external", str(doc))],
+                           models={"external": "legacy-mapper-v0"},
+                           dispositions=str(self.write_dispositions([])))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: incomplete panel: no internal lens "
+                      "coverage", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_external_document_does_not_shift_agreement_ratio(self) -> None:
+        a, b = self.dual_docs(
+            [dict(self.finding("RC-001", "minor", artifact="a.txt:2"),
+                  evidence="Model A: the guard is missing.")],
+            [dict(self.finding("RC-001", "minor", artifact="a.txt:2"),
+                  evidence="Model B: guard absent on the same path.")])
+        ext = self.write_findings(
+            "external", [self.finding("EX-001", "info", artifact="a.txt:2")],
+            path=self.repo / "f-ext-ratio.yaml")
+        disp = self.write_dispositions([
+            {"id": "RC-001@qwen3.8-max", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "RC-001@deepseek-v4-pro-0813", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "EX-001@qwen3.8-max", "disposition": "rejected",
+             "reason": "legacy", "evidence": "wire log"}])
+        _, _, md = self.render_ok(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b)),
+                   ("external", "qwen3.8-max", str(ext))],
+            dispositions=str(disp))
+        self.assertIn("models: deepseek-v4-pro-0813, qwen3.8-max", md)
+        self.assertIn("| RC-001@qwen3.8-max | review-contract | qwen3.8-max | "
+                      "minor | behavior | a.txt:2 | 2/2 |", md)
+        self.assertIn("| EX-001@qwen3.8-max | external | qwen3.8-max | info | "
+                      "behavior | a.txt:2 | — |", md)
+
+    def test_check_rejects_duplicate_document_in_stored_record(self) -> None:
+        a, b = self.dual_docs(
+            [self.finding("RC-001", "minor", artifact="a.txt:2")], [])
+        disp = self.write_dispositions([
+            {"id": "RC-001@qwen3.8-max", "disposition": "rejected",
+             "reason": "no", "evidence": "e"}])
+        out, data, _ = self.render_ok(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b))],
+            dispositions=str(disp))
+        # Point the second slot at the first slot's document and keep the
+        # stored hash consistent with that document.
+        first = next(r for r in data["reviewers"]
+                     if r["model"] == "qwen3.8-max")
+        second = next(r for r in data["reviewers"]
+                      if r["model"] == "deepseek-v4-pro-0813")
+
+        def repoint(data):
+            for reviewer in data["reviewers"]:
+                if reviewer["role"] == second["role"] and \
+                        reviewer["model"] == second["model"]:
+                    reviewer["document"] = first["document"]
+                    reviewer["document_sha256"] = first["document_sha256"]
+
+        self.rewrite_record(out, repoint)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: duplicate findings document:",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_rejects_padded_model_label(self) -> None:
+        a, b = self.dual_docs()
+        out, _, _ = self.render_ok(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b))],
+            dispositions=str(self.write_dispositions([])))
+
+        def pad(data):
+            for reviewer in data["reviewers"]:
+                if reviewer["model"] == "deepseek-v4-pro-0813":
+                    reviewer["model"] = "qwen3.8-max "
+
+        self.rewrite_record(out, pad)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
     def test_check_accepts_legacy_v1_record(self) -> None:
         """A stored review.record.v1 record stays verifiable under v1 rules."""
         out, data, _ = self.render_ok()
@@ -1119,12 +1210,17 @@ class _GitFixtureTest(unittest.TestCase):
 
     def test_external_reviewer_model_recorded(self) -> None:
         doc = self.write_findings("external", [self.finding("EX-001", "info",
-                                                           artifact="a.txt:1")])
+                                                           artifact="a.txt:1")],
+                                  path=self.repo / "f-ex2.yaml")
+        contract = self.write_findings("review-contract", [],
+                                       path=self.repo / "f-c2.yaml")
         disp = self.write_dispositions(
             [{"id": "EX-001@legacy-mapper-v0", "disposition": "rejected",
               "reason": "legacy", "evidence": "wire log"}])
-        _, data, _ = self.render_ok(findings=[("external", str(doc))],
-                                    models={"external": "legacy-mapper-v0"},
+        _, data, _ = self.render_ok(findings=[("external", str(doc)),
+                                              ("review-contract", str(contract))],
+                                    models={"external": "legacy-mapper-v0",
+                                            "review-contract": "contract-map-v0"},
                                     dispositions=str(disp))
         self.assertEqual(data["reviewers"][0]["model"], "legacy-mapper-v0")
 

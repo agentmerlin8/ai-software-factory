@@ -321,6 +321,8 @@ def check_panel_symmetry(reviewers: list[dict]) -> None:
         if reviewer["role"] == "external":
             continue
         coverage.setdefault(reviewer["model"], set()).add(reviewer["role"])
+    if len(coverage) == 0:
+        fail("review record: incomplete panel: no internal lens coverage")
     if len(coverage) <= 1:
         return
     models = sorted(coverage)
@@ -341,13 +343,23 @@ def check_panel_symmetry(reviewers: list[dict]) -> None:
 
 
 def annotate_agreement(findings: list[dict]) -> None:
-    """Set location_key and agreement (distinct models at that location)."""
+    """Set location_key and agreement (distinct models at that location).
+
+    Agreement is a panel signal, so it counts internal models only: an
+    ingested external finding is outside the panel and carries no agreement
+    count (rendered as an em dash) rather than inflating a pair's ratio.
+    """
     models_at: dict[str, set[str]] = {}
     for finding in findings:
         finding["location_key"] = location_key(finding)
+        if finding["lens"] == "external":
+            finding["agreement"] = None
+            continue
         models_at.setdefault(finding["location_key"], set()).add(
             finding["model"])
     for finding in findings:
+        if finding["lens"] == "external":
+            continue
         finding["agreement"] = len(models_at[finding["location_key"]])
 
 
@@ -825,23 +837,26 @@ def render_markdown(record: dict) -> str:
                    f"{md_cell(reviewer['rubric_version'])} | "
                    f"{md_cell(reviewer['document'])} |")
     legacy = record.get("schema") == LEGACY_SCHEMA
-    panel_models = sorted({reviewer["model"] for reviewer in record["reviewers"]})
+    panel_models = sorted({reviewer["model"] for reviewer in record["reviewers"]
+                           if reviewer["role"] != "external"})
     if not legacy:
         out += [
             "",
             "## Panel",
             "",
-            f"models: {', '.join(panel_models)}",
+            "models: " + ", ".join(md_cell(model) for model in panel_models),
             "",
             "attribution: dispatch-declared — the record binds each document "
-            "hash, not the model that produced it",
+            "hash, not the model that produced it; finding-free approval "
+            "documents are not de-duplicated",
             "",
             "| model | lenses | findings |",
             "| --- | --- | --- |",
         ]
         for model in panel_models:
             lenses = sorted(reviewer["role"] for reviewer in record["reviewers"]
-                            if reviewer["model"] == model)
+                            if reviewer["model"] == model
+                            and reviewer["role"] != "external")
             count = sum(1 for finding in record["findings"]
                         if finding.get("model") == model)
             out.append(f"| {md_cell(model)} | {md_cell(', '.join(lenses))} | {count} |")
@@ -884,13 +899,16 @@ def render_markdown(record: dict) -> str:
                 f"{md_cell(disposition_evidence(disposition))} |"
             )
         else:
+            agreement = finding.get("agreement")
+            at = ("—" if agreement is None
+                  else f"{agreement}/{len(panel_models)}")
             out.append(
                 f"| {md_cell(finding['id'])} | {md_cell(finding['lens'])} | "
                 f"{md_cell(finding.get('model'))} | "
                 f"{md_cell(finding['severity'])} | "
                 f"{md_cell(finding['rubric_dimension'])} | "
                 f"{md_cell(finding['artifact_reference'])} | "
-                f"{finding.get('agreement')}/{len(panel_models)} | "
+                f"{at} | "
                 f"{md_cell(disposition.get('disposition'))} | "
                 f"{md_cell(disposition_evidence(disposition))} |"
             )
@@ -1019,7 +1037,13 @@ def validate_record(doc: object) -> list[str]:
                 if not (isinstance(value, str) and value.strip()):
                     errors.append(
                         f"findings[{index}] {key} must be a non-empty string")
-            if not isinstance(entry.get("agreement"), int):
+            agreement = entry.get("agreement")
+            if entry.get("lens") == "external":
+                if agreement is not None:
+                    errors.append(
+                        f"findings[{index}] agreement must be null for an "
+                        "external finding")
+            elif not isinstance(agreement, int):
                 errors.append(f"findings[{index}] agreement must be an integer")
     return errors
 
@@ -1071,9 +1095,16 @@ def cmd_check(args) -> int:
     seen_slots: set[tuple[str, str]] = set()
     seen_roles: set[str] = set()
     seen_docs: dict[str, str] = {}
+    normalized: list[dict] = []
     for reviewer in data["reviewers"]:
-        role = reviewer.get("role")
-        model = reviewer.get("model")
+        role_value = reviewer.get("role")
+        model_value = reviewer.get("model")
+        # Stored labels are validated as non-empty where they are written,
+        # but check must not trust a stored record's whitespace: a padded
+        # label would otherwise create a phantom panel slot.
+        role = role_value.strip() if isinstance(role_value, str) else ""
+        model = model_value.strip() if isinstance(model_value, str) else ""
+        normalized.append({"role": role, "model": model})
         doc_path = resolve_record_path(reviewer["document"], args.repo)
         raw = read_bytes(doc_path,
                          f"review record: findings doc mismatch: {role}")
@@ -1120,7 +1151,7 @@ def cmd_check(args) -> int:
             derived_findings.append(entry)
 
     if not legacy:
-        check_panel_symmetry(data["reviewers"])
+        check_panel_symmetry(normalized)
         annotate_agreement(derived_findings)
 
     FINDING_KEYS = ("id", "source", "lens", "severity", "rubric_dimension",

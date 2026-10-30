@@ -315,6 +315,11 @@ def check_panel_symmetry(reviewers: list[dict]) -> None:
         fail("review record: empty panel: no reviewer documents supplied")
     coverage: dict[str, set[str]] = {}
     for reviewer in reviewers:
+        # The symmetry rule is scoped to internal lenses: an ingested
+        # external findings document belongs to one model and must not
+        # make an otherwise symmetric panel look asymmetric.
+        if reviewer["role"] == "external":
+            continue
         coverage.setdefault(reviewer["model"], set()).add(reviewer["role"])
     if len(coverage) <= 1:
         return
@@ -358,10 +363,6 @@ def collect_reviewers(specs: list[tuple[str, str, str]], pkg: PackageInfo,
     findings: list[dict] = []
     seen: set[tuple[str, str]] = set()
     doc_slots: dict[str, str] = {}
-    # Namespacing exists to keep two models' RC-001 apart.  A single-model
-    # panel has no collision to prevent, so it keeps the plain lens ids its
-    # operators already read (and that single-model records have always had).
-    qualify = len({model for _, model, _ in specs}) > 1
     for role, model, path in specs:
         if role not in ROLES:
             fail(f"review record: unknown reviewer role: {role}")
@@ -391,7 +392,7 @@ def collect_reviewers(specs: list[tuple[str, str, str]], pkg: PackageInfo,
         })
         for finding in lens["findings"]:
             findings.append({
-                "id": f"{finding['id']}@{model}" if qualify else finding["id"],
+                "id": f"{finding['id']}@{model}",
                 "source": "external" if role == "external" else "internal",
                 "lens": role,
                 "model": model,
@@ -663,12 +664,13 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
                          f"ROLE=FILE): {spec!r}")
         if "@" in role_part:
             role, _, model = role_part.partition("@")
+            role, model = role.strip(), model.strip()
             inline_form = True
-            if not role or not model.strip():
+            if not role or not model:
                 parser.error("bad --findings spec (expected ROLE@MODEL=FILE): "
                              f"{spec!r}")
         else:
-            role, model = role_part, ""
+            role, model = role_part.strip(), ""
             legacy_form = True
         specs.append((role, model, path))
     if inline_form and legacy_form:
@@ -679,7 +681,8 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
     if legacy_form:
         for spec in args.model:
             role, sep, model = spec.partition("=")
-            if not sep or not role or not model.strip():
+            role, model = role.strip(), model.strip()
+            if not sep or not role or not model:
                 parser.error(f"bad --model spec (expected ROLE=MODEL): {spec!r}")
             if role not in ROLES:
                 fail(f"review record: unknown model role: {role}")
@@ -1052,10 +1055,21 @@ def cmd_check(args) -> int:
     # reviewer documents themselves, dispositions re-run their rules against
     # those findings, and the verdict is recomputed from severities.
     legacy = data["schema"] == LEGACY_SCHEMA
-    qualify = len({reviewer.get("model")
-                   for reviewer in data["reviewers"]}) > 1
+    if legacy:
+        # A v1-claiming record must not smuggle v2 content past the v2
+        # guards: namespaced ids or v2 finding fields are a schema lie.
+        for finding in data["findings"]:
+            fid = finding.get("id")
+            if isinstance(fid, str) and "@" in fid:
+                fail(f"review record: schema mismatch: v1 record carries "
+                     f"namespaced finding id {fid}")
+            for key in ("model", "location_key", "agreement"):
+                if key in finding:
+                    fail(f"review record: schema mismatch: v1 record carries "
+                         f"v2 finding field {key} ({fid})")
     derived_findings: list[dict] = []
     seen_slots: set[tuple[str, str]] = set()
+    seen_roles: set[str] = set()
     seen_docs: dict[str, str] = {}
     for reviewer in data["reviewers"]:
         role = reviewer.get("role")
@@ -1078,7 +1092,12 @@ def cmd_check(args) -> int:
             fail(f"review record: findings doc mismatch: {role} "
                  "(rubric version changed)")
         slot = (role, model)
-        if slot in seen_slots:
+        if legacy:
+            if role in seen_roles:
+                fail(f"review record: findings doc mismatch: duplicate role "
+                     f"{role}")
+            seen_roles.add(role)
+        elif slot in seen_slots:
             fail(f"review record: findings doc mismatch: duplicate "
                  f"role/model {role}@{model}")
         seen_slots.add(slot)
@@ -1096,8 +1115,7 @@ def cmd_check(args) -> int:
             if legacy:
                 entry["id"] = finding["id"]
             else:
-                entry["id"] = (f"{finding['id']}@{model}" if qualify
-                               else finding["id"])
+                entry["id"] = f"{finding['id']}@{model}"
                 entry["model"] = model
             derived_findings.append(entry)
 

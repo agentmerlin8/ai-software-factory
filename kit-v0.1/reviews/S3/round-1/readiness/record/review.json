@@ -1,0 +1,474 @@
+{
+  "base_sha": "152b205b48937a3a12020c02c8378022d088d86e",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "Added W-1 toplevel-mismatch FAIL test; deleting the comparison makes it fail.",
+      "fix_sha": "52a7d81",
+      "id": "RA-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "check_c12 decode/read failures return a named FAIL, no traceback.",
+      "fix_sha": "a447cb2",
+      "id": "RA-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "required_status_checks parameter validation.",
+      "fix_sha": null,
+      "id": "RA-003",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Malformed scoped-id guard unreachable for the empty-binding branch.",
+      "fix_sha": null,
+      "id": "RA-004",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "`required` registry field is loaded but not consulted by the gate computation.",
+      "fix_sha": null,
+      "id": "RA-005",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Attest event_id TOCTOU window.",
+      "fix_sha": null,
+      "id": "RA-006",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Read-only hash walk now compares deletions as well as changes/additions.",
+      "fix_sha": "52a7d81",
+      "id": "RA-007",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "home_states swallows installed state-machine errors.",
+      "fix_sha": null,
+      "id": "RA-008",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Non-string credential refs are skipped silently (confinement fixed separately).",
+      "fix_sha": null,
+      "id": "RA-009",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "N-A applicability for unknown control-home mode.",
+      "fix_sha": null,
+      "id": "RA-010",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Unused hash_walk helper removed from readiness.py (tests keep their local copy).",
+      "fix_sha": "52a7d81",
+      "id": "RC-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "The acceptance was executed at head 62867b7: `python3 onboarding/test_out.py --smoke` (default seed = the kit's benchmark-app/) ran 10/10 steps PASS, verify GREEN (18 pass / 0 fail), rc 0. test_out.py is unchanged since the reviewed head 2bd431c, so the run applies to the reviewed code. The unit test's synthetic seed is a suite-speed choice, not a deferral of the acceptance.",
+      "fix_sha": null,
+      "id": "RC-002",
+      "issue": null,
+      "reason": "Same acceptance evidence as pipeline RC-001."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "test_readiness module docstring corrected to describe the shipped FAIL-path coverage.",
+      "fix_sha": "52a7d81",
+      "id": "RC-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "test_docs_consistency docstring corrected to describe both shipped tests.",
+      "fix_sha": "52a7d81",
+      "id": "RC-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "--forge-fixture false-PASS path (same class as tools-docs RS-002).",
+      "fix_sha": null,
+      "id": "RS-001",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Applicability N-A for an unknown control-home mode; confirm an invalid config still fails a gating check.",
+      "fix_sha": null,
+      "id": "RS-002",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "check_c12 decode/read failures return a named FAIL, no traceback (same fix as RA-002).",
+      "fix_sha": "a447cb2",
+      "id": "RS-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "file: credential refs resolved and confined under the control home; escapes are a named problem.",
+      "fix_sha": "a447cb2",
+      "id": "RS-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "home_states swallows installed state-machine errors and falls back to the kit authority.",
+      "fix_sha": null,
+      "id": "RS-005",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "deferred",
+      "evidence": "Attestation identity is self-declared; allowlist check is a trust-model decision.",
+      "fix_sha": null,
+      "id": "RS-006",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Preflight detail rows normalise CR/LF before escaping so a detail cannot break the table.",
+      "fix_sha": "a447cb2",
+      "id": "RS-007",
+      "issue": null,
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:872",
+      "evidence": "W-1's core guard `if Path(toplevel) != ctx.home.resolve(): return FAIL, f\"git toplevel {toplevel} is not the control home\"` is never exercised: the only W-1 defect test (`test_w1_fail_in_repo`, defect `not-git-root`) moves `.git` into `nested/` so `rev-parse` fails outright and the FIRST branch fires (\"not inside a git repo\"); deleting the toplevel comparison leaves every test in the package green.",
+      "id": "RA-001",
+      "lens": "review-adversary",
+      "required_change": "Add a FAIL-path test where `git rev-parse --show-toplevel` succeeds but returns a directory other than the home (e.g. home is a plain subdirectory of an initialized repo), asserting the `git toplevel ... is not the control home` detail \u2014 removing the comparison must make that test fail.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:773",
+      "evidence": "The module Laws claim \"malformed input never produces a raw traceback\", but check_c12 does `secrets.read_text(encoding=\"utf-8\")` and `gitignore.read_text(...)` with no UnicodeDecodeError handling; run_verify catches only `(EngineError, FP.FixtureError)` and `OSError`, and UnicodeDecodeError is a ValueError subclass \u2014 a non-UTF-8 factory/SECRETS.md or .gitignore escapes as a raw traceback, no PREFLIGHT.md is written, and the asserted fail-closed invariant is not delivered. parse_toml, check_a7 and check_a8 all catch UnicodeDecodeError; check_c12 does not, and no test feeds a non-UTF-8 file to it.",
+      "id": "RA-002",
+      "lens": "review-adversary",
+      "required_change": "Handle UnicodeDecodeError in check_c12's two read_text calls with a named FAIL detail (as parse_toml does), or widen run_verify's named-error catch to cover it, and add a defect test (non-UTF-8 SECRETS.md) asserting a named FAIL row and no traceback.",
+      "rubric_dimension": "behavior",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:440",
+      "evidence": "missing_protections validates parameters only for `pull_request` (`required_approving_review_count >= 1`); for `required_status_checks` it checks type presence only. A ruleset carrying a `required_status_checks` rule with an empty or absent checks parameter passes C-3/W-7 while the PASS detail claims full protection \u2014 the guard is defeated by a widened input. Every ruleset test removes or adds rule TYPES (`test_c3_fail_empty_rules`, `test_c3_fail_single_missing_protection`); none exercises a present-but-empty required_status_checks parameter.",
+      "id": "RA-003",
+      "lens": "review-adversary",
+      "required_change": "Either validate that the `required_status_checks` rule carries a non-empty checks parameter in missing_protections, or state explicitly in the check detail that only type presence is claimed; add a ruleset-dataset test with an empty required_status_checks parameter pinning the chosen semantics.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:1230",
+      "evidence": "In run_attest the malformed-scoped-id guard (`if check_id.count(\":\") != 1 or not binding.strip()`) is nested inside `if binding:`, so it is unreachable for the empty-binding case: `attest <home> C-13: --by x --note y` partitions to binding=\"\", skips the block, and appends a row for the meaningless id \"C-13:\" to the append-only ledger instead of the named refusal `unknown check id`; no test covers a trailing-colon id.",
+      "id": "RA-004",
+      "lens": "review-adversary",
+      "required_change": "Reject a check_id containing \":\" with an empty or whitespace-only binding before the declared-binding lookup (named EngineError, rc 1), and add a CLI test asserting the refusal message and a byte-identical ledger.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:1173",
+      "evidence": "load_registry hard-requires a bool `required` per check row, but the gate computation `green = summary[\"failed\"] == 0` never consults it \u2014 every FAIL gates regardless of the flag, and the flag drives no output. A production registry change flipping a CORE check to `required: false` leaves behavior and output byte-identical: the validated field is nominal, and no test pins what `required` means for gating.",
+      "id": "RA-005",
+      "lens": "review-adversary",
+      "required_change": "Either gate on `required` (only required FAILs force RED, non-required FAILs render as named non-gating rows) with a test that flips a check's flag and observes the rc change, or drop the misleading per-row bool from the registry schema and its validation.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:384",
+      "evidence": "append_attest builds `event_id = f\"onboard-attest-{check_id}-{int(time.time())}\"` and dedupes against a ledger snapshot loaded before the append (TOCTOU): two concurrent attest runs within the same unix second both load the same `existing` set, both conclude the id is free, and both append \u2014 duplicate event_ids hit the ledger's uniqueness law, and on LedgerError the dedupe silently degrades to `existing = set()` (no collision check at all).",
+      "id": "RA-006",
+      "lens": "review-adversary",
+      "required_change": "Make the append collision-safe under concurrent runs (e.g. re-read/verify uniqueness inside the append path or derive a suffix from content the snapshot cannot collide on) and add an operational test appending two attests for the same check within one second asserting distinct event_ids and a valid ledger.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/tests/test_readiness.py:306",
+      "evidence": "test_read_only_hash_walk computes `changed = {k for k in after if k not in before or before.get(k) != after[k]}` and `added = set(after) - set(before)` \u2014 both keyed on `after`, so files DELETED by a verify run never appear; a production change making verify unlink any home file outside the sanctioned set keeps the read-only-law test green.",
+      "id": "RA-007",
+      "lens": "review-adversary",
+      "required_change": "Include deletions in the walk comparison (`set(before) - set(after)` must also be a subset of the sanctioned set, or empty) so removing the guard fails the test.",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:348",
+      "evidence": "home_states() wraps the installed state_machine import/exec in `except Exception: pass` and silently falls back to the kit's SM.STATES; W-8's comparison baseline therefore changes without any signal in the detail line (\"Stage options cover all N pipeline states\" names neither authority nor N's source). A production change that makes the installed module raise (or a truncated STATES list in it) silently swaps or shrinks the authority W-8 checks against; no test covers a broken or divergent installed state_machine.py.",
+      "id": "RA-008",
+      "lens": "review-adversary",
+      "required_change": "Name the authority used in the W-8 detail (installed vs kit fallback), and add a test with a broken/short-STATES installed factory/tools/state_machine.py pinning the fallback behavior and the detail wording.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:546",
+      "evidence": "env_ref_problems silently skips non-string refs (`if not isinstance(ref, str) or CV.is_deferred(ref): continue`) and resolves `file:` refs as `(ctx.home / ref[5:]).exists()` \u2014 an absolute or `../`-escaping path resolves outside the home, so a production change declaring `refs = [\"file:/etc/passwd\"]` or a dict-valued ref passes W-3's presence guard without any credential material under the home. No test covers a non-string ref or a home-escaping file: ref.",
+      "id": "RA-009",
+      "lens": "review-adversary",
+      "required_change": "Refuse (named W-3 problem) non-string refs and file: refs that resolve outside the home, and add tests for both escapes.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:1048",
+      "evidence": "applicability's `control_home not declared (workspace.toml unreadable or invalid)` N-A branch (mode \"unknown\") turns off ALL eight mode:dedicated checks, and N-A never gates; apply_defects has no defect that removes or garbles the `control_home` key while keeping the TOML parseable, so no test shows whether a valid workspace.toml that merely omits control_home still forces RED via C-10 or silently greens with W-1..W-8 all N-A.",
+      "id": "RA-010",
+      "lens": "review-adversary",
+      "required_change": "Add a defect test (workspace.toml without `control_home`, otherwise valid) pinning the intended outcome: either a named FAIL from an always-applicable check or the N-A rendering with its rc, so widening applicability to unknown-mode cannot silently disable the WORKSPACE category.",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/readiness.py:1250",
+      "evidence": "+def hash_walk(root: Path) -> dict[str, str]:\n+    \"\"\"Read-only-law helper (used by the hash-walk test): rel path ->\n+    sha256 of every regular file under root.\"\"\" \u2014 but the hash-walk test in the same package defines and uses its own local copy (onboarding/tests/test_readiness.py:58 \"+def hash_walk(root: Path) -> dict[str, str]:\"); no test references RD.hash_walk, so the shipped helper is unused and its docstring claim has no corresponding artifact.",
+      "id": "RC-001",
+      "lens": "review-contract",
+      "required_change": "Either delete the unused hash_walk helper from onboarding/readiness.py or make the hash-walk tests (test_read_only_hash_walk, test_fixture_trees_pristine) call it; in both cases the docstring must stop claiming usage that does not exist.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/tests/test_readiness.py:330",
+      "evidence": "Contract acceptance: \"The test-out scripts ship and run green against `benchmark-app` as a smoke.\" The Diff stat ships only 4 files (onboarding/readiness.py, onboarding/registry.json, onboarding/tests/test_readiness.py, onboarding/tests/test_docs_consistency.py) \u2014 no hunk ships a test-out script or touches benchmark-app \u2014 and the gate evidence records only `python3 -m unittest`, `python3 tools/gates/test_gate.py`, `python3 tools/config_validator.py templates/...`, and CI runs at head; no benchmark-app smoke run appears anywhere in the package. The closest acceptance artifact in the Diff is the fixture-scoped bad-home run (\"The acceptance run of record: every seeded defect FAILs precisely.\"), which does not cover this criterion.",
+      "id": "RC-002",
+      "lens": "review-contract",
+      "required_change": "Show acceptance criterion 3 satisfied inside the review record: add gate evidence of the shipped test-out scripts running green against benchmark-app as a smoke at head 2bd431c, or ship/point to the test-out script hunks this slice adds, or record an explicit owner-approved deviation deferring the benchmark-app smoke (as the contract already does only for the FULL conformance smoke, not for the test-out script smoke).",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/tests/test_readiness.py:6",
+      "evidence": "Module docstring claims \"Every required check also has a FAIL-path test via the make_home/verify_home generator (one defect per test, precise detail assertions).\" \u2014 but the package shows no FAIL-path test for the required checks C-9 and W-5: \"C-9\" appears only in the good-home PASS list (test_readiness.py:226) and the registry-id enumeration (test_readiness.py:1374), and no defect in apply_defects or dataset mutation exercises W-5 (test_c8_fail_ledger_invalid asserts C-8 only); the claimed coverage has no corresponding artifact for these two checks.",
+      "id": "RC-003",
+      "lens": "review-contract",
+      "required_change": "Add FAIL-path tests for C-9 (e.g. toolchain probe failure) and W-5 (e.g. ledger-invalid asserted on the W-5 row), or correct the module docstring so the coverage claim matches the tests actually shipped.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/tests/test_docs_consistency.py:5",
+      "evidence": "Module docstring states \"ONE test asserting:\" followed by the pipeline/deleted-asset assertions, but the same file ships TWO test methods: \"+    def test_kickoff_template_gate_list_includes_spec_freeze(self):\" (test_docs_consistency.py:60) and \"+    def test_docs_name_the_pipeline_and_drop_deleted_assets(self) -> None:\" (test_docs_consistency.py:77) \u2014 the docstring does not describe the shipped contents.",
+      "id": "RC-004",
+      "lens": "review-contract",
+      "required_change": "Update the module docstring of onboarding/tests/test_docs_consistency.py to describe both shipped tests (the G7 KICKOFF-template gate-list test and the pipeline/deleted-asset test).",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:1166",
+      "evidence": "run_verify: `if forge_fixture: forge = FP.Forge.from_fixture(forge_fixture)` \u2014 the --forge-fixture flag swaps the gh transport for a dataset-backed one, and nothing records that the run was fixture-backed: PREFLIGHT.md and the --json payload (`\"status\": \"GREEN\" if green else \"RED\"`) are byte-shaped identically to a live-probe run.",
+      "id": "RS-001",
+      "lens": "review-security",
+      "required_change": "Make fixture-backed runs distinguishable at every output surface: record the forge transport mode (live vs fixture file path) in PREFLIGHT.md and in the --json payload, or refuse --forge-fixture outside a test environment, so a fabricated-dataset GREEN can never masquerade as live gate evidence.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:1043",
+      "evidence": "applicability: `if applies == \"mode:dedicated\": if ctx.control_home == \"dedicated\": return None; if ctx.control_home == \"in-repo\": return ...; return \"control_home not declared (workspace.toml unreadable or invalid)\"` \u2014 Context sets `self.control_home = ch if isinstance(ch, str) else None` with no enum validation, so a declared but unrecognized value (control_home = \"garbage\") renders ALL W-1..W-8 checks N-A and skips check_c13's binding-scoped attest requirement (`if ctx.control_home != \"dedicated\" ...: return status, detail`), with no FAIL raised at readiness.py's own boundary; no test covers a non-enum control_home value.",
+      "id": "RS-002",
+      "lens": "review-security",
+      "required_change": "Validate control_home against the closed enum {dedicated, in-repo} when it is present: a declared but unrecognized value must produce a named FAIL (fail closed), not N-A scope reduction of the dedicated-mode checks and the C-13 binding attest requirement.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:773",
+      "evidence": "check_c12: `if not secrets.is_file() or not secrets.read_text(encoding=\"utf-8\").strip()` and `text = gitignore.read_text(encoding=\"utf-8\").lower()` read target-controlled bytes with no UnicodeDecodeError handling; run_verify only catches `(EngineError, FP.FixtureError)` and `OSError`, so a non-UTF-8 SECRETS.md or .gitignore raises a raw traceback that kills the whole verify \u2014 no named FAIL row, no PREFLIGHT.md, no summary \u2014 contradicting the module's own law \"malformed input never produces a raw traceback\"; the FAIL-path tests (\"no-secrets-doc\", \"bad-gitignore\") only use valid UTF-8, so they stay green regardless of decode handling.",
+      "id": "RS-003",
+      "lens": "review-security",
+      "required_change": "Guard every target-file read in the check implementations (C-12 in particular) for UnicodeDecodeError and convert it to a named FAIL detail for that check, so one malformed file yields a precise FAIL instead of aborting the entire verify with a traceback; add a non-UTF-8 fixture test.",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:553",
+      "evidence": "env_ref_problems: `elif ref.startswith(\"file:\"): if not (ctx.home / ref[5:]).exists()` \u2014 the file: credential ref is joined onto the home with no confinement: an absolute path (`ctx.home / \"/etc/passwd\"` resolves to `/etc/passwd` under pathlib) or a ../ traversal escapes the control home, and W-3 then PASSes on a credential that lives outside the workspace while the FAIL detail doubles as an existence oracle for arbitrary paths.",
+      "id": "RS-004",
+      "lens": "review-security",
+      "required_change": "Resolve file: refs against ctx.home and require the resolved path to stay within the home (reject absolute paths and ..-escapes with a named problem) before the existence check.",
+      "rubric_dimension": "security",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:348",
+      "evidence": "home_states: `spec.loader.exec_module(mod)` is wrapped in `except Exception: pass  # fall through to the kit authority` \u2014 a broken or hostile installed factory/tools/state_machine.py that raises during import is silently discarded with no named detail anywhere, and W-8 then validates the board against the kit's STATES without the output ever revealing that the home's declared authority failed to load.",
+      "id": "RS-005",
+      "lens": "review-security",
+      "required_change": "Narrow the catch and surface the failure: record a named detail (in the W-8 row or an advisory) when the installed state_machine exists but fails to import, so the silent fallback to the kit authority is visible in verify output.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:379",
+      "evidence": "append_attest validates only `if not isinstance(by, str) or not by.strip()` and find_attest accepts any row where `isinstance(by, str) and by.strip()` \u2014 the human-gate identity is a fully self-declared arbitrary string; rows carrying decision \"approved\" are written and trusted with no binding to any authenticated identity (the forge's auth login is already probed by C-2 via `ctx.forge.auth_scopes()`), so any actor able to run the CLI mints an approved human_gate PASS for C-13/U-*/A-* under any name.",
+      "id": "RS-006",
+      "lens": "review-security",
+      "required_change": "Bind the attest identity to an authenticated source: cross-check --by against the forge's authenticated login (or record the authenticated login alongside the claimed one in the row) so a human-gate PASS carries verifiable attribution.",
+      "rubric_dimension": "security",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/readiness.py:1135",
+      "evidence": "write_preflight: `detail = (r.get(\"detail\") or \"\").replace(\"|\", \"\\\\|\")` escapes pipes but not newlines, and details can embed ledger-controlled strings (attest_status renders `attested by {row.get('answered_by')}`); a crafted answered_by (or subprocess error text) containing a newline injects forged rows (e.g. a fake `| C-3 | CORE | PASS | ... |` line) into the regenerated PREFLIGHT.md report.",
+      "id": "RS-007",
+      "lens": "review-security",
+      "required_change": "Sanitize detail strings before table interpolation \u2014 strip or escape CR/LF and collapse each detail to a single line in write_preflight \u2014 so report rows can never be injected from ledger or subprocess content.",
+      "rubric_dimension": "security",
+      "severity": "minor",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3/round-1/gate-evidence.md",
+      "evidence_sha256": "5e3e920675d39d8117295fdede6908ce3fadfeab66999a52c63b9bfe0c2e67d1",
+      "exit": 0,
+      "gate": "deterministic-gates"
+    }
+  ],
+  "head_sha": "2bd431cd82e0938b42309ed3d1ff808d9e2260ad",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 1
+  },
+  "open_findings": [
+    "RA-003",
+    "RA-004",
+    "RA-005",
+    "RA-006",
+    "RA-008",
+    "RA-009",
+    "RA-010",
+    "RC-002",
+    "RS-001",
+    "RS-002",
+    "RS-005",
+    "RS-006"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3/round-1/pkg-readiness.md",
+    "sha256": "de145807307d37da509d48552638156a2669ba07b9ff3cc40cc0a6eeae87dd06"
+  },
+  "pr": 23,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/readiness/findings-review-adversary.yaml",
+      "document_sha256": "f74e0040078bd221156857a69bc287ed55d66a35ca7be1d07a6831ba037c5e71",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/readiness/findings-review-contract.yaml",
+      "document_sha256": "cd49b9da787a77df7666a9f4b9709e6260d719fdf9232f9c87969e7b6801b081",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-1/readiness/findings-review-security.yaml",
+      "document_sha256": "aa9d35ddaa572e6be981384178215faee010abe28b5fa4936bc19c8c5cd6649d",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v1",
+  "story": "S3",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 1,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 0,
+    "loop": 1,
+    "loop_cap": 2,
+    "majors": 5,
+    "minors": 15
+  }
+}

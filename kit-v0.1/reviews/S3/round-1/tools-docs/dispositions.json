@@ -1,0 +1,112 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001",
+      "disposition": "rejected",
+      "reason": "Package-scope artifact: the docs describe artifacts shipped in the same PR but outside this package.",
+      "evidence": "onboarding/readiness.py (1291 lines), onboard.py, forge_probe.py and their tests are in the same diff (pkg-readiness / pkg-pipeline, hashes de145807 / 269be00d). The tools-docs package was scoped to tools+docs so each lens fit a context."
+    },
+    {
+      "id": "RC-002",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: quickstart passes --control-home in-repo in README.md and onboarding/README.md, with the reason stated."
+    },
+    {
+      "id": "RC-003",
+      "disposition": "rejected",
+      "reason": "The tool is a carried S2 residual, disclosed in the PR body.",
+      "evidence": "PR #23 body, T6: 'Carried S2 residuals: F3 - genericization CI tripwire (tools/check_generi...'. It enforces the build-plan ground rule 'This repo stays generic - no private product names ever'."
+    },
+    {
+      "id": "RC-004",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Advisory-vs-gating wording for kit-SHA drift; docs wording pass."
+    },
+    {
+      "id": "RC-005",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Five-category registry wording vs implemented checks; docs wording pass."
+    },
+    {
+      "id": "RA-001",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "check_genericization scans the union of tracked and walked files so untracked new files are swept; test added."
+    },
+    {
+      "id": "RA-002",
+      "disposition": "rejected",
+      "reason": "Not dead code: the bare-invocation check is scoped to declared runners; contract-shape validation lives in the contract parser.",
+      "evidence": "mechanical_checks.check_bare_runners returns early when no --runner names are declared (nothing to check), and the added verify_commands type check runs whenever the check is active."
+    },
+    {
+      "id": "RA-003",
+      "disposition": "rejected",
+      "reason": "Documented normalization, not a defect.",
+      "evidence": "The loop rewrites non-list contract fields to [] with the comment explaining that a list-typed field failing the contract parser is normalized so the gate reports the parser's named findings rather than crashing."
+    },
+    {
+      "id": "RA-004",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Unreachable defensive try/except; remove or wire it in a cleanup pass."
+    },
+    {
+      "id": "RA-005",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: _read_injected_json uses a sentinel so JSON null is a shape refusal, not a read failure."
+    },
+    {
+      "id": "RA-006",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "gitignore template over-broad substring patterns."
+    },
+    {
+      "id": "RA-007",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Carve-out is a whole-line test broader than its clone-URL intent."
+    },
+    {
+      "id": "RS-001",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Same item as RA-006 (gitignore substring patterns)."
+    },
+    {
+      "id": "RS-002",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "--forge-fixture false-PASS path; needs an explicit test-mode gate or report annotation."
+    },
+    {
+      "id": "RS-003",
+      "disposition": "rejected",
+      "reason": "No elevated token: the workflow declares no permissions block and no secrets; fetch-depth only affects history.",
+      "evidence": ".github/workflows/kit-ci.yml: actions/checkout with fetch-depth 0 and no token input, no permissions: key, no secret references; GITHUB_TOKEN is not passed to any script."
+    },
+    {
+      "id": "RS-004",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Genericization tripwire skips binary/unreadable files; decide whether to fail loudly."
+    },
+    {
+      "id": "EX-004",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: non-object UI evidence is a named usage refusal (rc 2) and never reaches check_ui_results."
+    },
+    {
+      "id": "EX-005",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: quickstart passes --control-home in-repo in README.md and onboarding/README.md."
+    }
+  ]
+}

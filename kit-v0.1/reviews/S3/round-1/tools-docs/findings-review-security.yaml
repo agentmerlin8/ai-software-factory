@@ -1,0 +1,37 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: bd0de80a5873fd8fa69dc5d701b01fd84c873f1d914ef6f04f94d4d9fd40ec33
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/templates/gitignore:7
+      evidence: "The shipped gitignore template ignores '*token*' (line 7) and '*secret*' (line 6) by bare substring: '+*secret*' / '+*token*'. apply installs this template into every onboarded control home (ONBOARDING.md: \"- `factory/KICKOFF.md`, `factory/SECRETS.md`, `.gitignore`\"). The patterns match ANY path containing the substring, not just secret stores — e.g. src/tokenizer.py, token_bucket.md, secret_sharing.rs are silently untracked, so code and config the operator expects committed never enters version control, with no error anywhere."
+      required_change: "Narrow the shipped patterns to the documented secret locations only (e.g. 'secrets/', '.env', '.env.*', '*.pem', plus at most '*secret*'/'*token*' anchored to a dedicated directory such as 'secrets/**' or '*.secret'), so legitimate source files whose names merely contain the substrings are not ignored; update SECRETS.md's C-12 wording if it names these patterns."
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@ONBOARDING.md:173
+      evidence: "The fixture seam swaps the real forge transport for attacker/operator-controlled data: \"`preflight`, `apply`, and `verify` accept `--forge-fixture <file>`: the sanctioned fixture-backed seam that swaps the forge (gh) transport for a dataset-driven one\" (ONBOARDING.md:173-175), while verify's output is committed truth: \"`factory/PREFLIGHT.md` is regenerated on every run and is the **report of record**\" (ONBOARDING.md:108) and the verify loop says \"commit it\" (ONBOARDING.md:154). The only guard separating a fixture-backed run from a real readiness record is prose — \"a real onboarding session never passes it\" (ONBOARDING.md:176) — nothing in the documented behavior marks, refuses, or distinguishes a PREFLIGHT.md produced under --forge-fixture. Mutation: run `verify --forge-fixture f.json` against a green fixture dataset and commit the resulting report of record; downstream consumers (KICKOFF cold start reads \"factory/PREFLIGHT.md (the latest verify result)\", ONBOARDING.md's kickoff message) accept it as real readiness."
+      required_change: "Make the fixture mode mechanically visible in the report of record: when verify runs with --forge-fixture, stamp the regenerated factory/PREFLIGHT.md with an unmissable fixture-mode marker (and record it in the onboarding/verify output), or refuse to write the report of record under a fixture unless an explicit override flag is passed, so a fixture-backed run can never produce an unmarked readiness record."
+      actionable: true
+    - id: RS-003
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@.github/workflows/kit-ci.yml:28
+      evidence: "The workflow changes deepen what untrusted-branch code can do without pinning token scope: the diff adds full-history checkout ('+          fetch-depth: 0   # full history — readiness pin-resolution checks', .github/workflows/kit-ci.yml:12) and a new step executing repo-controlled Python on every push/PR ('+      - name: Genericization tripwire (banned-token sweep)' / '+        run: python3 tools/check_genericization.py', lines 28-29). Neither hunk introduces or shows a least-privilege `permissions:` block, so the job's steps run with the repository's default GITHUB_TOKEN scope (write-all on private/legacy settings), wider than anything the listed steps need — a fork-branch or malicious-commit change to the executed scripts inherits that token."
+      required_change: "Add an explicit least-privilege permissions block to the workflow (e.g. `permissions: contents: read` at the workflow or job level) so the CI job's GITHUB_TOKEN is scoped to read-only regardless of repository defaults."
+      actionable: true
+    - id: RS-004
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/check_genericization.py:153
+      evidence: "The tripwire silently skips any file that is not valid UTF-8 or cannot be read: '+        except (UnicodeDecodeError, OSError):' / '+            continue  # binary/unreadable: skipped, never fatal' (tools/check_genericization.py:153-154). Mutation: append one invalid byte (e.g. 0xff) to a text file containing banned vocabulary and the file leaves the scan entirely — the gate stays green (exit 0, 'genericization: 0 hit(s)') while the leak ships, with no line naming the skipped file. The docstring makes the skip deliberate, but the skip is invisible in the output, so a bypass produces no signal."
+      required_change: "Make skips visible: print a one-line notice per skipped-but-git-tracked file (e.g. 'SKIP <path>: not valid UTF-8') and include the skip count in the summary, so a file silently dropping out of the tripwire's coverage is observable in CI logs; optionally fail when a text-extension file is undecodable."
+      actionable: true

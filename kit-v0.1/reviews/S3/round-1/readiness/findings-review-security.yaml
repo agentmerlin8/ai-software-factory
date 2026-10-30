@@ -1,0 +1,58 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: de145807307d37da509d48552638156a2669ba07b9ff3cc40cc0a6eeae87dd06
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/readiness.py:1166
+      evidence: "run_verify: `if forge_fixture: forge = FP.Forge.from_fixture(forge_fixture)` — the --forge-fixture flag swaps the gh transport for a dataset-backed one, and nothing records that the run was fixture-backed: PREFLIGHT.md and the --json payload (`\"status\": \"GREEN\" if green else \"RED\"`) are byte-shaped identically to a live-probe run."
+      required_change: "Make fixture-backed runs distinguishable at every output surface: record the forge transport mode (live vs fixture file path) in PREFLIGHT.md and in the --json payload, or refuse --forge-fixture outside a test environment, so a fabricated-dataset GREEN can never masquerade as live gate evidence."
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/readiness.py:1043
+      evidence: "applicability: `if applies == \"mode:dedicated\": if ctx.control_home == \"dedicated\": return None; if ctx.control_home == \"in-repo\": return ...; return \"control_home not declared (workspace.toml unreadable or invalid)\"` — Context sets `self.control_home = ch if isinstance(ch, str) else None` with no enum validation, so a declared but unrecognized value (control_home = \"garbage\") renders ALL W-1..W-8 checks N-A and skips check_c13's binding-scoped attest requirement (`if ctx.control_home != \"dedicated\" ...: return status, detail`), with no FAIL raised at readiness.py's own boundary; no test covers a non-enum control_home value."
+      required_change: "Validate control_home against the closed enum {dedicated, in-repo} when it is present: a declared but unrecognized value must produce a named FAIL (fail closed), not N-A scope reduction of the dedicated-mode checks and the C-13 binding attest requirement."
+      actionable: true
+    - id: RS-003
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@onboarding/readiness.py:773
+      evidence: "check_c12: `if not secrets.is_file() or not secrets.read_text(encoding=\"utf-8\").strip()` and `text = gitignore.read_text(encoding=\"utf-8\").lower()` read target-controlled bytes with no UnicodeDecodeError handling; run_verify only catches `(EngineError, FP.FixtureError)` and `OSError`, so a non-UTF-8 SECRETS.md or .gitignore raises a raw traceback that kills the whole verify — no named FAIL row, no PREFLIGHT.md, no summary — contradicting the module's own law \"malformed input never produces a raw traceback\"; the FAIL-path tests (\"no-secrets-doc\", \"bad-gitignore\") only use valid UTF-8, so they stay green regardless of decode handling."
+      required_change: "Guard every target-file read in the check implementations (C-12 in particular) for UnicodeDecodeError and convert it to a named FAIL detail for that check, so one malformed file yields a precise FAIL instead of aborting the entire verify with a traceback; add a non-UTF-8 fixture test."
+      actionable: true
+    - id: RS-004
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/readiness.py:553
+      evidence: "env_ref_problems: `elif ref.startswith(\"file:\"): if not (ctx.home / ref[5:]).exists()` — the file: credential ref is joined onto the home with no confinement: an absolute path (`ctx.home / \"/etc/passwd\"` resolves to `/etc/passwd` under pathlib) or a ../ traversal escapes the control home, and W-3 then PASSes on a credential that lives outside the workspace while the FAIL detail doubles as an existence oracle for arbitrary paths."
+      required_change: "Resolve file: refs against ctx.home and require the resolved path to stay within the home (reject absolute paths and ..-escapes with a named problem) before the existence check."
+      actionable: true
+    - id: RS-005
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@onboarding/readiness.py:348
+      evidence: "home_states: `spec.loader.exec_module(mod)` is wrapped in `except Exception: pass  # fall through to the kit authority` — a broken or hostile installed factory/tools/state_machine.py that raises during import is silently discarded with no named detail anywhere, and W-8 then validates the board against the kit's STATES without the output ever revealing that the home's declared authority failed to load."
+      required_change: "Narrow the catch and surface the failure: record a named detail (in the W-8 row or an advisory) when the installed state_machine exists but fails to import, so the silent fallback to the kit authority is visible in verify output."
+      actionable: true
+    - id: RS-006
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/readiness.py:379
+      evidence: "append_attest validates only `if not isinstance(by, str) or not by.strip()` and find_attest accepts any row where `isinstance(by, str) and by.strip()` — the human-gate identity is a fully self-declared arbitrary string; rows carrying decision \"approved\" are written and trusted with no binding to any authenticated identity (the forge's auth login is already probed by C-2 via `ctx.forge.auth_scopes()`), so any actor able to run the CLI mints an approved human_gate PASS for C-13/U-*/A-* under any name."
+      required_change: "Bind the attest identity to an authenticated source: cross-check --by against the forge's authenticated login (or record the authenticated login alongside the claimed one in the row) so a human-gate PASS carries verifiable attribution."
+      actionable: true
+    - id: RS-007
+      severity: minor
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/readiness.py:1135
+      evidence: "write_preflight: `detail = (r.get(\"detail\") or \"\").replace(\"|\", \"\\\\|\")` escapes pipes but not newlines, and details can embed ledger-controlled strings (attest_status renders `attested by {row.get('answered_by')}`); a crafted answered_by (or subprocess error text) containing a newline injects forged rows (e.g. a fake `| C-3 | CORE | PASS | ... |` line) into the regenerated PREFLIGHT.md report."
+      required_change: "Sanitize detail strings before table interpolation — strip or escape CR/LF and collapse each detail to a single line in write_preflight — so report rows can never be injected from ledger or subprocess content."
+      actionable: true

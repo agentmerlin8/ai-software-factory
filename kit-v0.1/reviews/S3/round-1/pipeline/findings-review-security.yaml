@@ -1,0 +1,44 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: 269be00da739de416d92686bf26baa6624c630a899ea102e693e720bebbcd3b1
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: onboarding/forge_probe.py:303
+      evidence: "the label_ensure branch of the default transport executes a caller-supplied argv verbatim: `if op == \"label_ensure\": argv = params[\"argv\"]` then `out = subprocess.run(argv, capture_output=True, text=True)` — the docstring's containment claim that the single sanctioned write op is confined to label ensure is not enforced at the transport seam; any caller (or future edit to Forge.label_ensure) that reaches gh_probe_transport with op=\"label_ensure\" and an arbitrary argv list gets arbitrary subprocess execution under the operator's gh credentials, and the tests would stay green because they only assert the pure builder's output and the recorded params for calls made through Forge.label_ensure"
+      required_change: "confine the write seam at the transport: in the label_ensure branch, rebuild the argv from the structured params via build_label_ensure_argv(params[\"repo\"], params[\"name\"], params[\"color\"], params[\"description\"]) instead of trusting params[\"argv\"], so the default transport can only ever execute `gh label create ... --force`"
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: security
+      artifact_reference: onboarding/onboard.py:483
+      evidence: "Installer.install_bytes decides with `dest = self.target / rel` then `if dest.exists():` and otherwise `dest.parent.mkdir(parents=True, exist_ok=True)` + `dest.write_bytes(data)` — no symlink or resolved-path confinement check anywhere; a hostile target tree carrying a broken symlink at an install path (e.g. `factory/KICKOFF.md -> ~/.profile`) makes exists() False and write_bytes follow the link, creating/overwriting files OUTSIDE the target, and mkdir(parents=True) likewise follows symlinked parent dirs; the package's own test_out.py treats exactly this class as a real threat (\"a preserved symlink could point OUTSIDE the temp dir and later writes ... would mutate the original target\") but apply — the command that actually writes into a possibly third-party repo — has no equivalent guard"
+      required_change: "before any write, refuse (named, fail-closed) when dest or any component of dest.parent inside the target is a symlink, or resolve dest and verify it stays within target.resolve(); apply the same check to the mkdir(parents=True) path"
+      actionable: true
+    - id: RS-003
+      severity: major
+      rubric_dimension: security
+      artifact_reference: onboarding/onboard.py:416
+      evidence: "propose validates --envs entries only by existence — `if not (WS_TEMPLATES / \"environments\" / f\"{name}.toml\").is_file()` — with no format or single-component check on `name`, then builds `src = WS_TEMPLATES / \"environments\" / f\"{name}.toml\"` and `dst = drafts_dir / \"environments\" / f\"{name}.toml\"`; a traversal name (`--envs ../../../..../x`) reads any existing *.toml on disk and writes a copy outside onboarding-drafts (dst.parent.mkdir creates the escaping dirs), and an absolute name resets both Paths entirely (pathlib `/` with an absolute operand), turning dst into an arbitrary *.toml path that is then rewritten; every sibling input on this same command is grammar-checked (WS_SLUG_RE, REPO_ID_RE, pin, control_home), and test_out.py ships validate_dir_name for exactly this class, so the env-name boundary is a validation gap, not a design choice"
+      required_change: "validate each env name as a single relative component before any path join (reuse the validate_dir_name law: non-empty, no NUL, no '/' or '\\\\', not '.'/'..', equal to its own Path(...).name), with a named refusal otherwise"
+      actionable: true
+    - id: RS-004
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: onboarding/forge_probe.py:262
+      evidence: "the issue_form transport branch classifies failure by substring on the child's stderr: `detail = (out.stderr or \"\").strip()` then `if \"404\" in detail: return {\"present\": False, \"path\": None}` — any error whose text happens to contain '404' anywhere (rate-limit bodies, repo names, echoed URLs) is silently reclassified as a legitimate 'template absent' result instead of a named ProbeError, so the check layer reports 'issue form missing' when the real condition is an unprobeable forge"
+      required_change: "match the HTTP status structurally (e.g. the leading `HTTP 404` of gh api's error output or `gh api --silent` status handling) instead of an unanchored '404' substring, and raise the named ProbeError for everything else"
+      actionable: true
+    - id: RS-005
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: onboarding/forge_probe.py:209
+      evidence: "the ruleset transport branch swallows a non-array listing: `for entry in listing if isinstance(listing, list) else []:` — a valid-JSON object response (e.g. `{\"message\": \"API rate limit exceeded\"}`) yields zero rulesets and Forge.ruleset then returns found=False with read=\"ok\", presenting a refused/degraded read as a successful read that found no protection; the labels op in the same transport explicitly refuses this shape (`expected an array of labels`), so the ruleset path is the inconsistent one"
+      required_change: "mirror the labels op: when the parsed listing is not a list, raise the named ProbeError (`probe failed: ruleset — cannot parse gh output: expected an array of rulesets`) instead of iterating an empty fallback"
+      actionable: true

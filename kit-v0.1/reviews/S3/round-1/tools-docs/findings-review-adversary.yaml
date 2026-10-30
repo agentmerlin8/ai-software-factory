@@ -1,0 +1,58 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: bd0de80a5873fd8fa69dc5d701b01fd84c873f1d914ef6f04f94d4d9fd40ec33
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/check_genericization.py:144
+      evidence: "scan() selects `files = tracked_files(root) if is_git_repo(root) else walked_files(root)`, and the CI step (`run: python3 tools/check_genericization.py`) executes inside an actions/checkout work tree, so production always takes the git-tracked branch. Yet the suite docstring says each case runs in a `temp tree, non-git -> the tree-walk branch`, and the only case touching the git branch, test_real_repo_root_is_clean, asserts merely rc 0 plus `genericization: 0 hit(s) in 0 file(s)` - which an empty scan satisfies; test_root_flag_honored_and_validated's default-root leg asserts only `assertNotIn(\"leak.md\", proc.stdout)` with no rc or hit check. Named defeating change: stub `tracked_files` to `return []` (leave is_git_repo intact); every test in tools/tests/test_genericization_check.py stays green while the CI tripwire permanently prints `0 hit(s) in 0 file(s)`, exits 0, and waves banned-token leaks through."
+      required_change: "add a suite case that exercises the git branch as a detector: git-init a temp repo, commit a file containing a seeded token, run the tool with --root at it, and assert rc 1 plus the exact HIT line, so an empty or stubbed tracked-file enumeration fails the suite"
+      actionable: true
+    - id: RA-002
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/gates/mechanical_checks.py:201
+      evidence: "the new guard in check_bare_runners (`declared = contract.get(\"verify_commands\")` / non-list -> `fail(...)`) sits after the early return `no runner names declared (--runner) - bare-invocation check inactive`. No test in the package reaches it: the unit assertion calls only `M.check_verify_commands({\"verify_commands\": 42}, ...)`, and the CLI case test_verify_commands_non_list_named passes no --runner, so check_bare_runners returns inactive before the guard runs. Deleting this guard leaves the whole suite green, while a production contract with declared runners and `verify_commands: 42` regresses to the raw TypeError the hunk's own comment (`named refusal, never TypeError (S2-F2)`) says must never happen."
+      required_change: "add a unit case calling check_bare_runners with a non-empty runners list and a non-list verify_commands, asserting the named `must be a list, got int` finding and no exception"
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/gates/pre_review_gate.py:172
+      evidence: "the normalization loop rewrites five keys (`files`, `tests`, `verify_commands`, `invariants`, `decisions`) to `[]` when non-list, justified by the comment `a list-typed field that failed the type check above already carries a NAMED finding`. The package proves that claim for only two of the five keys (the tests assert named findings for `files: 42` and `verify_commands: 42`); for `tests`, `invariants`, and `decisions` no test shows a named finding exists, and validate_contract's body is not in the package. If any of those three keys lacks a type finding upstream, the silent `[]` normalization makes downstream checks (tests coverage, invariants, decisions) pass vacuously with zero findings - and removing validate_contract's type check for one of those keys, or extending the normalization list to a key that never had one, leaves the suite green."
+      required_change: "add gate cases feeding non-list `tests`, `invariants`, and `decisions` through the plan/build CLI, each asserting a NAMED finding is emitted alongside the normalization, so the comment's claim is test-pinned for all five keys"
+      actionable: true
+    - id: RA-004
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/gates/pre_review_gate.py:366
+      evidence: "build_mode's new try/except around `diff_file.read_text` (named `manifest-diff` finding, `named refusal, never a raw traceback (S2-F2)`) is unreachable through the CLI: main() now pre-reads `args.diff_file` and returns rc 2 (`usage: unreadable ...`) before build_mode is ever called, and the only test for a bad diff file, test_missing_diff_file_is_usage_refusal, exercises just that pre-check. No test calls build_mode directly with an unreadable injected diff. Reverting the guard to a bare `diff_file.read_text(...)` - or deleting it - leaves the entire suite green while any programmatic caller (test harnesses, future embedders importing the module) regresses to a raw traceback on a non-UTF-8 diff."
+      required_change: "add a unit test that calls Gate.build_mode directly with a non-UTF-8 or unreadable --diff-file path and asserts the named `manifest-diff ... unreadable` finding with no traceback, so the guard is proven independent of the CLI pre-check"
+      actionable: true
+    - id: RA-005
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/gates/pre_review_gate.py:502
+      evidence: "_read_injected_json uses None as its failure sentinel and returns `json.loads(text)` on success; a --command-result or --ui-results file whose entire content is the valid JSON literal `null` therefore returns None indistinguishably from a read failure, and callers do `if parsed is None: return 2` - an rc-2 exit with NO `usage: unreadable ...` line printed, contradicting the helper's own contract (`Returns the parsed value, or None after printing usage: unreadable <path>`) and the S2-F2 named-refusal rule. No test covers a null-content evidence file, so the silent unnamed refusal ships green."
+      required_change: "separate the failure signal from parsed values (sentinel object or (ok, value) tuple) so valid JSON `null` is handled explicitly - either accepted as a legal empty evidence value or refused with the named usage line - and add a test pinning the chosen behavior"
+      actionable: true
+    - id: RA-006
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@onboarding/templates/gitignore:6
+      evidence: "the installed ignore template carries the patterns `*secret*` (line 6) and `*token*` (line 7) while ONBOARDING.md's apply list installs `factory/SECRETS.md` and `.gitignore` into the same target repo. On case-insensitive filesystems (macOS/Windows checkouts, where git sets core.ignorecase and matches ignore patterns case-insensitively) `*secret*` matches `factory/SECRETS.md`, so apply installs the secrets-posture doc but git silently never tracks it - an unhandled partial-install failure mode; the diff ships no check that every file apply installs survives the .gitignore it installs, and Linux CI (case-sensitive) can never catch it."
+      required_change: "narrow the pattern or add a negation (e.g. `!factory/SECRETS.md`) so installed template files are never ignored by the installed .gitignore, and add a verify/apply check (exercised case-insensitively) that no installed file matches the ignore rules"
+      actionable: true
+    - id: RA-007
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/check_genericization.py:132
+      evidence: "carve-out 1 is implemented as a whole-line test - `if name == \"agentmerlin\" and \"ai-software-factory\" in line.lower(): continue` - while its documented intent is narrow: `clone URLs like github.com/agentmerlin8-ops/ai-software-factory pass`. Any agentmerlin occurrence on a line that merely mentions the factory name is carved out, so a leaking reference (e.g. `vendored from agentmerlin/[redacted]-ingest into ai-software-factory`) passes the tripwire; the guard is wider than the claim. test_agentmerlin_with_factory_identity_passes pins only the pass direction (a genuine clone URL), and no test distinguishes URL-shaped identity lines from arbitrary co-mentioned lines, so widening or keeping the broad form stays green either way."
+      required_change: "narrow the carve-out to the claimed shape (agentmerlin appearing as part of an ai-software-factory repo URL/host path on the line) and add a failing-case test for a bare agentmerlin reference that merely co-occurs with the factory name"
+      actionable: true

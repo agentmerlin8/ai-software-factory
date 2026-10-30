@@ -1,0 +1,16 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: 269be00da739de416d92686bf26baa6624c630a899ea102e693e720bebbcd3b1
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: onboarding/tests/test_test_out.py:22
+      evidence: "Contract acceptance: \"The test-out scripts ship and run green against `benchmark-app` as a smoke.\" The package's own test docstring substitutes a different seed and defers the required run: \"All smoke runs work on temp dirs with a tiny synthetic seed (the real benchmark-app seed run is the orchestrator's acceptance, not a unit test).\" The Gate evidence section lists four commands (python3 -m unittest; python3 tools/gates/test_gate.py; config_validator over 3 templates; CI runs) — none is a `python3 onboarding/test_out.py --smoke` invocation against the default benchmark-app seed, and no other artifact in the package records such a run at head 2bd431c."
+      required_change: "Make the benchmark-app smoke run evidenced inside the review surface: either add the green `python3 onboarding/test_out.py --smoke` (default seed = benchmark-app/) invocation with its output to the gate-evidence artifact at head 2bd431cd82e0938b42309ed3d1ff808d9e2260ad, or add an in-suite test that exercises the default benchmark-app seed end-to-end. Until one of these exists, the third acceptance criterion's \"run green against benchmark-app\" clause is not shown satisfied."
+      actionable: true

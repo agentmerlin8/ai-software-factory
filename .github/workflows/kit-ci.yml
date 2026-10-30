@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — readiness pin-resolution checks
+                           # resolve concrete pins against ancestor commits
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'   # the documented floor (stdlib tomllib)
@@ -22,3 +25,5 @@ jobs:
           templates/workspace/workspace.toml
           templates/workspace/environments/local.toml
           templates/workspace/environments/github.toml
+      - name: Genericization tripwire (banned-token sweep)
+        run: python3 tools/check_genericization.py

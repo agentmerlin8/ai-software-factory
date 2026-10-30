@@ -1,0 +1,20 @@
+workspace = "fixture-home"
+control_home = "dedicated"
+default_branch = "main"
+
+[factory]
+pin = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+[[repos]]
+id = "app"
+role = "primary"
+url = "github.com/fixture-org/app"
+
+[board]
+project_id = "fixture-org/projects/7"
+
+[policy]
+gates = "default"
+
+[identity]
+approvers = ["fixture-human"]

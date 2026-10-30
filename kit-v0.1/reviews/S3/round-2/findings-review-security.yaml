@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: 6014aa8b460055e2cda30d20da8b67c8af03a3a6d4033502afb8479706e559a2
+  base_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  head_sha: 52a7d81344333b2337c7dc601b0a5b6bedcc3cd1
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@onboarding/onboard.py:510
+      evidence: "the symlink fix guards only the destination leaf: `+        if dest.is_symlink():` / `+            raise OnboardError(` / `+                f\"destination is a symlink — refusing to install {rel} \"` — while the write path below it is unchanged (`dest.parent.mkdir(parents=True, exist_ok=True)` + write_bytes per the round-1 record). A hostile target tree carrying a SYMLINKED PARENT directory (e.g. `factory -> /outside/dir`) defeats the guard: `dest.is_symlink()` is False for `factory/KICKOFF.md` when only the parent is a link, mkdir(parents=True, exist_ok=True) passes through the link to an existing outside directory, and the write lands outside the target. The round-1 required change was explicit: 'refuse ... when dest OR ANY COMPONENT OF dest.parent inside the target is a symlink, or resolve dest and verify it stays within target.resolve(); apply the same check to the mkdir(parents=True) path'. All three shipped tests (TestInstallerSymlinkGuard in onboarding/tests/test_onboard.py) plant the symlink at the destination file only, so moving the link one level up to a parent directory leaves the suite green while the escape works — the fix is incomplete against its own required change."
+      required_change: "extend the install_bytes guard to the full destination path: refuse (named OnboardError) when any component of dest from the target root down — including dest.parent directories created or traversed by mkdir(parents=True) — is a symlink, or resolve dest and verify resolved.is_relative_to(self.target.resolve()) before any write; add a test planting the symlink at a PARENT directory (e.g. factory -> outside) asserting the refusal and that nothing is written outside."
+      actionable: true
+    - id: RS-002
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@onboarding/forge_probe.py:330
+      evidence: "the issue-form classification fix stays substring-based: `+        if \"404\" in detail and \"not found\" in detail.lower():` / `             return {\"present\": False, \"path\": None}` — the round-1 required change was to 'match the HTTP status structurally (e.g. the leading `HTTP 404` of gh api's error output ...) instead of an unanchored \"404\" substring'. Conjoining a second unanchored token narrows the misclassification class (the shipped tests pin that `pipeline 4041 failed` and `HTTP 404: API rate limit exceeded` are now named ProbeErrors) but does not eliminate it: any unrelated failure whose stderr happens to carry both tokens anywhere — an intercepting proxy's `404 ... Not Found` error page, an error quoting a URL or repo path containing `404` plus a `not found` phrase — is still silently reclassified as genuine template absence instead of a named probe failure, so a transport-level error is reported downstream as a legitimate 'form absent' result."
+      required_change: "anchor the absence classification to the gh api error grammar (e.g. require detail to start with `HTTP 404` / match `^HTTP 404\\b` case-insensitively) and raise the named ProbeError for every other non-zero-rc stderr; add a stubbed-transport test for a both-tokens-present but unanchored error body (e.g. a proxy page quoting `404` mid-text with `not found`) asserting the named refusal."
+      actionable: true

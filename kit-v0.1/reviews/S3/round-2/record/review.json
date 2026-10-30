@@ -1,0 +1,374 @@
+{
+  "base_sha": "2bd431cd82e0938b42309ed3d1ff808d9e2260ad",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "install_bytes refuses when any component from the target root to dest is a symlink and verifies resolved containment under the target.",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RA-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "issue-form absence classification anchored to ^HTTP 404; a non-404 'not found' now raises a named ProbeError (test added).",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RA-002",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "forge-login parse refuses a line with no 'account' token as well as the empty tail; both shapes tested.",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RA-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "G4 refuses when a dedicated home's origin cannot be normalized (named refusal + NEXT).",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RA-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "check_genericization.scan: files = sorted(set(tracked) | set(walked_files(root))); walked_files walks the tree outside .git and applies the same exclusions.",
+      "fix_sha": null,
+      "id": "RA-005",
+      "issue": null,
+      "reason": "No behavioral risk: the sweep is the union of tracked and walked files by design; walked_files already covers every tracked file, so the tracked enumeration is belt-and-braces, and a mutation removing it cannot hide a file."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "--command-result list elements are shape-checked as objects; '[42]' is a named usage refusal (rc 2, element index named).",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RA-006",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "EXCLUDED_TREES introduced in 52a7d81 (the carve-out this finding targets); its boundary tests added in 20044a7. Both are on this branch; the cited line is the carve-out's definition.",
+      "fix_sha": "52a7d81344333b2337c7dc601b0a5b6bedcc3cd1",
+      "id": "RA-007",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "cmd_propose refuses every --repo-url that normalize_repo_url rejects before render_workspace_draft is reached; actionable=false in the finding.",
+      "fix_sha": null,
+      "id": "RA-008",
+      "issue": null,
+      "reason": "Informational: defense-in-depth escaping behind a validated path; no change required and none made."
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "Acceptance evidence measured at the reviewed head 52a7d81344333b2337c7dc601b0a5b6bedcc3cd1: `python3 onboarding/test_out.py --smoke` (default seed = the kit's benchmark-app/) ran 10/10 steps PASS with verify GREEN (18 pass / 0 fail / 13 n-a), rc 0. The smoke is an execution acceptance, not a unit test; the record cites the run rather than embedding it in the package gate inputs.",
+      "fix_sha": null,
+      "id": "RC-001",
+      "issue": null,
+      "reason": "Acceptance executed at the reviewed head; the gate-evidence input is a deterministic-gate record, not the acceptance transcript."
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "PR #23 body, T6: 'Carried S2 residuals: ... F3 - genericization CI tripwire (tools/check_generi...'; build-plan ground rules: 'This repo stays generic - no private product names ever'.",
+      "fix_sha": null,
+      "id": "RC-002",
+      "issue": null,
+      "reason": "The scope extension is recorded, not hidden: the genericization tripwire is a carried S2 residual (T6) named in the PR body, and it enforces the build-plan ground rule that this repo stays generic. A second plan amendment for a carried residual is bookkeeping, not a scope change."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "README quickstart half fixed in 62867b7 (control-home flag + reason); the ONBOARDING.md choices row added in 20044a7.",
+      "fix_sha": "62867b7cadb7da31ef7314052ec652a71ec2f6f5",
+      "id": "RC-003",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "architecture.md older bullet amended: only registry-version drift FAILs; kit-sha drift stays advisory.",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RC-004",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "target-repo-readiness.md check-categories line now lists the five categories including WORKSPACE.",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RC-005",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RA-001: parent-component symlink and resolved-containment checks in install_bytes.",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RS-001",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same fix as RA-002: structural ^HTTP 404 anchoring for issue-form absence.",
+      "fix_sha": "20044a75bdaceacffc54aeafbec924f010d52ef8",
+      "id": "RS-002",
+      "issue": null,
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/onboard.py:510",
+      "evidence": "the symlink fix guards only the destination itself \u2014 '+        if dest.is_symlink():' raising OnboardError \u2014 but the prior finding it answers (pipeline RS-002) required refusing 'when dest or any component of dest.parent inside the target is a symlink, or resolve dest and verify it stays within target.resolve()' and applying the same check to the mkdir(parents=True) path; the hunk leaves dest.parent unexamined, so a hostile target tree whose 'factory' directory is itself a symlink to an outside location makes dest.is_symlink() False and dest.exists() follow the link, and install_bytes writes through to the outside target; all three new tests (test_installer_refuses_dangling_symlink_directly, test_installer_refuses_symlink_to_existing_file, test_apply_refuses_dangling_symlink_dest) plant the symlink only AT the destination path, so no test fails with the parent-component escape open",
+      "id": "RA-001",
+      "lens": "review-adversary",
+      "required_change": "extend install_bytes to resolve dest and verify containment within target.resolve() (or check every parent component inside the target for symlinks before mkdir/write), and add a test where a PARENT directory of an install path is a symlink to an outside directory, asserting the named refusal and that nothing is written outside",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/forge_probe.py:330",
+      "evidence": "the tightened absence classifier '+        if \"404\" in detail and \"not found\" in detail.lower():' is pinned on only one side: mutation \u2014 drop the '\"404\" in detail' conjunct, keeping 'if \"not found\" in detail.lower():' \u2014 and every test in TestIssueFormTransport404Classification stays green ('HTTP 404: Not Found (GH006)' and 'error 404: TEMPLATE NOT FOUND' still classify absent; 'pipeline 4041 failed: deploy error' and 'HTTP 404: API rate limit exceeded' contain no 'not found' and still raise ProbeError); no test feeds a NON-404 stderr that contains 'not found' (e.g. 'ssh: Could not resolve hostname \u2014 host not found'), so the 404 half of the guard can be deleted without any test failing while a DNS or CLI error is silently reclassified as template absence",
+      "id": "RA-002",
+      "lens": "review-adversary",
+      "required_change": "add a stubbed-transport case with a non-404 stderr containing 'not found' (e.g. 'host not found') asserting a named ProbeError, so removing either conjunct of the classifier fails the suite",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/test_out.py:490",
+      "evidence": "the login-parse fix covers only the empty-tail shape \u2014 '+                if not tail:' raising TestOutError \u2014 but the prior finding it answers (pipeline RA-008) named TWO shapes and required covering both: 'a line lacking account silently yields garbage (e.g. the first whitespace token)'; a 'Logged in to' line without the 'account' substring still takes split(\"account\")[-1] = the whole line and silently assigns tail[0] (the first whitespace token, e.g. a check-mark glyph) as the login that feeds 'gh repo create' ownership; TestGhAuthLoginParseGuard's EmptyTailAuthRunner emits only 'Logged in to github.com account' \u2014 no test drives the missing-'account' shape, so that path stays a silent garbage value",
+      "id": "RA-003",
+      "lens": "review-adversary",
+      "required_change": "refuse (named TestOutError) or fall back to the explicit '<owner>' sentinel when the 'account' token is absent from the line, and add a second stubbed full-path case for that shape as the prior finding required",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/onboard.py:454",
+      "evidence": "the self-binding guard change only casefolds the comparison ('+                home_slug.casefold() == binding_slug.casefold():'); the prior finding it answers (pipeline RA-009) required handling the normalize-FAILURE escape: 'when control_home=dedicated and an origin exists but normalize_repo_url fails, either refuse with a named message or fall back to comparing the raw origin string against the binding' \u2014 the hunk leaves 'home_slug = RD.repo_slug_from_url(normalize_repo_url(facts[\"origin_url\"]) or \"\")' untouched, so an origin outside the two grammars (ssh:// with a port, non-GitHub host) still collapses home_slug to '' and the guard passes through; the only new test (test_case_variant_self_binding_refused) uses a normalizing https origin, so no test exercises a non-normalizing origin plus a self-referential --repo-url",
+      "id": "RA-004",
+      "lens": "review-adversary",
+      "required_change": "refuse with a named message (or compare the raw origin against the binding) when control_home=dedicated, an origin exists, and normalize_repo_url returns None; add the test the prior finding named \u2014 a dedicated propose with a non-normalizing origin plus a self-referential --repo-url",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/check_genericization.py:161",
+      "evidence": "the union scan '+    tracked = tracked_files(root) if is_git_repo(root) else []' / '+    files = sorted(set(tracked) | set(walked_files(root)))' makes the tracked-file enumeration non-load-bearing \u2014 mutation: stub tracked_files to return [] and every test stays green, because walked_files alone supplies all on-disk files and the new test_git_repo_untracked_file_is_swept only proves the WALK half of the union; the prior finding's acceptance (tools-docs RA-001: 'assert rc 1 plus the exact HIT line, so an empty or stubbed tracked-file enumeration fails the suite') is therefore still not met \u2014 no test observes the tracked enumeration contributing anything",
+      "id": "RA-005",
+      "lens": "review-adversary",
+      "required_change": "either pin the tracked branch with a case only it can satisfy (a git-tracked file absent from the walk, e.g. excluded by a walk skip rule, carrying a seeded token \u2192 HIT), or delete the now-redundant tracked_files/is_git_repo branch so the scan has one tested source",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/gates/pre_review_gate.py:644",
+      "evidence": "the new shape-contract law validates only the TOP level of --command-result: 'if isinstance(parsed, list): command_results.extend(parsed)' \u2014 list ELEMENTS are never shape-checked, so a file holding '[42]' or '[\"x\"]' extends command_results with non-objects that flow into the gate's payload walk, the exact failure class the sibling --ui-results fix names in its own comment ('never reach check_ui_results (whose payload walk would raise an AttributeError on a non-object)'); test_non_object_command_result_named_usage_refusal feeds only the scalar '42', so no test covers a list of non-objects and the named-refusal rationale is unenforced for the list branch",
+      "id": "RA-006",
+      "lens": "review-adversary",
+      "required_change": "validate each element of a --command-result list as a JSON object with a named rc-2 usage refusal for non-object elements (mirroring the ui-results check), and add a test feeding '[42]' asserting the named refusal and no traceback",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@tools/check_genericization.py:169",
+      "evidence": "the fix introduces a new whole-subtree exclusion \u2014 '+EXCLUDED_TREES = (\"kit-v0.1/reviews\",)' with the scan-loop skip '+        if any(rel == prefix or rel.startswith(prefix + \"/\") for prefix in EXCLUDED_TREES):' \u2014 and no test pins its boundary in either direction: mutation \u2014 widen the prefix to 'kit-v0.1' (or any ancestor of real product docs) \u2014 and every suite case stays green, because the temp-tree cases never create a kit-v0.1 path and test_real_repo_root_is_clean only gets MORE excluded; a banned token planted anywhere under the excluded subtree is invisible to the tripwire, and nothing tests that a seeded token just OUTSIDE the prefix still HITs while one just INSIDE is skipped",
+      "id": "RA-007",
+      "lens": "review-adversary",
+      "required_change": "add two temp-tree cases pinning the carve-out boundary: a seeded banned token under a kit-v0.1/reviews/ path is skipped (rc 0) and the same token under a sibling path (e.g. kit-v0.1/other/) is reported (rc 1, exact HIT line), so widening EXCLUDED_TREES fails the suite",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": false,
+      "artifact_reference": "package:diff@onboarding/onboard.py:336",
+      "evidence": "the render_workspace_draft escaping hunk ('+        safe_url = (args.repo_url.replace(\"\\\\\", \"\\\\\\\\\").replace(\\'\"\\', \\\\'\\\\\"\\'))') is unreachable through any validated path \u2014 cmd_propose now refuses every --repo-url that normalize_repo_url rejects and substitutes the NORMALIZED value, which by construction carries no quote or backslash \u2014 and no test drives render_workspace_draft with a raw escapable string, so mutation: delete both .replace calls and every test stays green; the hunk is harmless defense-in-depth but is not proof of anything",
+      "id": "RA-008",
+      "lens": "review-adversary",
+      "required_change": "none required; if the defense-in-depth layer is wanted, add a direct unit test calling render_workspace_draft with an escapable repo_url so the escaping is pinned, otherwise note it as belt-and-braces",
+      "rubric_dimension": "test_quality",
+      "severity": "info",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "onboarding/test_out.py:490",
+      "evidence": "Contract acceptance: \"The test-out scripts ship and run green against `benchmark-app` as a smoke.\" The gate evidence at head 52a7d81 records only `python3 -m unittest` (Ran 1386 tests), `python3 tools/gates/test_gate.py`, `python3 tools/config_validator.py ...` and a CI note \u2014 no invocation of onboarding/test_out.py against benchmark-app. The only test_out.py hunk in this fix diff is the gh-auth login parse guard (`raise TestOutError(\"gh-auth \u2014 cannot parse the account login ...\")`), and the round-1 substitution in test_test_out.py (\"the real benchmark-app seed run is the orchestrator's acceptance, not a unit test\") stands unchanged. Round-1 findings readiness RC-002 / pipeline RC-001 (both major, contract_fidelity) required this evidence inside the review surface; no fix is present in this diff.",
+      "id": "RC-001",
+      "lens": "review-contract",
+      "required_change": "Evidence acceptance criterion 3 green at head 52a7d81 inside the review surface: add the `python3 onboarding/test_out.py --smoke` (default seed = benchmark-app/) invocation and its output to the gate-evidence artifact, or ship an in-suite test that runs the smoke against the benchmark-app seed \u2014 or record an explicit owner-approved deviation in the pinned contract deferring the benchmark-app smoke run.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "tools/check_genericization.py:151",
+      "evidence": "Round-1 tools-docs RC-003 (major, scope): \"A substantial body of the diff maps to no S3 acceptance criterion and no S3 plan item: tools/check_genericization.py (+189, docstring self-tags it 'the genericization tripwire (S2-F3)') ... Required: Either record the scope extension \u2014 an explicit deviation/scope note in the contract or plan ... or split these hunks out of the S3 range\". This fix diff adds FURTHER unrecorded genericization scope instead \u2014 `tracked = tracked_files(root) if is_git_repo(root) else []` / `files = sorted(set(tracked) | set(walked_files(root)))` (union sweep) and `EXCLUDED_TREES = (\"kit-v0.1/reviews\",)` (a whole-subtree gate carve-out) \u2014 and the Contract inputs embedded in this package carry no deviation or scope note tying the tripwire work to S3; the Diff stat shows no contract/plan/workflow file touched.",
+      "id": "RC-002",
+      "lens": "review-contract",
+      "required_change": "Record the scope extension \u2014 an explicit deviation/scope note in the pinned contract or build plan tying the genericization tripwire changes (S2-F3 remediation, the union sweep, and the kit-v0.1/reviews carve-out) to this slice \u2014 or split these hunks into their own reviewed change; the round-1 requirement to name the check tied to the fetch-depth:0 CI comment remains part of the same record.",
+      "rubric_dimension": "scope",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "README.md:131",
+      "evidence": "Round-1 tools-docs RC-002 required TWO things: \"State the default --control-home mode in ONBOARDING.md's guided-session choices table (as done for the other choices), AND make the README quickstart's configuration explicit\". The fix diff satisfies only the README half \u2014 `+# --control-home in-repo: dedicated mode rejects a binding to the target's own origin` / `+python3 onboarding/onboard.py propose /path/to/your/repo --control-home in-repo` in README.md and onboarding/README.md, pinned by test_single_repo_quickstart_passes_control_home_in_repo \u2014 but the Diff stat lists no ONBOARDING.md hunk, so the guided-session choices table still does not state the default mode. The fix is incomplete.",
+      "id": "RC-003",
+      "lens": "review-contract",
+      "required_change": "Add the ONBOARDING.md hunk stating the default --control-home mode in the guided-session choices table (the round-1 finding observed the table defines the choice but names no default), completing the conjunctive requirement.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "kit-v0.1/architecture.md:436",
+      "evidence": "Round-1 tools-docs RC-004 required amending the older bullet in kit-v0.1/architecture.md so it names only registry-version drift as the FAIL condition, \"removing the contradiction inside the Onboarding architecture section\" ('A kit-version vs registry-version mismatch is a **FAIL**' vs the new 'kit-sha drift is **ADVISORY** ... it never gates'). The Diff stat of this fix round lists 15 files and kit-v0.1/architecture.md is not among them; no hunk in the Diff section touches the file. The fix is missing.",
+      "id": "RC-004",
+      "lens": "review-contract",
+      "required_change": "Amend the older architecture.md bullet to name only registry-version drift as the FAIL condition (registry-version drift FAIL, kit-sha drift ADVISORY, never gating), or record an explicit owner-approved deferral of this round-1 finding in the review record.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "kit-v0.1/target-repo-readiness.md:11",
+      "evidence": "Round-1 tools-docs RC-005 required updating the Check-categories line in kit-v0.1/target-repo-readiness.md to include WORKSPACE (five categories, matching ONBOARDING.md \u00a75), \"since the file is already touched by this slice\" \u2014 the line still read 'Check categories: **CORE** ... \u00b7 **UI**' with four categories and no WORKSPACE. The Diff stat of this fix round lists 15 files and kit-v0.1/target-repo-readiness.md is not among them; no hunk in the Diff section touches the file. The fix is missing.",
+      "id": "RC-005",
+      "lens": "review-contract",
+      "required_change": "Update the Check-categories line in kit-v0.1/target-repo-readiness.md to the five-category set including WORKSPACE, or record an explicit owner-approved deferral of this round-1 finding in the review record.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/onboard.py:510",
+      "evidence": "the symlink fix guards only the destination leaf: `+        if dest.is_symlink():` / `+            raise OnboardError(` / `+                f\"destination is a symlink \u2014 refusing to install {rel} \"` \u2014 while the write path below it is unchanged (`dest.parent.mkdir(parents=True, exist_ok=True)` + write_bytes per the round-1 record). A hostile target tree carrying a SYMLINKED PARENT directory (e.g. `factory -> /outside/dir`) defeats the guard: `dest.is_symlink()` is False for `factory/KICKOFF.md` when only the parent is a link, mkdir(parents=True, exist_ok=True) passes through the link to an existing outside directory, and the write lands outside the target. The round-1 required change was explicit: 'refuse ... when dest OR ANY COMPONENT OF dest.parent inside the target is a symlink, or resolve dest and verify it stays within target.resolve(); apply the same check to the mkdir(parents=True) path'. All three shipped tests (TestInstallerSymlinkGuard in onboarding/tests/test_onboard.py) plant the symlink at the destination file only, so moving the link one level up to a parent directory leaves the suite green while the escape works \u2014 the fix is incomplete against its own required change.",
+      "id": "RS-001",
+      "lens": "review-security",
+      "required_change": "extend the install_bytes guard to the full destination path: refuse (named OnboardError) when any component of dest from the target root down \u2014 including dest.parent directories created or traversed by mkdir(parents=True) \u2014 is a symlink, or resolve dest and verify resolved.is_relative_to(self.target.resolve()) before any write; add a test planting the symlink at a PARENT directory (e.g. factory -> outside) asserting the refusal and that nothing is written outside.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "artifact_reference": "package:diff@onboarding/forge_probe.py:330",
+      "evidence": "the issue-form classification fix stays substring-based: `+        if \"404\" in detail and \"not found\" in detail.lower():` / `             return {\"present\": False, \"path\": None}` \u2014 the round-1 required change was to 'match the HTTP status structurally (e.g. the leading `HTTP 404` of gh api's error output ...) instead of an unanchored \"404\" substring'. Conjoining a second unanchored token narrows the misclassification class (the shipped tests pin that `pipeline 4041 failed` and `HTTP 404: API rate limit exceeded` are now named ProbeErrors) but does not eliminate it: any unrelated failure whose stderr happens to carry both tokens anywhere \u2014 an intercepting proxy's `404 ... Not Found` error page, an error quoting a URL or repo path containing `404` plus a `not found` phrase \u2014 is still silently reclassified as genuine template absence instead of a named probe failure, so a transport-level error is reported downstream as a legitimate 'form absent' result.",
+      "id": "RS-002",
+      "lens": "review-security",
+      "required_change": "anchor the absence classification to the gh api error grammar (e.g. require detail to start with `HTTP 404` / match `^HTTP 404\\b` case-insensitively) and raise the named ProbeError for every other non-zero-rc stderr; add a stubbed-transport test for a both-tokens-present but unanchored error body (e.g. a proxy page quoting `404` mid-text with `not found`) asserting the named refusal.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3/round-2/gate-evidence.md",
+      "evidence_sha256": "4f2c47b4317918abbadab14a218af3c21dfb69882442e6c35281557acead10a7",
+      "exit": 0,
+      "gate": "deterministic-gates"
+    }
+  ],
+  "head_sha": "52a7d81344333b2337c7dc601b0a5b6bedcc3cd1",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 1
+  },
+  "open_findings": [
+    "RA-005",
+    "RA-008",
+    "RC-001",
+    "RC-002"
+  ],
+  "package": {
+    "path": "kit-v0.1/reviews/S3/round-2/package.md",
+    "sha256": "6014aa8b460055e2cda30d20da8b67c8af03a3a6d4033502afb8479706e559a2"
+  },
+  "pr": 23,
+  "prior_rounds": [
+    {
+      "decision": "CHANGES_REQUESTED",
+      "dispositioned": 15,
+      "findings": 18,
+      "loop": 1,
+      "path": "kit-v0.1/reviews/S3/round-1/pipeline/record"
+    },
+    {
+      "decision": "CHANGES_REQUESTED",
+      "dispositioned": 9,
+      "findings": 21,
+      "loop": 1,
+      "path": "kit-v0.1/reviews/S3/round-1/readiness/record"
+    },
+    {
+      "decision": "CHANGES_REQUESTED",
+      "dispositioned": 5,
+      "findings": 18,
+      "loop": 1,
+      "path": "kit-v0.1/reviews/S3/round-1/tools-docs/record"
+    }
+  ],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3/round-2/findings-review-adversary.yaml",
+      "document_sha256": "17b99aa77462975817458c9a0fa7a4548077dc84b055469225abbed8c12d8f5e",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-2/findings-review-contract.yaml",
+      "document_sha256": "50adccc0c9eea4cac08d67795f3df79ac13be621e202fb68a690186a832e7c63",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3/round-2/findings-review-security.yaml",
+      "document_sha256": "ce7719eb972edbd78baa567089fed11607efb3cfe8a8e2e37a8bf582c0fe7f87",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v1",
+  "story": "S3",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 0,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 1,
+    "loop": 2,
+    "loop_cap": 2,
+    "majors": 5,
+    "minors": 9
+  }
+}

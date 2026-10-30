@@ -1,0 +1,15 @@
+# secrets posture (never commit credential values)
+.env
+.env.*
+secrets/
+*.pem
+*secret*
+*token*
+
+# python hygiene
+__pycache__/
+*.pyc
+
+# factory local state — NOTE: factory/locks/OVERRIDE must NOT be
+# ignored: the controller requires it COMMITTED (HEAD:factory/locks/
+# OVERRIDE). Only OVERRIDE.example ships by default (also committed).

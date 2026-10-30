@@ -1,0 +1,44 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: 6014aa8b460055e2cda30d20da8b67c8af03a3a6d4033502afb8479706e559a2
+  base_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  head_sha: 52a7d81344333b2337c7dc601b0a5b6bedcc3cd1
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: onboarding/test_out.py:490
+      evidence: "Contract acceptance: \"The test-out scripts ship and run green against `benchmark-app` as a smoke.\" The gate evidence at head 52a7d81 records only `python3 -m unittest` (Ran 1386 tests), `python3 tools/gates/test_gate.py`, `python3 tools/config_validator.py ...` and a CI note — no invocation of onboarding/test_out.py against benchmark-app. The only test_out.py hunk in this fix diff is the gh-auth login parse guard (`raise TestOutError(\"gh-auth — cannot parse the account login ...\")`), and the round-1 substitution in test_test_out.py (\"the real benchmark-app seed run is the orchestrator's acceptance, not a unit test\") stands unchanged. Round-1 findings readiness RC-002 / pipeline RC-001 (both major, contract_fidelity) required this evidence inside the review surface; no fix is present in this diff."
+      required_change: "Evidence acceptance criterion 3 green at head 52a7d81 inside the review surface: add the `python3 onboarding/test_out.py --smoke` (default seed = benchmark-app/) invocation and its output to the gate-evidence artifact, or ship an in-suite test that runs the smoke against the benchmark-app seed — or record an explicit owner-approved deviation in the pinned contract deferring the benchmark-app smoke run."
+      actionable: true
+    - id: RC-002
+      severity: major
+      rubric_dimension: scope
+      artifact_reference: tools/check_genericization.py:151
+      evidence: "Round-1 tools-docs RC-003 (major, scope): \"A substantial body of the diff maps to no S3 acceptance criterion and no S3 plan item: tools/check_genericization.py (+189, docstring self-tags it 'the genericization tripwire (S2-F3)') ... Required: Either record the scope extension — an explicit deviation/scope note in the contract or plan ... or split these hunks out of the S3 range\". This fix diff adds FURTHER unrecorded genericization scope instead — `tracked = tracked_files(root) if is_git_repo(root) else []` / `files = sorted(set(tracked) | set(walked_files(root)))` (union sweep) and `EXCLUDED_TREES = (\"kit-v0.1/reviews\",)` (a whole-subtree gate carve-out) — and the Contract inputs embedded in this package carry no deviation or scope note tying the tripwire work to S3; the Diff stat shows no contract/plan/workflow file touched."
+      required_change: "Record the scope extension — an explicit deviation/scope note in the pinned contract or build plan tying the genericization tripwire changes (S2-F3 remediation, the union sweep, and the kit-v0.1/reviews carve-out) to this slice — or split these hunks into their own reviewed change; the round-1 requirement to name the check tied to the fetch-depth:0 CI comment remains part of the same record."
+      actionable: true
+    - id: RC-003
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: README.md:131
+      evidence: "Round-1 tools-docs RC-002 required TWO things: \"State the default --control-home mode in ONBOARDING.md's guided-session choices table (as done for the other choices), AND make the README quickstart's configuration explicit\". The fix diff satisfies only the README half — `+# --control-home in-repo: dedicated mode rejects a binding to the target's own origin` / `+python3 onboarding/onboard.py propose /path/to/your/repo --control-home in-repo` in README.md and onboarding/README.md, pinned by test_single_repo_quickstart_passes_control_home_in_repo — but the Diff stat lists no ONBOARDING.md hunk, so the guided-session choices table still does not state the default mode. The fix is incomplete."
+      required_change: "Add the ONBOARDING.md hunk stating the default --control-home mode in the guided-session choices table (the round-1 finding observed the table defines the choice but names no default), completing the conjunctive requirement."
+      actionable: true
+    - id: RC-004
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: kit-v0.1/architecture.md:436
+      evidence: "Round-1 tools-docs RC-004 required amending the older bullet in kit-v0.1/architecture.md so it names only registry-version drift as the FAIL condition, \"removing the contradiction inside the Onboarding architecture section\" ('A kit-version vs registry-version mismatch is a **FAIL**' vs the new 'kit-sha drift is **ADVISORY** ... it never gates'). The Diff stat of this fix round lists 15 files and kit-v0.1/architecture.md is not among them; no hunk in the Diff section touches the file. The fix is missing."
+      required_change: "Amend the older architecture.md bullet to name only registry-version drift as the FAIL condition (registry-version drift FAIL, kit-sha drift ADVISORY, never gating), or record an explicit owner-approved deferral of this round-1 finding in the review record."
+      actionable: true
+    - id: RC-005
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: kit-v0.1/target-repo-readiness.md:11
+      evidence: "Round-1 tools-docs RC-005 required updating the Check-categories line in kit-v0.1/target-repo-readiness.md to include WORKSPACE (five categories, matching ONBOARDING.md §5), \"since the file is already touched by this slice\" — the line still read 'Check categories: **CORE** ... · **UI**' with four categories and no WORKSPACE. The Diff stat of this fix round lists 15 files and kit-v0.1/target-repo-readiness.md is not among them; no hunk in the Diff section touches the file. The fix is missing."
+      required_change: "Update the Check-categories line in kit-v0.1/target-repo-readiness.md to the five-category set including WORKSPACE, or record an explicit owner-approved deferral of this round-1 finding in the review record."
+      actionable: true

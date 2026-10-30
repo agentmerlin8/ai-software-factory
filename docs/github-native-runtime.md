@@ -120,4 +120,4 @@ A fine-grained PAT **cannot list private repos** via `/users/{u}/repos` — dire
 
 ## Local dashboard contract
 
-`factory/DASHBOARD.md` is regenerated after every stage transition (same commit as `stories/STORY-{ID}/state.md`). See `onboarding/templates/DASHBOARD.md`. Combined with GitHub's issue labels (`factory:*`) this gives a kanban view in the Issues tab without any external tooling.
+`factory/DASHBOARD.md` is regenerated after every stage transition (same commit as `stories/STORY-{ID}/state.md`). It is a generated render produced by the kit's renderers — never hand-edited. Combined with GitHub's issue labels (`factory:*`) this gives a kanban view in the Issues tab without any external tooling.

@@ -1,0 +1,167 @@
+{
+  "auth_scopes": {
+    "stdout": "github.com\n  ✓ Logged in to github.com account fixture-bot (GH_TOKEN)\n  - Token scopes: 'gist', 'project', 'repo'\n",
+    "stderr": ""
+  },
+  "repo_view": {
+    "nameWithOwner": "fixture-org/app",
+    "defaultBranchRef": {
+      "name": "main"
+    },
+    "visibility": "PRIVATE"
+  },
+  "ruleset": {
+    "error": "probe failed: ruleset — HTTP 403: upgrade required for ruleset reads"
+  },
+  "ruleset@fixture-org/app": {
+    "rulesets": [
+      {
+        "id": 24744013,
+        "name": "protect-main-target",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ]
+          }
+        },
+        "bypass_actors": [
+          {
+            "actor_type": "Integration",
+            "actor_id": 5239072,
+            "mode": "always"
+          }
+        ],
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "non_fast_forward"
+          },
+          {
+            "type": "pull_request",
+            "parameters": {
+              "required_approving_review_count": 1,
+              "dismiss_stale_reviews_on_push": true,
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_review_thread_resolution": true
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "strict_required_status_checks_policy": true,
+              "required_status_checks": [
+                {
+                  "context": "factory-gates"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "labels": {
+    "labels": [
+      {
+        "name": "factory:planning",
+        "color": "1d76db",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:plan-review",
+        "color": "5319e7",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:implementation",
+        "color": "0e8a16",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:code-review",
+        "color": "fbca04",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:testing",
+        "color": "d93f0b",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory:done",
+        "color": "cccccc",
+        "description": "factory pipeline stage"
+      },
+      {
+        "name": "factory",
+        "color": "0E8A16",
+        "description": "board auto-add gate"
+      },
+      {
+        "name": "idea",
+        "color": "D4C5F9",
+        "description": "idea intake — refined into a context bundle before stories"
+      }
+    ]
+  },
+  "issue_form": {
+    "present": true,
+    "path": ".github/ISSUE_TEMPLATE/idea.yml"
+  },
+  "project": {
+    "node_id": "PVT_kwDON8RfA87FIXTURE",
+    "fields": {
+      "nodes": [
+        {
+          "__typename": "ProjectV2Field",
+          "id": "F_TITLE",
+          "name": "Title"
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_STATUS",
+          "name": "Status",
+          "options": [
+            {
+              "id": "OPT_TODO",
+              "name": "Todo"
+            },
+            {
+              "id": "OPT_DOING",
+              "name": "In Progress"
+            },
+            {
+              "id": "OPT_DONE",
+              "name": "Done"
+            }
+          ]
+        },
+        {
+          "__typename": "ProjectV2SingleSelectField",
+          "id": "F_GROUP",
+          "name": "Stage group",
+          "options": [
+            {
+              "id": "OPT_PRE",
+              "name": "pre-build"
+            },
+            {
+              "id": "OPT_BUILD",
+              "name": "build"
+            },
+            {
+              "id": "OPT_POST",
+              "name": "post-merge"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

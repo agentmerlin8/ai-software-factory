@@ -104,7 +104,7 @@ ai-software-factory/
 ├── agents/                # Pipeline role instructions (the source of truth)
 ├── .github/agents/        # Same instructions, Copilot-discovery path
 ├── grill-me/              # Comprehension verification: process + prompt templates
-├── onboarding/            # Idempotent onboarding: installer, templates, preflight
+├── onboarding/            # Onboarding pipeline: preflight→inspect→propose→apply→verify, readiness registry, templates
 ├── docs/                  # Context-bundle templates, pipeline architecture,
 │                          #   field notes, runtime notes, research, agent evaluations
 ├── ado/                   # Enterprise variant: ADO work-item-type design + setup script
@@ -125,12 +125,18 @@ In the ADO variant, the same data lives on custom work items — **AI Story** (p
 
 ```bash
 git clone https://github.com/agentmerlin8-ops/ai-software-factory
-./ai-software-factory/onboarding/onboard.sh /path/to/your/repo
+cd ai-software-factory
+python3 onboarding/onboard.py preflight /path/to/your/repo
+python3 onboarding/onboard.py inspect /path/to/your/repo
+# --control-home in-repo: dedicated mode rejects a binding to the target's own origin
+python3 onboarding/onboard.py propose /path/to/your/repo --control-home in-repo
+python3 onboarding/onboard.py apply /path/to/your/repo
+python3 onboarding/onboard.py verify /path/to/your/repo
 ```
 
-The script detects greenfield/brownfield posture, installs the factory structure (idempotent — never overwrites your files), creates the pipeline labels, and writes a PASS/FAIL preflight report. See [`onboarding/README.md`](onboarding/README.md).
+The pipeline detects greenfield/brownfield/bundled posture, drafts and installs the factory control-home surface (idempotent — never overwrites your files), ensures the pipeline labels, and writes a PASS/FAIL readiness report (`factory/PREFLIGHT.md`). The guided-session brief — every command and every choice — is [`ONBOARDING.md`](ONBOARDING.md); the quick reference is [`onboarding/README.md`](onboarding/README.md).
 
-> The onboarding flow is being reworked in kit v0.1 for runtime-agnostic requirements — the readiness checklist and scripted verify mode ship with v0.1 ([`kit-v0.1/target-repo-readiness.md`](kit-v0.1/target-repo-readiness.md)); the fresh-repo hardening test-out follows in v0.1.x.
+> The onboarding flow was reworked in kit v0.1 for runtime-agnostic requirements and is **shipped**: the readiness checklist and scripted verify mode (fail-closed, CI-gateable) are in [`kit-v0.1/target-repo-readiness.md`](kit-v0.1/target-repo-readiness.md) + `onboarding/`; the fresh-repo hardening test-out follows in v0.1.x.
 
 ### Read the process
 

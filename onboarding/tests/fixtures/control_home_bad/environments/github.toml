@@ -1,0 +1,7 @@
+runtime = "github-actions"
+
+[dispatch]
+mechanism = "contained"
+
+[models]
+T1 = "model-ci-fixture"

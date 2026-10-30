@@ -1,0 +1,112 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001",
+      "disposition": "rejected",
+      "reason": "Acceptance is a run, and it is green; the unit test's synthetic seed is a speed choice.",
+      "evidence": "The acceptance was executed at head 62867b7: `python3 onboarding/test_out.py --smoke` (default seed = the kit's benchmark-app/) ran 10/10 steps PASS, verify GREEN (18 pass / 0 fail), rc 0. test_out.py is unchanged since the reviewed head 2bd431c, so the run applies to the reviewed code. The unit test's synthetic seed is a suite-speed choice, not a deferral of the acceptance."
+    },
+    {
+      "id": "RA-001",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "issue_form classifies absence only on 404 + not-found; unrelated errors raise a named ProbeError (test added)."
+    },
+    {
+      "id": "RA-002",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "stdlib-imports test replaced with a source AST scan of imported modules; verified it fails on a planted third-party import."
+    },
+    {
+      "id": "RA-003",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "__pycache__ test now seeds a temp source tree and asserts the installed tree excludes it."
+    },
+    {
+      "id": "RA-004",
+      "disposition": "fixed",
+      "fix_sha": "52a7d81",
+      "evidence": "run_full test uses distinct runner sentinels; the test now observes which seam is called."
+    },
+    {
+      "id": "RA-005",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "non-array ruleset listing raises a named ProbeError instead of coercing to empty."
+    },
+    {
+      "id": "RA-006",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "Drafts-dir reuse drift; design call on whether apply should install only proposed envs."
+    },
+    {
+      "id": "RA-007",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "catch-all refusal paths now print a NEXT line."
+    },
+    {
+      "id": "RA-008",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "forge-login parse guards the empty tail with a named TestOutError."
+    },
+    {
+      "id": "RA-009",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/26",
+      "evidence": "G4 no-origin case to be confirmed alongside the case-insensitive compare."
+    },
+    {
+      "id": "RS-001",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "label_ensure builds argv inside the transport from named params; a caller-supplied argv is refused."
+    },
+    {
+      "id": "RS-002",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "install_bytes refuses a symlink destination before the exists check; outside target is never created."
+    },
+    {
+      "id": "RS-003",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "--envs names validated as single path components before any path use."
+    },
+    {
+      "id": "RS-004",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "Same fix as RA-001 (issue_form classification)."
+    },
+    {
+      "id": "RS-005",
+      "disposition": "fixed",
+      "fix_sha": "a447cb2",
+      "evidence": "Same fix as RA-005 (ruleset listing shape)."
+    },
+    {
+      "id": "EX-001",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: GitHub ref-pattern matching for include and exclude, wildcard regressions."
+    },
+    {
+      "id": "EX-002",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: ruleset listing paginated to exhaustion (per_page=100&page=N)."
+    },
+    {
+      "id": "EX-003",
+      "disposition": "fixed",
+      "fix_sha": "62867b7",
+      "evidence": "62867b7: only target=branch rulesets participate in selection."
+    }
+  ]
+}

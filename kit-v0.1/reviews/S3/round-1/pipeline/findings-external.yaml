@@ -1,0 +1,30 @@
+schema: review.findings.v1
+review:
+  reviewer: external
+  rubric_version: external-v1
+  package_sha256: 269be00da739de416d92686bf26baa6624c630a899ea102e693e720bebbcd3b1
+  base_sha: 152b205b48937a3a12020c02c8378022d088d86e
+  head_sha: 2bd431cd82e0938b42309ed3d1ff808d9e2260ad
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: EX-001
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: onboarding/forge_probe.py:485
+      evidence: 'External review 5658724504 (2026-10-26, high): an active ruleset including ~DEFAULT_BRANCH but excluding refs/heads/m* does not protect main, yet this matcher selects it; wildcard includes are also missed.'
+      required_change: 'Implement GitHub-compatible ref-pattern matching for include AND exclude selectors; add wildcard and exclude regression cases.'
+      actionable: true
+    - id: EX-002
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: onboarding/forge_probe.py:205
+      evidence: 'External review 5658724504 (2026-10-26, medium): the ruleset list request reads only the first page (30 by default); an applicable ruleset on a later page makes the probe report missing protection.'
+      required_change: 'Page the rulesets endpoint to exhaustion before fetching details, as the labels transport already does.'
+      actionable: true
+    - id: EX-003
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: onboarding/forge_probe.py:491
+      evidence: 'External review 5658724504 (2026-10-26, medium): selection does not filter target == branch, so an active tag ruleset using ~ALL can be chosen ahead of the default-branch ruleset.'
+      required_change: 'Only rulesets whose target is branch may participate in branch-protection selection.'
+      actionable: true

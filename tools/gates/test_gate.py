@@ -31,6 +31,7 @@ _TOOLS = HERE.parent if (HERE.parent / "contract_lib.py").exists() \
 sys.path.insert(0, str(_TOOLS))
 sys.path.insert(0, str(HERE))
 import pre_review_gate as G  # noqa: E402
+import contract_lib as C  # noqa: E402
 import mechanical_checks as M  # noqa: E402
 import plan_checks as PC  # noqa: E402
 import check_digest as CD  # noqa: E402
@@ -1185,6 +1186,216 @@ class CliSmokeTests(unittest.TestCase):
              "--discovery", f"tests={d / 'discovery.txt'}",
              "--command-result", str(d / "command-results.json")],
             capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("PRE-REVIEW GATE (build): PASS", proc.stdout)
+
+
+class MalformedInputNamedRefusals(unittest.TestCase):
+    """S2-F2: malformed story-dir/injected-file input must produce NAMED
+    refusals (gate findings or `usage: unreadable …` rc-2 lines) — never
+    a raw traceback on stderr. Each test runs the real CLI in a
+    subprocess so an escaping exception WOULD show as `Traceback`."""
+
+    GATE = str(REPO / "tools" / "gates" / "pre_review_gate.py")
+
+    def _cli(self, argv):
+        return subprocess.run([sys.executable, self.GATE, *argv],
+                              capture_output=True, text=True)
+
+    def _story_dir(self, td: str, plan_bytes: bytes) -> Path:
+        d = Path(td) / "STORY-990"
+        d.mkdir(parents=True)
+        (d / "impl-plan.md").write_bytes(plan_bytes)
+        return d
+
+    def test_non_utf8_impl_plan_named_in_plan_and_build_mode(self):
+        """Class 1: non-UTF-8 impl-plan.md → `contract` finding naming
+        the file, in BOTH lanes; no traceback."""
+        with tempfile.TemporaryDirectory() as td:
+            d = self._story_dir(td, b"\xff\xfe\x00 not utf-8 \x81\x82")
+            proc = self._cli(["plan", str(d), "--root", str(REPO),
+                              "--base-sha", "HEAD", "--inflight", "none"])
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("STORY-990: contract — impl-plan.md unreadable:",
+                          proc.stdout)
+            proc = self._cli(["build", str(d), "--root", str(REPO),
+                              "--base", "main"])
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("STORY-990: contract — impl-plan.md unreadable:",
+                          proc.stdout)
+
+    def test_verify_commands_non_list_named(self):
+        """Class 3: `verify_commands: 42` → named finding, not
+        TypeError — at the unit level and through the build CLI."""
+        findings = []
+        M.check_verify_commands({"verify_commands": 42}, REPO,
+                                findings.append)
+        self.assertEqual(
+            findings,
+            ["contract verify_commands must be a list, got int"])
+        plan = ("# Plan\n\n```contract.yaml\n"
+                "contract_version: 1\n"
+                "files:\n  - path: src/a.py\n    op: CREATE\n"
+                "tests:\n  - ac: AC-1\n    project: tests\n"
+                "    name: t_one\n"
+                "invariants:\n  - id: INV-1\n    text: \"x\"\n"
+                "verify_commands: 42\n"
+                "decisions:\n  - decision: \"d\"\n"
+                "```\n").encode("utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            d = self._story_dir(td, plan)
+            proc = self._cli(["build", str(d), "--root", str(REPO),
+                              "--base", "main", "--run-verify"])
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("verify_commands` must be a list, got int",
+                          proc.stdout)
+
+    def test_files_non_list_named(self):
+        """Class 4: `files: 42` → named finding via contract_paths
+        guard (no TypeError) and through the plan CLI."""
+        self.assertEqual(C.contract_paths({"files": 42}), (set(), set()))
+        plan = ("# Plan\n\n```contract.yaml\n"
+                "contract_version: 1\n"
+                "files: 42\n"
+                "tests:\n  - ac: AC-1\n    project: tests\n"
+                "    name: t_one\n"
+                "invariants:\n  - id: INV-1\n    text: \"x\"\n"
+                "verify_commands:\n  - \"python3 -m unittest\"\n"
+                "decisions:\n  - decision: \"d\"\n"
+                "```\n").encode("utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            d = self._story_dir(td, plan)
+            proc = self._cli(["plan", str(d), "--root", str(REPO),
+                              "--base-sha", "HEAD", "--inflight", "none"])
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn("`files` must be a list, got int", proc.stdout)
+
+    def test_missing_diff_file_is_usage_refusal(self):
+        """Class 5: a missing --diff-file path → rc 2 with the named
+        `usage: unreadable <path> — <detail>` line, no traceback."""
+        d = FIX / "build-valid-manifest"
+        missing = str(Path(tempfile.gettempdir()) / "s3t6-no-such-diff.txt")
+        proc = self._cli(["build", str(d), "--root", str(REPO),
+                          "--base", "main", "--diff-file", missing])
+        self.assertEqual(proc.returncode, 2)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn(f"usage: unreadable {missing} —", proc.stderr)
+
+    def test_malformed_command_result_is_usage_refusal(self):
+        """Class 2/5: malformed --command-result JSON → rc 2 with the
+        named usage line (`invalid JSON` detail), no traceback."""
+        d = FIX / "build-valid-manifest"
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "command-results.json"
+            bad.write_text("{not json at all", encoding="utf-8")
+            proc = self._cli(
+                ["build", str(d), "--root", str(REPO), "--base", "main",
+                 "--diff-file", str(d / "diff-name-status.txt"),
+                 "--discovery", f"tests={d / 'discovery.txt'}",
+                 "--command-result", str(bad)])
+            self.assertEqual(proc.returncode, 2)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn(f"usage: unreadable {bad} — invalid JSON:",
+                          proc.stderr)
+
+    def test_non_object_ui_results_named_usage_refusal(self):
+        """Class 6 (F4): --ui-results parsing to anything but a JSON
+        object (list/string/number/null) → rc 2, a usage line naming
+        BOTH the file and the expected 'JSON object' shape, no
+        traceback, and check_ui_results is NEVER reached (no gate
+        verdict is printed)."""
+        d = FIX / "ui-assertions-valid"
+        with tempfile.TemporaryDirectory() as td:
+            for payload, kind in (("[]", "list"), ('"x"', "str"),
+                                  ("3", "int"), ("null", "NoneType")):
+                bad = Path(td) / "ui-not-an-object.json"
+                bad.write_text(payload, encoding="utf-8")
+                with self.subTest(payload=payload):
+                    proc = self._cli(
+                        ["build", str(d), "--root", str(REPO),
+                         "--base", "main",
+                         "--diff-file", str(d / "diff-name-status.txt"),
+                         "--discovery", f"tests={d / 'discovery.txt'}",
+                         "--ui-results", str(bad)])
+                    self.assertEqual(proc.returncode, 2)
+                    self.assertNotIn("Traceback", proc.stderr)
+                    self.assertIn(f"usage: --ui-results {bad}",
+                                  proc.stderr)
+                    self.assertIn("JSON object", proc.stderr)
+                    self.assertIn(f"got {kind}", proc.stderr)
+                    # never reached the check layer: no gate verdict
+                    self.assertNotIn("PRE-REVIEW GATE", proc.stdout)
+
+    def test_object_ui_results_still_runs_the_normal_gate_path(self):
+        """F4 keeps object payloads working: the valid ui-assertions
+        fixture passes through the CLI under the normal gate path."""
+        d = FIX / "ui-assertions-valid"
+        proc = self._cli(
+            ["build", str(d), "--root", str(REPO), "--base", "main",
+             "--diff-file", str(d / "diff-name-status.txt"),
+             "--discovery", f"tests={d / 'discovery.txt'}",
+             "--ui-results", str(d / "ui-results.json")])
+        self.assertEqual(proc.returncode, 0,
+                         f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("PRE-REVIEW GATE (build): PASS", proc.stdout)
+
+    def test_non_object_command_result_named_usage_refusal(self):
+        """Same shape-contract law for --command-result: a valid-JSON
+        non-object/non-array (string/number/null) is a named rc-2
+        refusal, not a silent skip or a downstream crash."""
+        d = FIX / "build-valid-manifest"
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "cr.json"
+            bad.write_text("42", encoding="utf-8")
+            proc = self._cli(
+                ["build", str(d), "--root", str(REPO), "--base", "main",
+                 "--diff-file", str(d / "diff-name-status.txt"),
+                 "--discovery", f"tests={d / 'discovery.txt'}",
+                 "--command-result", str(bad)])
+            self.assertEqual(proc.returncode, 2)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn(f"usage: --command-result {bad}", proc.stderr)
+            self.assertIn("JSON object or array", proc.stderr)
+
+    def test_command_result_list_elements_shape_checked(self):
+        """RA-006: a --command-result LIST's elements take the same
+        shape contract — '[42]' is a named rc-2 usage refusal naming
+        the file AND the element index, and never reaches the gate
+        payload walk (no verdict printed)."""
+        d = FIX / "build-valid-manifest"
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "cr-list.json"
+            bad.write_text("[42]", encoding="utf-8")
+            proc = self._cli(
+                ["build", str(d), "--root", str(REPO), "--base", "main",
+                 "--diff-file", str(d / "diff-name-status.txt"),
+                 "--discovery", f"tests={d / 'discovery.txt'}",
+                 "--command-result", str(bad)])
+            self.assertEqual(proc.returncode, 2)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn(f"usage: --command-result {bad}", proc.stderr)
+            self.assertIn("element [0] must be a JSON object",
+                          proc.stderr)
+            self.assertIn("got int", proc.stderr)
+            self.assertNotIn("PRE-REVIEW GATE", proc.stdout)
+
+    def test_command_result_list_of_objects_still_flows(self):
+        # the flipped side of RA-006: a list of objects IS the legal
+        # shape and must still reach the gate (the same CLI surface the
+        # flattened-list repro drives).
+        d = FIX / "build-valid-manifest"
+        proc = self._cli(
+            ["build", str(d), "--root", str(REPO), "--base", "main",
+             "--diff-file", str(d / "diff-name-status.txt"),
+             "--discovery", f"tests={d / 'discovery.txt'}",
+             "--command-result", str(d / "command-results.json")])
         self.assertEqual(proc.returncode, 0,
                          f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
         self.assertNotIn("Traceback", proc.stderr)

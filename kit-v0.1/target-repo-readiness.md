@@ -6,10 +6,10 @@
 ## How this list is used
 
 1. **Before onboarding**: the operator (or the orchestrator) works the checklist top to bottom.
-2. **Onboard verify** (to build): each item becomes a machine check with a PASS/FAIL line and a remedy printed on failure. Required items gate; advisories warn.
+2. **Onboard verify** (shipped in S3 — `onboarding/readiness.py` + `onboarding/registry.json`): each item is a machine check with a PASS/FAIL line and a remedy printed on failure. Required items gate; advisories warn (S4-owned components render as `DEFERRED(S4)` until the S4 alignment pass).
 3. **Re-check on every significant change** (new board field, changed branch protection, new adapter) — verify is re-runnable and CI-gateable.
 
-Check categories: **CORE** (required for any factory run) · **UI** (only when stories touch UI) · **ADAPTER** (required only when that adapter executes work) · **ADVISORY** (recommended).
+Check categories: **CORE** (required for any factory run) · **WORKSPACE** (control-home checks; Mode 2 only) · **UI** (only when stories touch UI) · **ADAPTER** (required only when that adapter executes work) · **ADVISORY** (recommended).
 
 Mode-aware applicability: control-home checks (kit install, ledger, config, kickoff) run **once** at the control home. In Mode 2, product-only target repos are checked against the binding subset (C-1, C-2, the C-3 target variant, C-13, and the story-branch conventions) — they never duplicate the control home. Target protection and a runnable test environment are per-binding requirements: each bound target repo keeps standard branch protection with **no factory bypass** (the bot-App bypass lives on the workspace repo only) and a runnable test environment, because `architecture.md` requires tests green in every touched repo and standard target protection. Installation checks stay at the control home.
 

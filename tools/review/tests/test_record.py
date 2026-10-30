@@ -1186,6 +1186,36 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertIn("review record:", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
+    def test_agreement_counts_models_not_findings(self) -> None:
+        doc = self.write_findings(
+            "review-contract",
+            [dict(self.finding("RC-001", "minor", artifact="a.txt:2"),
+                  evidence="first hit on this line"),
+             dict(self.finding("RC-002", "minor", artifact="a.txt:2"),
+                  evidence="second hit on the same line")],
+            path=self.repo / "f-same-model.yaml")
+        disp = self.write_dispositions([
+            {"id": "RC-001@test-model-v1", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "RC-002@test-model-v1", "disposition": "rejected",
+             "reason": "no", "evidence": "e"}])
+        _, data, _ = self.render_ok(
+            findings=[("review-contract", str(doc))], dispositions=str(disp))
+        self.assertEqual(len({f["location_key"] for f in data["findings"]}), 1)
+        self.assertTrue(all(f["agreement"] == 1 for f in data["findings"]))
+
+    def test_check_refuses_v1_record_with_namespaced_ids(self) -> None:
+        out, data, _ = self.render_ok()
+        data["schema"] = "review.record.v1"
+        data["lane"]["version"] = 1
+        (out / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: schema mismatch: v1 record carries "
+                      "namespaced finding id", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
     def test_check_accepts_legacy_v1_record(self) -> None:
         """A stored review.record.v1 record stays verifiable under v1 rules."""
         out, data, _ = self.render_ok()

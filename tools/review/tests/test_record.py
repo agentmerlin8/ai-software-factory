@@ -738,13 +738,13 @@ class _GitFixtureTest(unittest.TestCase):
         _, _, md = self.render_ok(findings=[("review-adversary", str(doc))],
                                   dispositions=str(disp))
         self.assertIn(f"| RA-001 | review-adversary | test-model-v1 | minor | "
-                      f"behavior | a.txt:2 | 1 | fixed | fixed: {self.fix_a} |",
+                      f"behavior | a.txt:2 | 1/1 | fixed | fixed: {self.fix_a} |",
                       md)
         self.assertIn("| RA-002 | review-adversary | test-model-v1 | info | "
-                      "behavior | extra/new.txt:1 | 1 | rejected | "
+                      "behavior | extra/new.txt:1 | 1/1 | rejected | "
                       "reason: not now evidence: log 42 |", md)
         self.assertIn("| RA-003 | review-adversary | test-model-v1 | info | "
-                      "behavior | src/app.py:1 | 1 | deferred | issue: "
+                      "behavior | src/app.py:1 | 1/1 | deferred | issue: "
                       "https://github.com/org/repo/issues/9 |", md)
 
     def test_external_source_and_lens(self) -> None:
@@ -810,13 +810,15 @@ class _GitFixtureTest(unittest.TestCase):
         with namespaced ids and a shared location (agreement 2)."""
         a = self.write_findings(
             "review-contract",
-            [self.finding("RC-001", "info", artifact="src/app.py:1",
-                          dimension="contract_fidelity")],
+            [dict(self.finding("RC-001", "info", artifact="src/app.py:1",
+                               dimension="contract_fidelity"),
+                  evidence="Model A: the contract names a file the diff omits.")],
             path=self.repo / "findings-contract-a.yaml")
         b = self.write_findings(
             "review-contract",
-            [self.finding("RC-001", "info", artifact="src/app.py:1",
-                          dimension="contract_fidelity")],
+            [dict(self.finding("RC-001", "info", artifact="src/app.py:1",
+                               dimension="contract_fidelity"),
+                  evidence="Model B: same omission, read from the AC text.")],
             path=self.repo / "findings-contract-b.yaml")
         disp = self.write_dispositions([
             {"id": "RC-001@qwen3.8-max", "disposition": "rejected",
@@ -885,8 +887,10 @@ class _GitFixtureTest(unittest.TestCase):
 
     def test_dual_panel_check_rejects_tampered_agreement(self) -> None:
         a, b = self.dual_docs(
-            [self.finding("RC-001", "major", artifact="a.txt:2")],
-            [self.finding("RC-001", "major", artifact="a.txt:2")])
+            [dict(self.finding("RC-001", "major", artifact="a.txt:2"),
+                  evidence="Model A: the guard is missing.")],
+            [dict(self.finding("RC-001", "major", artifact="a.txt:2"),
+                  evidence="Model B: guard absent on the same path.")])
         disp = self.write_dispositions([
             {"id": "RC-001@qwen3.8-max", "disposition": "fixed",
              "fix_sha": self.fix_a},
@@ -906,6 +910,85 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("review record: findings mismatch:", proc.stderr)
         self.assertIn("agreement", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_render_refuses_empty_panel(self) -> None:
+        proc = self.render(findings=[], models={},
+                           dispositions=str(self.write_dispositions([])))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: empty panel:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_dual_panel_refuses_duplicate_document(self) -> None:
+        shared = self.write_findings(
+            "review-contract",
+            [self.finding("RC-001", "minor", artifact="a.txt:2")],
+            path=self.repo / "findings-shared.yaml")
+        proc = self.render(
+            panel=[("review-contract", "qwen3.8-max", str(shared)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(shared))],
+            dispositions=str(self.write_dispositions([])))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: duplicate findings document:",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_location_key_separates_artifacts_and_dimensions(self) -> None:
+        a, b = self.dual_docs(
+            [self.finding("RC-001", "minor", artifact="a.txt:2"),
+             self.finding("RC-002", "minor", artifact="src/app.py:1"),
+             self.finding("RC-003", "minor", artifact="a.txt:2",
+                          dimension="docs_process")],
+            [self.finding("RC-001", "minor", artifact="a.txt:2")])
+        disp = self.write_dispositions([
+            {"id": "RC-001@qwen3.8-max", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "RC-002@qwen3.8-max", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "RC-003@qwen3.8-max", "disposition": "rejected",
+             "reason": "no", "evidence": "e"},
+            {"id": "RC-001@deepseek-v4-pro-0813", "disposition": "rejected",
+             "reason": "no", "evidence": "e"}])
+        _, data, _ = self.render_ok(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b))],
+            dispositions=str(disp))
+        by_id = {f["id"]: f for f in data["findings"]}
+        self.assertEqual(by_id["RC-001@qwen3.8-max"]["location_key"],
+                         by_id["RC-001@deepseek-v4-pro-0813"]["location_key"])
+        self.assertNotEqual(by_id["RC-002@qwen3.8-max"]["location_key"],
+                            by_id["RC-001@qwen3.8-max"]["location_key"])
+        self.assertNotEqual(by_id["RC-003@qwen3.8-max"]["location_key"],
+                            by_id["RC-001@qwen3.8-max"]["location_key"])
+        self.assertEqual(by_id["RC-001@qwen3.8-max"]["agreement"], 2)
+        self.assertEqual(by_id["RC-002@qwen3.8-max"]["agreement"], 1)
+        self.assertEqual(by_id["RC-003@qwen3.8-max"]["agreement"], 1)
+
+    def test_check_refuses_asymmetric_panel_in_stored_record(self) -> None:
+        """The check-side symmetry guard is exercised, not just the render one."""
+        a, b = self.dual_docs()
+        out, _, _ = self.render_ok(
+            panel=[("review-contract", "qwen3.8-max", str(a)),
+                   ("review-contract", "deepseek-v4-pro-0813", str(b))],
+            dispositions=str(self.write_dispositions([])))
+        extra = self.write_findings("external", [],
+                                    path=self.repo / "findings-ext.yaml")
+        entry = {
+            "role": "external",
+            "model": "qwen3.8-max",
+            "rubric_version": "external-v1",
+            "document": record.record_path(str(extra), str(self.repo)),
+            "document_sha256": hashlib.sha256(extra.read_bytes()).hexdigest(),
+        }
+
+        def widen(data):
+            data["reviewers"].append(entry)
+            data["reviewers"].sort(key=lambda r: (r["role"], r["model"]))
+
+        self.rewrite_record(out, widen)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: incomplete panel:", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
     def test_check_accepts_legacy_v1_record(self) -> None:

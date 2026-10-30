@@ -301,15 +301,18 @@ def location_key(finding: dict) -> str:
     """
     key = f"{repo_artifact_path(finding['artifact_reference'])}\x00" \
           f"{finding['rubric_dimension']}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
 def check_panel_symmetry(reviewers: list[dict]) -> None:
     """Every model must cover the same lens set (a dual panel is symmetric).
 
     An asymmetric panel is refused by name: it means one model silently
-    skipped a lens, which would read as coverage the run never had.
+    skipped a lens, which would read as coverage the run never had.  An empty
+    panel is the maximal skip and is refused for the same reason.
     """
+    if not reviewers:
+        fail("review record: empty panel: no reviewer documents supplied")
     coverage: dict[str, set[str]] = {}
     for reviewer in reviewers:
         coverage.setdefault(reviewer["model"], set()).add(reviewer["role"])
@@ -354,6 +357,7 @@ def collect_reviewers(specs: list[tuple[str, str, str]], pkg: PackageInfo,
     reviewers: list[dict] = []
     findings: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    doc_slots: dict[str, str] = {}
     # Namespacing exists to keep two models' RC-001 apart.  A single-model
     # panel has no collision to prevent, so it keeps the plain lens ids its
     # operators already read (and that single-model records have always had).
@@ -366,6 +370,18 @@ def collect_reviewers(specs: list[tuple[str, str, str]], pkg: PackageInfo,
                  f"{role}@{model}")
         seen.add((role, model))
         lens = load_review_lens(path, role, pkg)
+        slot = f"{role}@{model}"
+        # Two models that both approve produce byte-identical documents (same
+        # package hash, same rubric, empty findings) — that is legitimate.
+        # A document that CERTIFIES defects cannot be reused as a second
+        # model's independent review, so only finding-bearing docs are
+        # de-duplicated.
+        if lens["findings"]:
+            if lens["document_sha256"] in doc_slots:
+                fail(f"review record: duplicate findings document: {slot} and "
+                     f"{doc_slots[lens['document_sha256']]} are byte-identical "
+                     "— one document cannot stand in for two panel slots")
+            doc_slots[lens["document_sha256"]] = slot
         reviewers.append({
             "role": role,
             "model": model,
@@ -814,6 +830,9 @@ def render_markdown(record: dict) -> str:
             "",
             f"models: {', '.join(panel_models)}",
             "",
+            "attribution: dispatch-declared — the record binds each document "
+            "hash, not the model that produced it",
+            "",
             "| model | lenses | findings |",
             "| --- | --- | --- |",
         ]
@@ -868,7 +887,7 @@ def render_markdown(record: dict) -> str:
                 f"{md_cell(finding['severity'])} | "
                 f"{md_cell(finding['rubric_dimension'])} | "
                 f"{md_cell(finding['artifact_reference'])} | "
-                f"{md_cell(finding.get('agreement'))} | "
+                f"{finding.get('agreement')}/{len(panel_models)} | "
                 f"{md_cell(disposition.get('disposition'))} | "
                 f"{md_cell(disposition_evidence(disposition))} |"
             )
@@ -1037,16 +1056,24 @@ def cmd_check(args) -> int:
                    for reviewer in data["reviewers"]}) > 1
     derived_findings: list[dict] = []
     seen_slots: set[tuple[str, str]] = set()
+    seen_docs: dict[str, str] = {}
     for reviewer in data["reviewers"]:
         role = reviewer.get("role")
         model = reviewer.get("model")
         doc_path = resolve_record_path(reviewer["document"], args.repo)
         raw = read_bytes(doc_path,
                          f"review record: findings doc mismatch: {role}")
-        if hashlib.sha256(raw).hexdigest() != reviewer["document_sha256"]:
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest != reviewer["document_sha256"]:
             fail(f"review record: findings doc mismatch: {role} "
                  f"({reviewer['document']})")
         lens = load_review_lens(doc_path, role, pkg)
+        if lens["findings"]:
+            if digest in seen_docs:
+                fail(f"review record: duplicate findings document: "
+                     f"{role}@{model} and {seen_docs[digest]} are "
+                     "byte-identical")
+            seen_docs[digest] = f"{role}@{model}"
         if lens["rubric_version"] != reviewer.get("rubric_version"):
             fail(f"review record: findings doc mismatch: {role} "
                  "(rubric version changed)")

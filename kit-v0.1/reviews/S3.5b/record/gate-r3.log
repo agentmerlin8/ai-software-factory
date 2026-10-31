@@ -1,0 +1,92 @@
+test_api_shape_invalid_rejected_valid_accepted (__main__.BuildLaneFixtures.test_api_shape_invalid_rejected_valid_accepted) ... ok
+test_missing_discovery_listing_refuses (__main__.BuildLaneFixtures.test_missing_discovery_listing_refuses)
+No --discovery file and no --run-discovery = named refusal. ... ok
+test_ui_assertion_requires_cardinality_constraint (__main__.BuildLaneFixtures.test_ui_assertion_requires_cardinality_constraint)
+R5-F3: an expected assertion with no recognized cardinality ... ok
+test_ui_assertions_invalid_rejected_valid_accepted (__main__.BuildLaneFixtures.test_ui_assertions_invalid_rejected_valid_accepted) ... ok
+test_ui_declared_without_results_rejects (__main__.BuildLaneFixtures.test_ui_declared_without_results_rejects) ... ok
+test_undeclared_files_and_ghost_test_rejected (__main__.BuildLaneFixtures.test_undeclared_files_and_ghost_test_rejected) ... ok
+test_valid_build_accepted (__main__.BuildLaneFixtures.test_valid_build_accepted) ... ok
+test_api_shape_activation (__main__.BuildLaneUnits.test_api_shape_activation) ... ok
+test_bare_runner_inactive_without_declaration (__main__.BuildLaneUnits.test_bare_runner_inactive_without_declaration) ... ok
+test_bare_runner_target_resolves_against_preceding_cd (__main__.BuildLaneUnits.test_bare_runner_target_resolves_against_preceding_cd)
+command-validity: a declared runner target is resolved against ... ok
+test_cd_chain_live_mode_rejects_nonexistent_target (__main__.BuildLaneUnits.test_cd_chain_live_mode_rejects_nonexistent_target)
+R13-N2 pin: the reported repro — live verification from the ... ok
+test_cd_chain_validates_every_target (__main__.BuildLaneUnits.test_cd_chain_validates_every_target)
+R13-N2: each cd target must EXIST and stay under the root ... ok
+test_escaping_cd_refused_by_parser_and_ignored_for_target (__main__.BuildLaneUnits.test_escaping_cd_refused_by_parser_and_ignored_for_target)
+A `cd ..` that leaves the root violates parse_test_command's ... ok
+test_glued_operator_chain_rejected_by_verify_check (__main__.BuildLaneUnits.test_glued_operator_chain_rejected_by_verify_check)
+R13-N1 end-to-end: the glued form reaches the named-failure ... ok
+test_glued_operators_rejected_quoted_stay_legal (__main__.BuildLaneUnits.test_glued_operators_rejected_quoted_stay_legal)
+R13-N1: shlex keeps `ok&&false` as ONE token — the chain scan ... ok
+test_injected_result_rows_require_string_command (__main__.BuildLaneUnits.test_injected_result_rows_require_string_command)
+R13-N5: each injected result row is validated BEFORE the ... ok
+test_parse_test_command_refuses_segments_after_external (__main__.BuildLaneUnits.test_parse_test_command_refuses_segments_after_external)
+F5: setup AFTER the external command would be applied ... ok
+test_parse_test_command_refuses_unsafe_syntax (__main__.BuildLaneUnits.test_parse_test_command_refuses_unsafe_syntax) ... ok
+test_parse_test_command_refuses_variable_expansion_in_argv (__main__.BuildLaneUnits.test_parse_test_command_refuses_variable_expansion_in_argv)
+R5-F2: argv is executed literally — a `$VAR` token in the ... ok
+test_parse_test_command_refuses_variable_expansion_in_setup_value (__main__.BuildLaneUnits.test_parse_test_command_refuses_variable_expansion_in_setup_value)
+R6-G1: an unsupported `$VAR` ref inside an export/env-prefix ... ok
+test_parse_test_command_setup_before_external_accepted (__main__.BuildLaneUnits.test_parse_test_command_setup_before_external_accepted) ... ok
+test_pinned_commands_injected_results (__main__.BuildLaneUnits.test_pinned_commands_injected_results) ... ok
+test_pinned_commands_live_exact_execution (__main__.BuildLaneUnits.test_pinned_commands_live_exact_execution)
+Live mode runs the EXACT declared command — no rewriting. ... ok
+test_pytest_node_id_target_parsed_by_runner (__main__.BuildLaneUnits.test_pytest_node_id_target_parsed_by_runner)
+R13-N4: a declared pytest target may be a NODE ID — the file ... ok
+test_runner_opt_cli_plumbing (__main__.BuildLaneUnits.test_runner_opt_cli_plumbing)
+R4-E2 CLI: `--runner-opt pytest=-k` parses into Gate and ... ok
+test_runner_value_flag_option_value_is_not_a_target (__main__.BuildLaneUnits.test_runner_value_flag_option_value_is_not_a_target)
+R4-E2: with `-k` declared as a value-taking flag ... ok
+test_runner_value_flag_target_existence_checked (__main__.BuildLaneUnits.test_runner_value_flag_target_existence_checked)
+R4-E2: with the value flag declared, the positional target ... ok
+test_setup_only_entry_in_mixed_list_refused (__main__.BuildLaneUnits.test_setup_only_entry_in_mixed_list_refused)
+R3-D1: a mixed list (setup-only + a real command) yields ... ok
+test_setup_only_verify_command_refused (__main__.BuildLaneUnits.test_setup_only_verify_command_refused)
+R3-D1: a setup-only entry (`cd .`, `export X=1`) parses to no ... ok
+test_setup_value_refusal_flows_to_named_failure (__main__.BuildLaneUnits.test_setup_value_refusal_flows_to_named_failure)
+R6-G1: the refusal surfaces through check_verify_commands' ... ok
+test_undeclared_option_value_still_counts_as_target (__main__.BuildLaneUnits.test_undeclared_option_value_still_counts_as_target)
+R4-E2 pin: with NO --runner-opt declaration, behavior is ... ok
+test_build_cli_command_result_list_flattened (__main__.CliSmokeTests.test_build_cli_command_result_list_flattened)
+The exact CLI repro: a --command-result file holding a LIST of ... ok
+test_build_cli_run (__main__.CliSmokeTests.test_build_cli_run) ... ok
+test_build_mode_rejects_multiple_dirs (__main__.CliSmokeTests.test_build_mode_rejects_multiple_dirs) ... ok
+test_plan_cli_pass_and_fail (__main__.CliSmokeTests.test_plan_cli_pass_and_fail) ... ok
+test_run_discovery_without_declared_command_is_usage_refusal (__main__.CliSmokeTests.test_run_discovery_without_declared_command_is_usage_refusal) ... ok
+test_bad_digest_rejected_with_reasons (__main__.DigestGateFixtures.test_bad_digest_rejected_with_reasons) ... ok
+test_cli_exit_codes (__main__.DigestGateFixtures.test_cli_exit_codes) ... ok
+test_good_digest_passes (__main__.DigestGateFixtures.test_good_digest_passes) ... ok
+test_ac_prose_without_named_test (__main__.PlanLaneInvalidFixturesRejected.test_ac_prose_without_named_test) ... ok
+test_bare_runner_rejected_when_declared (__main__.PlanLaneInvalidFixturesRejected.test_bare_runner_rejected_when_declared)
+commands family is activation-gated: with the runner DECLARED, ... ok
+test_coverage_defects_rejected (__main__.PlanLaneInvalidFixturesRejected.test_coverage_defects_rejected) ... ok
+test_missing_invariant_rejected (__main__.PlanLaneInvalidFixturesRejected.test_missing_invariant_rejected) ... ok
+test_unannotated_snippet_rejected (__main__.PlanLaneInvalidFixturesRejected.test_unannotated_snippet_rejected) ... ok
+test_unresolvable_anchors_rejected (__main__.PlanLaneInvalidFixturesRejected.test_unresolvable_anchors_rejected) ... ok
+test_unresolvable_seam_rejected (__main__.PlanLaneInvalidFixturesRejected.test_unresolvable_seam_rejected) ... ok
+test_base_sha_ladder (__main__.PlanLaneUnits.test_base_sha_ladder) ... ok
+test_batch_create_collision (__main__.PlanLaneUnits.test_batch_create_collision) ... ok
+test_bogus_sha_create_claim_rejected_not_exempted (__main__.PlanLaneUnits.test_bogus_sha_create_claim_rejected_not_exempted)
+AL2: `src/new.py@deadbee` with deadbee unresolvable must be a ... ok
+test_inflight_collision_skips_story_own_branch (__main__.PlanLaneUnits.test_inflight_collision_skips_story_own_branch)
+The gated story's OWN in-flight branch never collides with its ... ok
+test_line_number_below_one_rejected (__main__.PlanLaneUnits.test_line_number_below_one_rejected)
+AL3: `path:0` (or negative) cannot identify a source line — ... ok
+test_seam_fail_status_rejects (__main__.PlanLaneUnits.test_seam_fail_status_rejects) ... ok
+test_seam_pending_is_informational (__main__.PlanLaneUnits.test_seam_pending_is_informational) ... ok
+test_snippet_annotation_grammar (__main__.PlanLaneUnits.test_snippet_annotation_grammar) ... ok
+test_table_cell_citation_keeps_path_line_sha_apart (__main__.PlanLaneUnits.test_table_cell_citation_keeps_path_line_sha_apart)
+AL1: a non-backticked `| path:line |` table cell must yield ONE ... ok
+test_command_validity_inactive_note_without_runner (__main__.PlanLaneValidFixturesAccepted.test_command_validity_inactive_note_without_runner) ... ok
+test_prohibition_prose_and_annotated_snippets (__main__.PlanLaneValidFixturesAccepted.test_prohibition_prose_and_annotated_snippets)
+Prose poison strings must NOT trip the commands family (prose ... ok
+test_valid_seams_resolve_at_base (__main__.PlanLaneValidFixturesAccepted.test_valid_seams_resolve_at_base)
+Seams verified against a throwaway git repo (self-contained — ... ok
+
+----------------------------------------------------------------------
+Ran 58 tests in 0.305s
+
+OK

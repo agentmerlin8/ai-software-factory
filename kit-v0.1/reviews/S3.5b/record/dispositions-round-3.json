@@ -1,0 +1,16 @@
+{
+  "dispositions": [
+    {
+      "id": "RA-001@qwen3.8-max",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
+      "evidence": "Round-3 minor: the canonicalization test pins only HTTPS origins; the SSH no-suffix class is untested though the function handles it. Deferred to issue #33 item 4."
+    },
+    {
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
+      "evidence": "Round-3 minor: the trailing-slash rstrip guard is untested; a trailing-slash origin would otherwise render repo.git/.git. Deferred to issue #33 item 5."
+    }
+  ]
+}

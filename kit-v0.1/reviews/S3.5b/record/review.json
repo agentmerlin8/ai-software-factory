@@ -1,9 +1,9 @@
 {
-  "base_sha": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+  "base_sha": "82d301f6a9e9bb74b817686a6685c32bec90f6ee",
   "dispositions": [
     {
       "disposition": "deferred",
-      "evidence": "Round-2 minor: manifest label round-trip shape asymmetry between package._normalized_specs and record._manifest_input_spec. The rebuilt package digest still matches (the default label is the path stem either way); the missing test/canonicalization is deferred to issue #33 item 2.",
+      "evidence": "Round-3 minor: the trailing-slash rstrip guard is untested; a trailing-slash origin would otherwise render repo.git/.git. Deferred to issue #33 item 5.",
       "fix_sha": null,
       "id": "RA-001@deepseek-v4-pro-0813",
       "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
@@ -11,17 +11,9 @@
     },
     {
       "disposition": "deferred",
-      "evidence": "Round-2 minor: the fail-closed branch in controller._put_record_checks is not covered by a test. Deferred to issue #33 item 1; the branch itself is present and the round-1 authority tests cover the refusal path.",
+      "evidence": "Round-3 minor: the canonicalization test pins only HTTPS origins; the SSH no-suffix class is untested though the function handles it. Deferred to issue #33 item 4.",
       "fix_sha": null,
       "id": "RA-001@qwen3.8-max",
-      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
-      "reason": null
-    },
-    {
-      "disposition": "deferred",
-      "evidence": "Round-2 minor: REVIEWING's review_record_pr refuses a historical DRAFT_OPENED row with no persisted pr detail. Fail-closed by design; the explicit historical-row path is deferred to issue #33 item 3.",
-      "fix_sha": null,
-      "id": "RA-002@deepseek-v4-pro-0813",
       "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
       "reason": null
     }
@@ -30,13 +22,13 @@
     {
       "actionable": true,
       "agreement": 1,
-      "artifact_reference": "package:diff@tools/review/package.py:518",
-      "evidence": "the manifest round-trip between the build side and the rebuild side is shape-asymmetric for label-less contract/gate specs \u2014 `_normalized_specs` encodes them as a bare `rel` while `_manifest_input_spec` always re-encodes them as `rel:label` \u2014 yet no test in the diff rebuilds a record whose manifest carries a non-empty contract or gate spec: every rebuild fixture renders with empty specs (test_manifest_record_package_deleted_*, test_check_rebuilds_from_manifest_without_package_file, TestCiGateManifestRecord), and test_manifest_out_records_scope_flags_in_cli_order only inspects the stored JSON without ever rebuilding from it. If the package header renders the spec string verbatim, `check` falsely refuses rebuilt records with unlabeled inputs and the T1 fresh-clone guarantee is unproven for them; the byte-determinism invariant the fix relies on stays green under either behavior.",
+      "artifact_reference": "package:diff@tools/review/package.py:373",
+      "evidence": "the change adds the trailing-slash guard `value = url.rstrip(\"/\")` in canonical_repo_url, but the new test `test_origin_with_and_without_git_suffix_same_package` exercises only the origin forms `https://example.com/owner/repo` and `https://example.com/owner/repo.git`; deleting the rstrip guard leaves that test green, because neither origin carries a trailing slash and neither reaches the guarded path, while an origin stored as `.../repo.git/` would then fail `endswith(\".git\")` and render `repo.git/.git` \u2014 a different repository path \u2014 so the byte-identical rebuild the docstring claims is unpinned for that input form",
       "id": "RA-001@deepseek-v4-pro-0813",
       "lens": "review-adversary",
       "location_key": "edb30f76727e8486af77bff118d4e21e36bd2ab020b9921c16fc4689e2557408",
       "model": "deepseek-v4-pro-0813",
-      "required_change": "add a rebuild test that renders with a label-less and a label-carrying contract/gate spec, deletes the package file, and asserts `check` exits 0 with a digest match, or canonicalize `_normalized_specs` and `_manifest_input_spec` to one shared spec form so the round-trip is shape-identical by construction",
+      "required_change": "extend test_origin_with_and_without_git_suffix_same_package with a trailing-slash origin form, e.g. build with origin `https://example.com/owner/repo.git/` and assert the package is byte-identical to the canonical `.../repo.git` build, so that deleting the rstrip guard at the cited hunk fails the suite",
       "rubric_dimension": "test_quality",
       "severity": "minor",
       "source": "internal"
@@ -44,35 +36,21 @@
     {
       "actionable": true,
       "agreement": 1,
-      "artifact_reference": "package:diff@tools/controller.py:662",
-      "evidence": "the new fail-closed guard in _put_record_checks ('record is None' -> put(\"review_head_match\", False, \"record unreadable \u2014 head match cannot be established (fail closed)\") and the matching no_open_blocker_major branch) is exercised by no test in the package: every READY_FOR_REVIEW / MERGE_ELIGIBLE fixture in the tools/tests/test_controller.py diff (test_ready_for_review_record_head_rule, test_ready_for_review_refuses_open_blocker_major, test_merge_eligible_refuses_unresolvable_head_sha, TestMergeEligibleRecordHeadRule, TestMultirepoSetLevel.merge_ev) seeds an existing fake_record, so a production change flipping that first branch to put(\"review_head_match\", True, ...) leaves every test green while a refused transition persists a check_results row claiming a head match on an unreadable record; only the review-record-path refusals at REVIEWING (test_reviewing_refuses_missing_record_path) are covered, and they use the separate REVIEWING put() calls, not _put_record_checks",
+      "artifact_reference": "package:diff@tools/review/tests/test_package.py:443",
+      "evidence": "test_origin_with_and_without_git_suffix_same_package pins only the HTTPS origin class: it builds with 'https://example.com/owner/repo' vs '\u2026/repo.git' and anchors with assertIn(\"repo: https://example.com/owner/repo.git\\n\"). No test in the package exercises an SSH origin without the '.git' suffix; the preceding visible test asserts only 'repo: git@github.com:owner/repo.git' for an origin that already carries '.git', which stays green with or without canonical_repo_url. Production change that passes falsely: delete canonical_repo_url and revert the call site to 'origin = strip_userinfo(origin)' \u2014 an SSH checkout whose origin is 'git@github.com:owner/repo' (no suffix) would again rebuild a non-identical package, and every test in this diff stays green because neither the byte-equality assertion nor the assertIn anchor covers that input class.",
       "id": "RA-001@qwen3.8-max",
       "lens": "review-adversary",
-      "location_key": "292d575154c7518dd553cb3a95d1a6da3e8215efa786dea72066fdab0d6bc067",
+      "location_key": "758b8978ac3fba359385060598fd72211676350f3f0d57a67e44432394bb9d89",
       "model": "qwen3.8-max",
-      "required_change": "add controller fixtures that drive READY_FOR_REVIEW and MERGE_ELIGIBLE with review_record pointing at a missing (or uncontained/unparseable) record directory and assert the persisted check_results carry review_head_match=False and no_open_blocker_major=False with the fail-closed details, anchored at the _put_record_checks hunk in tools/controller.py",
+      "required_change": "Add a case in the same fixture class that builds with an SSH origin lacking the suffix ('git@github.com:owner/repo'), then set-url to the '.git' form, and asserts the two packages are byte-identical plus assertIn(\"repo: git@github.com:owner/repo.git\\n\") \u2014 so removing canonical_repo_url fails the suite for the SSH class too, anchored at the cited test hunk.",
       "rubric_dimension": "test_quality",
-      "severity": "minor",
-      "source": "internal"
-    },
-    {
-      "actionable": true,
-      "agreement": 1,
-      "artifact_reference": "package:diff@tools/controller.py:925",
-      "evidence": "REVIEWING's new `review_record_pr` check derives the expected pr only from the persisted DRAFT_OPENED evidence detail, and the diff's own comment acknowledges rows that carry no such detail (`None when the row carries no evidence detail \u2014 historical rows are read, never re-judged`). For such a row `pr_expect` is None and the check refuses (fail closed) ever reaching REVIEWING; `no_duplicate_trigger` also refuses a compensating second DRAFT_OPENED request, so a pre-cutover story parked at DRAFT_OPENED with a detail-less row has no request path to REVIEWING at all \u2014 the backward-compat fold promise covers mechanism values but not this evidence-detail shape.",
-      "id": "RA-002@deepseek-v4-pro-0813",
-      "lens": "review-adversary",
-      "location_key": "446b23ee0abf42f5764d30288e8e3f3434c3899b060e6e5cd7b3941ee2b5a406",
-      "model": "deepseek-v4-pro-0813",
-      "required_change": "when the DRAFT_OPENED row carries no pr_number detail, accept an evidence-supplied pr_number at REVIEWING and match it against the record's pr (instead of refusing), or document an explicit override path for detail-less historical rows",
-      "rubric_dimension": "operational",
       "severity": "minor",
       "source": "internal"
     }
   ],
   "gate_results": [
     {
-      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate-r2.log",
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate-r3.log",
       "evidence_sha256": "a704d9a770e0efcccb4f63af9aaebfa62168f253e800c0c736e6345709666313",
       "exit": 0,
       "gate": "gate-selftest"
@@ -84,94 +62,93 @@
       "gate": "ruleset-drill"
     },
     {
-      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit-r2.log",
-      "evidence_sha256": "af16de1f182db59b3dfdc0f7d98578036632aa9d8dd41a2370e1d8905bf3339a",
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit-r3.log",
+      "evidence_sha256": "1cbb2cbdba6b8f7cd20d2d9a9e1ac4777e30115823968ae008e3f6bc39effc8e",
       "exit": 0,
       "gate": "unit"
     }
   ],
-  "head_sha": "a02c2e53cd36cc3f3ab84b9fa32816be20f5d6b9",
+  "head_sha": "9d1ba060dfe4ecc0fc0824804e89d7b40e355635",
   "lane": {
     "name": "review-lane-v1",
     "version": 2
   },
   "open_findings": [
     "RA-001@deepseek-v4-pro-0813",
-    "RA-001@qwen3.8-max",
-    "RA-002@deepseek-v4-pro-0813"
+    "RA-001@qwen3.8-max"
   ],
   "package": {
     "manifest": {
       "allowed": null,
-      "base": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+      "base": "82d301f6a9e9bb74b817686a6685c32bec90f6ee",
       "contract": [
         "kit-v0.1/reviews/S3.5b/record/CONTRACT-issue-25.md:contract",
-        "kit-v0.1/reviews/S3.5b/record/PRIOR-FINDINGS.md:prior-findings"
+        "kit-v0.1/reviews/S3.5b/record/PRIOR-FINDINGS-R3.md:prior-findings"
       ],
       "gate": [
-        "kit-v0.1/reviews/S3.5b/record/unit-r2.log:unit",
-        "kit-v0.1/reviews/S3.5b/record/gate-r2.log:gate-selftest",
+        "kit-v0.1/reviews/S3.5b/record/unit-r3.log:unit",
+        "kit-v0.1/reviews/S3.5b/record/gate-r3.log:gate-selftest",
         "kit-v0.1/reviews/S3.5b/record/ruleset-drill.md:ruleset-drill"
       ],
-      "head": "a02c2e53cd36cc3f3ab84b9fa32816be20f5d6b9",
+      "head": "9d1ba060dfe4ecc0fc0824804e89d7b40e355635",
       "include": [],
       "max_diff_bytes": 1500000,
       "max_input_bytes": 200000,
       "version": 1,
       "withheld": null
     },
-    "path": "kit-v0.1/reviews/S3.5b/record/pkg-r2.md",
-    "sha256": "353be80b10343cc13e4c7402b04be583935279560dbb884f176675238836ec1a"
+    "path": "kit-v0.1/reviews/S3.5b/record/pkg-r3.md",
+    "sha256": "6b97a3823f2cf7c1a35646851df3778f1732f5d3d56005ba750f01d47d60bd8d"
   },
   "pr": 32,
   "prior_rounds": [
     {
-      "decision": "CHANGES_REQUESTED",
-      "dispositioned": 16,
-      "findings": 21,
-      "loop": 1,
-      "path": "kit-v0.1/reviews/S3.5b/record/round-1"
+      "decision": "APPROVED",
+      "dispositioned": 0,
+      "findings": 3,
+      "loop": 2,
+      "path": "kit-v0.1/reviews/S3.5b/record/round-2"
     }
   ],
   "reviewers": [
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/RA-deepseek-r2.yaml",
-      "document_sha256": "37c4a9b6132ddcbfaeaff3ba118316d266e4b052e24442af7b35a8eb87851e55",
+      "document": "kit-v0.1/reviews/S3.5b/record/RA-deepseek-r3.yaml",
+      "document_sha256": "d97063744779830a2484b6d437e851682d4fe079e3ee489936670461d11ccba5",
       "model": "deepseek-v4-pro-0813",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/RA-qwen-r2.yaml",
-      "document_sha256": "7b28145d2fafb0911595fac8c7391079b19736b1aedb63f3f16c07f90f7519d6",
+      "document": "kit-v0.1/reviews/S3.5b/record/RA-qwen-r3.yaml",
+      "document_sha256": "da59dd44ab8479cde370afa0eee11f4ee5a138d2bc1b57fa5fef4699a66045e6",
       "model": "qwen3.8-max",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/RC-deepseek-r2.yaml",
-      "document_sha256": "8e93f9e6efb79a10efb69c23bca6fcbe3261c2c76415ce4c331a257c7045764a",
+      "document": "kit-v0.1/reviews/S3.5b/record/RC-deepseek-r3.yaml",
+      "document_sha256": "430a85a15ab55df30088251a07a42e70085b843c019bf6937fe54146de333bc1",
       "model": "deepseek-v4-pro-0813",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/RC-qwen-r2.yaml",
-      "document_sha256": "f37a48c0baacc115484a2cb3663791c00e003613de978a3b004b154eae488ba9",
+      "document": "kit-v0.1/reviews/S3.5b/record/RC-qwen-r3.yaml",
+      "document_sha256": "c282b5355fa8b8dd0eec54e2675e18ee4cbeb776f4504526dccbf656f200b95e",
       "model": "qwen3.8-max",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/RS-deepseek-r2.yaml",
-      "document_sha256": "04bcb03f443ff101c549546ddc57be3e00d4a56f0069b5bb3aa01d9e5554d99b",
+      "document": "kit-v0.1/reviews/S3.5b/record/RS-deepseek-r3.yaml",
+      "document_sha256": "aa9a58907d728b33f0062ed896ff08b56328a9454da0fa79e48459881e10ed96",
       "model": "deepseek-v4-pro-0813",
       "role": "review-security",
       "rubric_version": "review-security-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/RS-qwen-r2.yaml",
-      "document_sha256": "43cb707529ad73c2d7b4685fc24a0149d841fc5164b4c4feeb23f78614341e1c",
+      "document": "kit-v0.1/reviews/S3.5b/record/RS-qwen-r3.yaml",
+      "document_sha256": "cb98efc19cc44d23a17d22cf9d30bd1130ed28a32eea1a30a3a7159130dd6082",
       "model": "qwen3.8-max",
       "role": "review-security",
       "rubric_version": "review-security-v1"
@@ -184,9 +161,9 @@
     "blockers": 0,
     "decision": "APPROVED",
     "infos": 0,
-    "loop": 2,
-    "loop_cap": 2,
+    "loop": 3,
+    "loop_cap": 3,
     "majors": 0,
-    "minors": 3
+    "minors": 2
   }
 }

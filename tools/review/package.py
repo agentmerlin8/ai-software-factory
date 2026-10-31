@@ -361,6 +361,19 @@ def render_section(heading: str, payload: str) -> str:
     return f"## {heading}\n"
 
 
+def canonical_repo_url(url: str) -> str:
+    """Canonical Identity form for a remote origin.
+
+    GitHub Actions checks out with ``https://host/owner/repo`` while a local
+    clone normally carries ``…/repo.git``; both name the same repository.  A
+    package must rebuild byte-identically from either clone, so the Identity
+    line always carries the ``.git`` form (S3.5b round 3: the required CI
+    check surfaced the two-clone hash split).
+    """
+    value = url.rstrip("/")
+    return value if value.endswith(".git") else value + ".git"
+
+
 def compose_package(args) -> tuple[str, str]:
     """Build package text + its sha256. Raises SystemExit on refusals."""
     base = resolve_sha(args.repo, args.base)
@@ -448,7 +461,7 @@ def compose_package(args) -> tuple[str, str]:
 
     origin = remote_origin_url(args.repo)
     if origin is not None:
-        origin = strip_userinfo(origin)
+        origin = canonical_repo_url(strip_userinfo(origin))
         identity_repo = origin
         repo_name = repo_name_from_url(origin)
     else:

@@ -609,6 +609,19 @@ class _GitFixtureTest(unittest.TestCase):
         self.build_ok()
         self.assertIn("repo: git@github.com:owner/repo.git\n", self.pkg)
 
+    def test_origin_with_and_without_git_suffix_same_package(self) -> None:
+        """The Identity line is canonical: a CI checkout (no .git) and a
+        local clone (…/repo.git) rebuild byte-identical packages.  The
+        required check surfaced this split in round 3 (S3.5b)."""
+        self.git("remote", "add", "origin", "https://example.com/owner/repo")
+        self.build_ok(out=self.dir / "no-suffix.md")
+        without = self.pkg
+        self.git("remote", "set-url", "origin",
+                 "https://example.com/owner/repo.git")
+        self.build_ok(out=self.dir / "with-suffix.md")
+        self.assertEqual(without, self.pkg)
+        self.assertIn("repo: https://example.com/owner/repo.git\n", without)
+
     # -- S3.5b T1: --manifest-out -------------------------------------------
 
     def test_manifest_out_deterministic_and_matches_package(self) -> None:

@@ -1,3 +1,4 @@
 ado/__pycache__/setup.cpython-311.pyc
 __azurite_db_blob*.json
 __pycache__/
+kit-v0.1/reviews/**/pkg*.md

@@ -642,12 +642,30 @@ class _GitFixtureTest(unittest.TestCase):
         # Canonical JSON form: sorted keys, 2-space indent.
         self.assertEqual(raw, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
+    def test_manifest_out_refuses_external_contract_input(self) -> None:
+        """A manifest is for self-verifying records: an absolute or
+        repo-escaping contract/gate input is refused at emission, and no
+        manifest is written (S3.5b review RA-007)."""
+        external = self.dir / "outside-contract.md"
+        external.write_text("contract\n", encoding="utf-8")
+        manifest = self.dir / "external-manifest.json"
+        pkg_out = self.dir / "pkg.md"
+        proc = self.build_proc(pkg_out, "--manifest-out", str(manifest),
+                               "--contract", str(external))
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("manifest requires repo-relative inputs", proc.stderr)
+        self.assertIn("resolves outside the repo", proc.stderr)
+        self.assertFalse(manifest.exists())
+        # The same build without a manifest still succeeds (external inputs
+        # remain legal for an operator-run package).
+        self.build_ok("--contract", str(external))
+
     def test_manifest_out_records_scope_flags_in_cli_order(self) -> None:
         """include is stripped in CLI order; contract/gate keep raw specs;
         allowed/withheld carry resolved path lists from the list files."""
-        contract = self.dir / "contract.txt"
+        contract = self.repo / "contract.txt"
         contract.write_text("C\n", encoding="utf-8")
-        gate = self.dir / "g.json"
+        gate = self.repo / "g.json"
         gate.write_text("{}\n", encoding="utf-8")
         allowed = self.dir / "allowed.txt"
         allowed.write_text("a.txt\n sub/b.txt \n\n", encoding="utf-8")
@@ -665,8 +683,8 @@ class _GitFixtureTest(unittest.TestCase):
                                out=self.dir / "scoped.md")
         data = json.loads(manifest.read_text(encoding="utf-8"))
         self.assertEqual(data["include"], ["sub", "a.txt"])
-        self.assertEqual(data["contract"], [f"{contract}:Custom"])
-        self.assertEqual(data["gate"], [str(gate)])
+        self.assertEqual(data["contract"], ["contract.txt:Custom"])
+        self.assertEqual(data["gate"], ["g.json"])
         self.assertEqual(data["allowed"], ["a.txt", "sub/b.txt"])
         self.assertEqual(data["withheld"], ["bin.dat"])
         self.assertEqual(data["max_diff_bytes"], 999)

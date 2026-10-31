@@ -126,9 +126,12 @@ def panel_slot_errors(record_dir: Path, record: dict,
         slots.append((str(reviewer.get("role")), str(reviewer.get("model"))))
     seen = set(slots)
     if len(slots) != len(seen):
-        dupes = sorted(s for s in seen if slots.count(s) > 1)
-        return [f"panel mismatch for {record_dir}: duplicate reviewer "
-                "slots: " + ", ".join(f"({r}, {m})" for r, m in dupes)]
+        dupes = sorted((s for s in seen if slots.count(s) > 1),
+                       key=lambda s: (-slots.count(s), s))
+        return [f"panel mismatch for {record_dir}: duplicate reviewer slots "
+                f"({len(slots)} entries, {len(seen)} distinct): "
+                + ", ".join(f"({r}, {m}) x{slots.count((r, m))}"
+                            for r, m in dupes)]
     declared = {(l, m) for l in lenses for m in models}
     missing = sorted(declared - seen)
     unexpected = sorted(seen - declared)

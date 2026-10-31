@@ -504,6 +504,22 @@ def parse_package_hash(data: bytes, path: str) -> str:
     return match.group(1)
 
 
+def _normalized_specs(repo, specs: list[str]) -> list[str]:
+    """Store manifest inputs repo-relative so a rebuild never depends on the
+    caller's cwd.  Absolute paths inside the repo are relativized; anything
+    outside was already refused by manifest_input_errors."""
+    root = Path(repo).resolve()
+    out: list[str] = []
+    for spec in specs:
+        path, label = split_spec(spec)
+        candidate = Path(path)
+        resolved = (candidate if candidate.is_absolute()
+                    else root / candidate).resolve()
+        rel = resolved.relative_to(root).as_posix()
+        out.append(f"{rel}:{label}" if ":" in spec else rel)
+    return out
+
+
 def build_manifest(args) -> dict:
     """The build manifest: a pure function of the resolved build inputs.
 
@@ -517,8 +533,8 @@ def build_manifest(args) -> dict:
         "base": resolve_sha(args.repo, args.base),
         "head": resolve_sha(args.repo, args.head),
         "include": [value.strip() for value in (args.include or [])],
-        "contract": list(args.contract or []),
-        "gate": list(args.gate or []),
+        "contract": _normalized_specs(args.repo, list(args.contract or [])),
+        "gate": _normalized_specs(args.repo, list(args.gate or [])),
         "allowed": (read_list_file(args.allowed, "--allowed")
                     if args.allowed is not None else None),
         "withheld": (read_list_file(args.withheld, "--withheld")
@@ -528,9 +544,33 @@ def build_manifest(args) -> dict:
     }
 
 
+def manifest_input_errors(repo, specs: list[str], flag: str) -> list[str]:
+    """Manifest inputs must resolve inside the repo: check rebuilds them from
+    the record, so an input outside the repo cannot be re-derived (S3.5b
+    review RA-007).  Emitted manifests are for self-verifying records only; a
+    package may still be built with external inputs without one."""
+    errors: list[str] = []
+    root = Path(repo).resolve()
+    for spec in specs:
+        path, _ = split_spec(spec)
+        candidate = Path(path)
+        resolved = (candidate if candidate.is_absolute()
+                    else root / candidate).resolve()
+        if not resolved.is_relative_to(root):
+            errors.append(f"{flag} {spec!r} resolves outside the repo")
+    return errors
+
+
 def cmd_build(args) -> int:
     if not is_git_worktree(args.repo):
         fail(f"review package: not a git worktree: {args.repo}")
+    if getattr(args, "manifest_out", None):
+        input_errors = manifest_input_errors(
+            args.repo, list(args.contract or []) + list(args.gate or []),
+            "--contract/--gate")
+        if input_errors:
+            fail("review package: manifest requires repo-relative inputs: "
+                 + "; ".join(input_errors))
     text, digest = compose_package(args)
     try:
         with open(args.out, "wb") as fh:

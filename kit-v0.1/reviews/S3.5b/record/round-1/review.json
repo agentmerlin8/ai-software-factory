@@ -1,0 +1,574 @@
+{
+  "base_sha": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+  "dispositions": [
+    {
+      "disposition": "rejected",
+      "evidence": "01b0449 controller checks; ci_gate.py --head from github.event.pull_request.head.sha.",
+      "fix_sha": null,
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": "Same boundary as RC-001: forge-free controller; the CI required check is the forge-anchored head binding. The new head_sha_resolves check closes the fabricated-head case."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "head_rule_errors now requires `git merge-base --is-ancestor record_head pr_head` before the v2 record-tail diff, and a non-ancestor fixture asserts the refusal.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-001@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "open_blocker_majors now counts only fixed (with a non-empty fix_sha), rejected, or deferred entries; a value-less disposition leaves the finding OPEN.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "controllers checks: BUILD_GREEN `commit_exists(self.root, sha)`; MERGE_ELIGIBLE `head_sha_resolves` (added 01b0449); architecture \u00a7Review lane Required check paragraph states the two-layer split.",
+      "fix_sha": null,
+      "id": "RA-002@qwen3.8-max",
+      "issue": null,
+      "reason": "The controller is deliberately forge-free and resolves every commit in the control home's object DB (the same assumption as BUILD_GREEN commit_sha and MERGED merged_sha). The required CI check is the forge-anchored layer: it compares the record head against github.event.pull_request.head.sha. Adding a per-story code-repo parameter is a controller-contract change outside this slice's boundary."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "ruleset-drill.md records the ruleset state transition and the red drill; the green half is the PR check run after the record commit.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-003@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "REVIEWING now requires SHA_RE.fullmatch(review_head_sha) before the prefix comparison; empty/non-hex evidence fails with a named detail.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-003@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "A real request-path DRAFT_OPENED -> REVIEWING integration test now asserts the pr_number round-trips through the persisted row shape.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-004@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "ci_gate duplicate-slot guard covered by a new fixture asserting the 'duplicate reviewer slots' refusal.",
+      "fix_sha": "fbceac56b3fbbda583f84577c41f01cd76820cf2",
+      "id": "RA-004@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "New ci_gate test runs the bare workflow invocation (default --records-root and --panel) and passes against the committed panel.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-005@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "New ci_gate fixture renders WITH --package-manifest, deletes the package file, and passes at the exact head and a record-tail head.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-006@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "manifest contract/gate specs are now repo-relative only (absolute or `..` refused at render and check); rebuild resolves them under the repo after a containment check.",
+      "fix_sha": "fbceac56b3fbbda583f84577c41f01cd76820cf2",
+      "id": "RA-007@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "validate-doc now uses --repo to resolve a relative --package path; a foreign-cwd test pins the behaviour.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RA-008@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "controller.py REVIEWING/MERGE checks; architecture \u00a7Review lane Required check sentence (two complementary layers).",
+      "fix_sha": null,
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": "Same boundary as RA-002: the controller's evidence model is object-DB + human gate, not a forge client. 01b0449 adds head_sha_resolves/review_head_resolves so the evidenced head must exist in the repo; the required CI check binds the actual PR head."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "T6 ruleset/drill evidence added as a record gate input: kit-v0.1/reviews/S3.5b/record/ruleset-drill.md records ruleset id 26277566 (active; kit-ci + review-record), the red run on 3aa3b59 (`no review record for PR 32`), and PR #32 BLOCKED at that head. The workflow also moved to env-indirected arguments in 01b0449.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RC-001@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "ruleset-drill.md is added as a record gate input (ruleset id, contexts, active state, red-run URL and message).",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RC-002@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "The retirement scan is now per-line, case-insensitive and order-independent (copilot AND review in the same line), so a Copilot-as-reviewer instruction cannot slip through by word order.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RC-002@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "tools/review/record.py match_dispositions (undisposed list -> fail); S3.5a T3 acceptance shipped this behaviour.",
+      "fix_sha": null,
+      "id": "RC-003@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": "The renderer already refuses an undispositioned finding: match_dispositions fails with `review record: undispositioned findings: ...` (record.py). The behaviour predates this slice's diff, so it is not visible in the package; the runbook sentence is accurate."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "record_head is validated with SHA_RE before the prefix comparison.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RS-001@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "record_head is validated with SHA_RE before the head comparison.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RS-001@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "rejected",
+      "evidence": "ci_gate.py panel_slot_errors + review-panel.toml; record.py check_panel_symmetry (v2 records).",
+      "fix_sha": null,
+      "id": "RS-002@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": "The declared panel is repository policy, not a universal controller constant. The required CI check enforces it via ci_gate.panel_slot_errors against kit-v0.1/review-panel.toml; the generic controller enforces panel symmetry through the record authority (check_panel_symmetry). Imposing a kit-specific panel file on every target repo would break the controller's repo-agnostic contract."
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Workflow passes PR_NUMBER and HEAD_SHA through the job env and quotes them in the shell; no ${{ }} expansion in the run block.",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "id": "RS-002@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/tests/test_controller.py:584",
+      "evidence": "The head rule at READY_FOR_REVIEW/MERGE_ELIGIBLE compares the record head only against caller-supplied evidence (_review_evidence(rel, head_ev) feeds evaluate with the transition's own review_head_sha/head_sha string) and never against the repository's actual current HEAD. A story whose tree contains unreviewed code commits reaches READY_FOR_REVIEW when the transition names the stale pre-code head: test_ready_for_review_record_head_rule commits late.py on top of the record's head, refuses review_head_sha=later, then asserts rc==0 for review_head_sha=<old head> while the unreviewed commit is still the repo HEAD. The same mechanism at MERGE_ELIGIBLE runs the head rule against evidence head_sha (test_v2_later_code_commit_refused refuses only when the HONEST later head is supplied; a stale named head is unexercised). No production change is required to defeat the 'record valid AT the current head' guard \u2014 it binds nothing to the true current head \u2014 and any actual-HEAD binding, if added, could be removed with every packaged test green.",
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "lens": "review-adversary",
+      "location_key": "bb4dd0a8b71f9a53bc18c1ba79cfc667b5c5657670ebcd3b8c7a6e7b14fe3b70",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Anchor the head rule to the repository's actual HEAD at transition time (resolve the current commit and require the record to cover it under the exact / record-only-tail / v1-ancestor rules), and add a test that advances the tree with a code commit and asserts READY_FOR_REVIEW and MERGE_ELIGIBLE are refused even when the stale head is named as evidence.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/review/record_gate.py:130",
+      "evidence": "head_rule_errors' v2 record-tail rule runs `git diff --name-only {record_head}..{pr_head}` and accepts when every changed path is under the record directory, but two-dot diff is direction-agnostic and ancestry is never checked: a pr_head that is EARLIER than the record head (e.g. the commit just before the record-tail commit, whose only difference is the record directory itself) satisfies `if paths and not outside` and returns []. The docstring claims the rule allows only 'a LATER head'. No test in the package feeds an ancestor pr_head whose diff is record-dir-only: test_record_at_wrong_head_exits_1 uses self.base, whose diff includes a.txt, so it refuses for the wrong reason and would stay green with the direction hole intact. In the controller path the record is read from the live working tree while review_head_sha is free-form evidence, so READY_FOR_REVIEW/MERGE_ELIGIBLE can pin an earlier head than the record actually reviewed.",
+      "id": "RA-001@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "527d2c806a0a8da42dc7063ee9751d3ae52ef12b591cb8c8678ddcab37783d61",
+      "model": "qwen3.8-max",
+      "required_change": "in head_rule_errors, require `git merge-base --is-ancestor {record_head} {pr_head}` to hold before applying the record-tail rule (exact match excepted), and add a fixture where pr_head is an ancestor of the record head with a record-dir-only diff that must be refused",
+      "rubric_dimension": "behavior",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/review/record_gate.py:97",
+      "evidence": "open_blocker_majors treats a disposition as clearing a blocker/major purely by id membership \u2014 dispositioned = {d.get('id') for d in record.get('dispositions', []) if isinstance(d, dict)} \u2014 never checking the entry's disposition VALUE: a finding dispositioned as {'id': 'RA-001@m'} with no disposition field, or a garbage value, counts as dispositioned and clears the open blocker/major at the gate re-assertion layer. The controller tests stub the record authority (mock.patch.object(CT.record_gate, 'check_record', ...)), so no packaged test exercises a malformed disposition entry at the gate layer, and the gate's own invariant would clear the blocker while every test stays green.",
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "lens": "review-adversary",
+      "location_key": "527d2c806a0a8da42dc7063ee9751d3ae52ef12b591cb8c8678ddcab37783d61",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Count a disposition entry only when it carries a recognized disposition value in {fixed, rejected, deferred} (and a fix_sha for fixed), and add a controller test seeding a blocker with a value-less disposition entry that asserts the transition is refused.",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/controller.py:632",
+      "evidence": "_review_evidence evaluates the record with `record_gate.evaluate(str(rec), str(self.root), pr_head, allow_v1_ancestor=True)` \u2014 the git oracle for the head rule is the control home (self.root), while review_head_sha/head_sha evidence names commits of the code repository. In the layout the shipped runbook documents ('All findings docs, gate evidence and the record live under ONE record directory (`stories/<id>/review/` in a control home)'), the control home is not the code repo: the record-tail diff and the v1 merge-base run against a repo that does not contain those SHAs, so head_rule_errors returns 'cannot diff' and, because a record commit necessarily lands after the reviewed head, READY_FOR_REVIEW/MERGE_ELIGIBLE become unreachable. Every controller test uses one temp repo as both control home and code repo (commit_all commits record and code together), so removing or breaking the tail/ancestor git calls in the split layout fails no test in the package.",
+      "id": "RA-002@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "446b23ee0abf42f5764d30288e8e3f3434c3899b060e6e5cd7b3941ee2b5a406",
+      "model": "qwen3.8-max",
+      "required_change": "resolve the head rule against the repository that owns head_sha (an explicit code-repo parameter or evidence), or enforce the co-located layout with a named refusal, and add a fixture with the record directory in a control home separate from the code repo",
+      "rubric_dimension": "operational",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:25",
+      "evidence": "The review-record job's refusal only blocks merges once the branch ruleset flips from the staged disabled state to active (owner decision: create ruleset, stage disabled, verify on the live PR, then flip active). The packaged gate evidence (unit.log, gate.log) contains no live-drill artifact showing a throwaway PR blocked without a record and passing with one \u2014 the T6 acceptance. While the ruleset stays disabled the required check runs but binds nothing, the cutover's own premise ('a review lane that is not mechanically required is advisory') remains unresolved, and no CI or state-machine test can fail: activating the ruleset is a state outside the diff, and its omission leaves every test green.",
+      "id": "RA-003@deepseek-v4-pro-0813",
+      "lens": "review-adversary",
+      "location_key": "149e395c5fb86e9398a39ccd99cafe37623940768105f7e5b4ec7d6fba46668e",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Record the T6 live-drill evidence (throwaway PR blocked without a record / passes with a valid record, plus the ruleset state transition) in the record's gate evidence before the owner flips the ruleset active, so the mechanical requirement is evidenced rather than assumed.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/controller.py:915",
+      "evidence": "the REVIEWING review_head_match check is `rec_head == head_ev or rec_head.startswith(head_ev) or head_ev.startswith(rec_head)`: any string starts with the empty string, so an empty review_head_sha passes the comparison, and review_head_sha is never format-checked (7-40 hex per EVIDENCE_FORMATS) inside this branch \u2014 the guard holds only if the generic evidence-supplied gate rejects empty values, which the package does not show. test_reviewing_refuses_head_mismatch exercises only 'd'*40 and the head[:7] prefix path; no test pins an empty or non-hex review_head_sha, so a production change that admits empty evidence values leaves every test green.",
+      "id": "RA-003@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "f8b183d6a7a4e5c43c80e0ebb298052f92783850e0b522b1d04569c88e453703",
+      "model": "qwen3.8-max",
+      "required_change": "validate review_head_sha against the documented 7-40 hex format before the prefix comparison in the REVIEWING branch, and add a test that an empty/non-hex review_head_sha is refused",
+      "rubric_dimension": "behavior",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/controller.py:633",
+      "evidence": "_draft_opened_pr reads the DRAFT_OPENED pr out of the persisted row shape (check_results.evidence_supplied.detail.pr_number), but every REVIEWING test fabricates that row by hand via draft_row() instead of driving a real DRAFT_OPENED transition through the controller. The read-back contract that review_record_pr depends on is therefore never exercised against rows the controller itself persisted: a production change to transition-row persistence that drops the evidence detail leaves pr_expect None and fails closed every new REVIEWING (the 'pr_expect is not None' guard is False), while all packaged tests continue to pass because their fabricated rows carry the expected shape.",
+      "id": "RA-004@deepseek-v4-pro-0813",
+      "lens": "review-adversary",
+      "location_key": "292d575154c7518dd553cb3a95d1a6da3e8215efa786dea72066fdab0d6bc067",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Add one controller-driven integration test that performs a real DRAFT_OPENED transition and then REVIEWING, asserting the pr_number round-trips through the actually-persisted row shape (and that a persisted row without the detail refuses with review_record_pr rather than silently greening).",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/ci_gate.py:128",
+      "evidence": "panel_slot_errors' duplicate-slot guard (`if len(slots) != len(seen)`) has no test: test_panel_mismatch_names_missing_slots only widens the declared panel to force a 'missing' mismatch. A record whose reviewers list the same (role, model) slot twice while still covering the declared set passes the set-equality branch (missing and unexpected both empty), so deleting the duplicate check is a production change that leaves every test in the package green while duplicated panel slots \u2014 the same lens+model counted twice \u2014 are admitted.",
+      "id": "RA-004@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "8fe48a1bba0accd1ec75d3b6bbf8896c668aec48e61bd316ea4fb514247bc01f",
+      "model": "qwen3.8-max",
+      "required_change": "add a ci_gate fixture with a duplicated (role, model) reviewer slot covering the full declared panel and assert the 'duplicate reviewer slots' refusal",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:41",
+      "evidence": "the workflow invokes `python3 tools/review/ci_gate.py --repo . --pr ... --head ...` with no --records-root and no --panel, so the required check depends entirely on DEFAULT_RECORDS_ROOT ('kit-v0.1/reviews') and DEFAULT_PANEL ('kit-v0.1/review-panel.toml') \u2014 yet every test in test_ci_gate.py overrides both flags (run_gate always passes --records-root and --panel). Changing either default, or moving/renaming the panel file, is a production change that fails no test in the package while turning the live required check into a permanent refusal (or, for a records-root default pointing at stale records, a wrong-record pass).",
+      "id": "RA-005@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "14319e653e73375b3da9dc8c5c788baeb45cb82f822ff83c364736976b898b2e",
+      "model": "qwen3.8-max",
+      "required_change": "add a ci_gate test that runs with the bare workflow invocation (no --records-root, no --panel) against the shipped defaults, asserting the committed kit-v0.1/review-panel.toml is loaded",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/tests/test_ci_gate.py:236",
+      "evidence": "test_valid_v2_record_at_exact_head_exits_0 (and every other ci_gate happy-path test) renders records WITHOUT --package-manifest while the package file self.pkg = repo/package.md remains present in the fixture working tree, so record.py check resolves the package from a file that a fresh CI clone never contains (packages are never committed \u2014 the diff's own .gitignore adds kit-v0.1/reviews/**/package.md). The CI-realistic condition \u2014 a manifest-carrying record with no package file at the pinned head checkout \u2014 is exercised only at the record.py check level (test_check_rebuilds_from_manifest_without_package_file), never through ci_gate; a production change breaking rebuild_package_from_manifest's wiring inside the ci_gate subprocess chain would leave all ci_gate tests green.",
+      "id": "RA-006@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "f075f171c58a61d694922333f0be6f8b8c4c3d273bdb9aae7dd914d51bea1726",
+      "model": "qwen3.8-max",
+      "required_change": "add a ci_gate fixture that renders with --package-manifest, deletes the package file (or commits only the record directory), and asserts exit 0 at the exact head and at a record-tail head",
+      "rubric_dimension": "test_quality",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/package.py:520",
+      "evidence": "build_manifest stores contract/gate inputs as the raw CLI specs (`'contract': list(args.contract or [])`), which may be absolute or repo-external paths (the fixture itself uses temp-dir paths like self.dir/'contract.txt'), and rebuild_package_from_manifest re-reads those files at check time. Two failure modes the diff never handles: (1) a record rendered with non-committed/absolute contract or gate paths renders cleanly but is permanently unverifiable on a fresh clone \u2014 O2's acceptance promise \u2014 failing later in CI as 'package rebuild failed'; (2) any later commit that edits a committed contract/gate input changes the rebuilt bytes, so a previously valid record fails with 'package rebuild mismatch', indistinguishable from tampering. No test covers a manifest whose contract/gate path is unreachable or mutated after render.",
+      "id": "RA-007@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "70d223e3963874fff7e3a99c8eefb10136af0b1b0476a8de172110368fe6c311",
+      "model": "qwen3.8-max",
+      "required_change": "at render time refuse (or named-warn on) manifest contract/gate specs that are not repo-relative committed paths at the record head, and add a fixture where a contract input mutates after render showing the named refusal distinguishes staleness from tampering",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": false,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/record.py:1434",
+      "evidence": "cmd_validate_doc requires --repo but never uses args.repo: validation binds only to the package file (parse_package + load_review_lens). Passing any --repo value yields the same OK line, so the flag claims a repo-scoped check that does not occur; the tests pass self.repo and cannot distinguish.",
+      "id": "RA-008@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "30e24d865af0127744cbaa4c7cd99c9ed77a96280497b86e810bd0ffe55264c3",
+      "model": "qwen3.8-max",
+      "required_change": "either drop --repo from validate-doc or use it (e.g. resolve the package path against it); no gate behavior depends on this",
+      "rubric_dimension": "behavior",
+      "severity": "info",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/controller.py:967",
+      "evidence": "The contract's state-machine deliverable requires \"`READY_FOR_REVIEW` / `MERGE_ELIGIBLE` require: record exists, record head SHA == current head, no undispositioned BLOCKER/MAJOR, verdict-consistent\". The READY_FOR_REVIEW hunk evaluates the head rule against operator-supplied evidence, never against the repository's current head:\n  +            rel = ev.get(\"review_record\", \"\")\n  +            head_ev = ev.get(\"review_head_sha\", \"\")\n  +            rec, record, errs = self._review_evidence(rel, head_ev)\nand state_machine.py's evidence format for that key says:\n  +    \"review_head_sha\": \"7-40 hex; the record's pinned head\",\ni.e. the comparison target is any 7-40 hex string supplied in the same transition request, with no requirement that it resolve to (let alone equal) the current HEAD. Echoing the record's own stale pin leaves every check green while the actual head contains unreviewed commits: review_head_sha == record.head_sha passes as an exact match by construction. MERGE_ELIGIBLE passes the evidence-supplied head_sha the same way. The mutation check confirms it: the concrete production change \"supply the record's own pinned head as review_head_sha (READY) or head_sha (MERGE) after new commits land\" leaves READY_FOR_REVIEW and MERGE_ELIGIBLE green with NO check comparing against the current head.",
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "lens": "review-contract",
+      "location_key": "bca8d843dfbfb0d5b5d5382ecec920e4ad0d74cd0a6a248245d4c0543ab3e9ae",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Bind the head rule's comparison target to the repository's actual current head: resolve the evidenced review_head_sha (READY_FOR_REVIEW) and head_sha (MERGE_ELIGIBLE) against the repo HEAD (rev-parse / resolve_sha) and refuse when the evidenced head is not the current commit, before evaluating the record head rule. Add a fixture whose record pin equals the supplied evidence but differs from the actual repo HEAD, asserting refusal under review_head_match.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:26",
+      "evidence": "Contract deliverable: 'Add to the branch ruleset as a required check (stage disabled -> verify -> active per the Pro ruleset lesson; never describe a disabled check as enforcement)'; acceptance bullet: 'A throwaway PR with no review record is blocked by the required check; the same PR with a valid record passes.' The package's Gate evidence section contains only the unit log ('Ran 1524 tests ... OK') and the gate-selftest log ('Ran 58 tests ... OK') \u2014 no artifact in the package shows the main ruleset requiring kit-ci + review-record (staged, verified on the live PR, flipped active) or the throwaway-PR drill result. Without the ruleset the added 'review-record' workflow job runs but blocks nothing, so the acceptance bullet is not shown satisfied by any package artifact.",
+      "id": "RC-001@qwen3.8-max",
+      "lens": "review-contract",
+      "location_key": "7c1ecd5372b9bf8b7b8ac66bc1bed137c746fe3d16367142b7a56df807c883ce",
+      "model": "qwen3.8-max",
+      "required_change": "Attach gate-trail evidence to the record for T6: the main ruleset configuration/export showing kit-ci + review-record required (with its disabled -> verified -> active staging) and the throwaway-PR drill outcome (blocked with no record, passed with a valid record), or record an owner-granted deviation deferring the ruleset flip with a named follow-up.",
+      "rubric_dimension": "docs_process",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@kit-v0.1/architecture.md:217",
+      "evidence": "The contract requires the check to be added \"to the branch ruleset as a required check (stage `disabled` \u2192 verify \u2192 `active` per the Pro ruleset lesson; never describe a disabled check as enforcement)\" and accepts with \"A throwaway PR with no review record is blocked by the required check; the same PR with a valid record passes.\" No artifact in the package evidences any of the ruleset facts: the Gate evidence section holds only unit.log (python suite) and gate.log (gate-selftest) \u2014 nothing showing the `main` ruleset exists, that kit-ci + review-record are required on it, that a throwaway PR was actually blocked/passed, or the ruleset's current stage. Yet the Diff's shipped docs assert enforcement as fact:\n  \"on every pull request (required check). Exit 0 = a valid record at the head with the declared panel; non-zero = named refusal\"  (kit-v0.1/architecture.md gate table)\n  \"on every pull request (required check)\"                                            (tools/gate_catalog.py, `when` field)\nPer the frozen rule quoted above, describing a check as \"required\" while its ruleset stage is unevidenced is exactly the prohibited \"describe a disabled check as enforcement\". Acceptance criterion #1 (the throwaway-PR block/pass drill) is not shown satisfied by any artifact.",
+      "id": "RC-002@deepseek-v4-pro-0813",
+      "lens": "review-contract",
+      "location_key": "f5946db850c02a16b2b9769f3d01a23c0f281eb43a6f668d78d111f01eae7a00",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Provide gate evidence establishing the ruleset facts (main ruleset created with kit-ci + review-record; live drill result: throwaway PR blocked without a record, passes with a valid one; current stage disabled|verified|active). Until the flip to `active` is evidenced, rewrite the architecture gate row and tools/gate_catalog.py `when` field to state the verified stage (e.g. \"staged disabled, verifying on the live PR\") rather than \"required check\".",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/tests/test_docs_consistency.py:31",
+      "evidence": "The T5 acceptance guard is 'REQUEST_A_BOT_REVIEW = re.compile(r\"(?i)(request|trigger|ask for)[^.\\n]{0,40}copilot[^.\\n]{0,40}review\")' scanned only over SHIP_TEMPLATES = README.md, onboarding/README.md and onboarding/templates/*.md, while the frozen deliverable says 'remove Copilot-request instructions from runbook.md, process/, templates, and the S3-shape onboarding docs where they are stated as the review mechanism' and T5's acceptance is 'no request-a-bot-review instruction remains'. Concrete production changes leave the check green: rephrasing an instruction to 'request a review from Copilot' or 'ask Copilot for a review' (the regex requires the order request...copilot...review and the literal 'ask for'), or leaving/adding such an instruction under process/ or agents/, which the scan set never reads. The cited check therefore does not prove the acceptance criterion it backs.",
+      "id": "RC-002@qwen3.8-max",
+      "lens": "review-contract",
+      "location_key": "d0e1bc2215e92564ff80be005434825339cc15f2b180a512a70d72787c583740",
+      "model": "qwen3.8-max",
+      "required_change": "Make the retirement guard prove 'no request-a-bot-review instruction remains': match Copilot-as-reviewer instructions order-independently (e.g. any copilot token co-occurring with request/trigger/ask/review wording in an instruction sentence, or refuse any residual copilot review-mechanism mention outright) and scan every path the deliverable names, including process/ and the shipped agents/onboarding docs, not only README.md, onboarding/README.md and onboarding/templates/*.md.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@onboarding/templates/runbook.md:31",
+      "evidence": "The runbook template asserts:\n  \"+an undispositioned finding will not render, and the `review-record` required\"\nNo artifact in this package shows render refusing. The only enforcement visible in the Diff is the gate-time re-assertion in tools/review/record_gate.py (\"undispositioned findings must be empty\") and the record's verdict derivation in record.py \u2014 i.e. the record refuses at check/gate time, not at render time. The visible record.py hunks (compose_record, cmd_check, cmd_validate_doc) contain no render-time refusal of undispositioned findings, so the claim \"will not render\" as written has no supporting artifact.",
+      "id": "RC-003@deepseek-v4-pro-0813",
+      "lens": "review-contract",
+      "location_key": "d7415b4bef92f46d44920c043f2b089bd50ee3c633509f2863428d0f206473d5",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "Align the runbook claim with the implementation: either add (and evidence) a render-time refusal of undispositioned findings in record.py render, or reword the sentence to state that a record with an undispositioned finding is refused by `record.py check` / the review-record gate.",
+      "rubric_dimension": "docs_process",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/record_gate.py:126",
+      "evidence": "head_rule_errors validates only the PR head against the 7-40 hex format (SHA_RE.fullmatch(pr_head), line 122) and then accepts any record head that prefix-matches in either direction: 'if pr_head.startswith(record_head) or record_head.startswith(pr_head): return []'. A review.json whose head_sha is a 1-hex-char (or any 1-6 char) prefix of the PR head passes this branch even though the module's own contract declares 7-40 hex, because the record head read from JSON is never format-checked or resolved to 40 hex (the comment claims 'prefix-tolerant exactness: resolve both to 40-hex for comparison' but no resolution happens). ci_gate step 2 runs head_rule_errors on discovered records before the authority is consulted, so the unvalidated-prefix acceptance is the head-selection control itself.",
+      "id": "RS-001@deepseek-v4-pro-0813",
+      "lens": "review-security",
+      "location_key": "c3f12b201ce6e6695c043cd75534feafd580e9e847efd4b3bcd0f488792b6b15",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "enforce the 7-40 hex domain on record_head (SHA_RE.fullmatch) before the prefix comparison, or actually resolve both heads to 40-hex from the repo object DB as the comment claims; a non-conforming or unresolvable record head must fail the head rule at every call site (ci_gate step 2 and evaluate), never pass via prefix tolerance.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/controller.py:913",
+      "evidence": "REVIEWING review_head_match is computed as `bool(record) and bool(rec_head) and (rec_head == head_ev or rec_head.startswith(head_ev) or head_ev.startswith(rec_head))` where `head_ev = ev.get(\"review_head_sha\", \"\")` is never format-validated in the changed hunk; `rec_head.startswith(\"\")` is True, so an empty (or 1-hex-char) review_head_sha evidence value matches ANY record head, defeating the pinned-head rule the same diff declares (`review_head_sha` = 7-40 hex, the record's pinned head), and no test exercises an empty or sub-7-hex value (tests cover only `\"d\"*40` mismatch and head[:7])",
+      "id": "RS-001@qwen3.8-max",
+      "lens": "review-security",
+      "location_key": "918f25368ff8470f5e261579345db595fd44c88a559ad0ee97b841207527ebfa",
+      "model": "qwen3.8-max",
+      "required_change": "before the comparison, require `record_gate.SHA_RE.fullmatch(head_ev)` (7-40 lowercase hex) and fail the review_head_match check with a named refusal when the supplied review_head_sha does not match that format; restrict the prefix tolerance to head_ev values of at least 7 hex characters",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/controller.py:632",
+      "evidence": "the controller's record gate for READY_FOR_REVIEW and MERGE_ELIGIBLE is built from record_gate.evaluate(...) in _review_evidence (line 632) plus _put_record_checks, which cover the authority, the head rule, open blockers/majors and verdict consistency only. The declared-panel equality check (panel_slot_errors) exists ONLY in tools/review/ci_gate.py (line 227), never in controller.py or record_gate.py: a record whose internal (role, model) reviewer slots do not match kit-v0.1/review-panel.toml passes the state-machine gates that lead to merge, so the 'record produced by the declared panel' authorization control is unreachable on the state-machine surface and holds only where the CI check runs.",
+      "id": "RS-002@deepseek-v4-pro-0813",
+      "lens": "review-security",
+      "location_key": "918f25368ff8470f5e261579345db595fd44c88a559ad0ee97b841207527ebfa",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "run the declared-panel equality (panel file vs the record's internal reviewer slots) inside the state-machine record checks (record_gate.evaluate or _put_record_checks) so READY_FOR_REVIEW and MERGE_ELIGIBLE refuse a record not produced by the declared panel, matching the control ci_gate already applies.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:360",
+      "evidence": "the review-record job interpolates GitHub expressions directly into the run: shell block (`--pr ${{ github.event.pull_request.number }} --head ${{ github.event.pull_request.head.sha }}`); the interpolated values are platform-typed (int, hex sha) so no injection is demonstrable today, but direct expression expansion in a shell run step is the pattern that turns exploitable the moment a string-typed context (title, branch name, label) is added",
+      "id": "RS-002@qwen3.8-max",
+      "lens": "review-security",
+      "location_key": "149e395c5fb86e9398a39ccd99cafe37623940768105f7e5b4ec7d6fba46668e",
+      "model": "qwen3.8-max",
+      "required_change": "pass the PR number and head sha through the job `env:` block and reference them as quoted shell variables (`--pr \"$PR_NUMBER\" --head \"$HEAD_SHA\"`) instead of expanding `${{ }}` expressions inside the run script",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate.log",
+      "evidence_sha256": "a704d9a770e0efcccb4f63af9aaebfa62168f253e800c0c736e6345709666313",
+      "exit": 0,
+      "gate": "gate-selftest"
+    },
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit.log",
+      "evidence_sha256": "a6149b8f2a3bff36e8cada9dc76b00c4d3aecc054540581f9f3883844d3fea49",
+      "exit": 0,
+      "gate": "unit"
+    }
+  ],
+  "head_sha": "9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 2
+  },
+  "open_findings": [
+    "RA-001@deepseek-v4-pro-0813",
+    "RA-002@qwen3.8-max",
+    "RC-001@deepseek-v4-pro-0813",
+    "RC-003@deepseek-v4-pro-0813",
+    "RS-002@deepseek-v4-pro-0813"
+  ],
+  "package": {
+    "manifest": {
+      "allowed": null,
+      "base": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+      "contract": [
+        "kit-v0.1/reviews/S3.5b/record/CONTRACT-issue-25.md:contract"
+      ],
+      "gate": [
+        "kit-v0.1/reviews/S3.5b/record/unit.log:unit",
+        "kit-v0.1/reviews/S3.5b/record/gate.log:gate-selftest"
+      ],
+      "head": "9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2",
+      "include": [],
+      "max_diff_bytes": 1500000,
+      "max_input_bytes": 200000,
+      "version": 1,
+      "withheld": null
+    },
+    "path": "kit-v0.1/reviews/S3.5b/record/package.md",
+    "sha256": "f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8"
+  },
+  "pr": 32,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/RA-deepseek.yaml",
+      "document_sha256": "983a7998e42ef34c5cfceb227767a03e82f0fafa569cf1a737daf3e5d1e32b7a",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/RA-qwen.yaml",
+      "document_sha256": "2d3106374472fa050af7722c579d20a646b0ca965d32dcb298170384f514a62e",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/RC-deepseek.yaml",
+      "document_sha256": "44222e64719df35e8f47f46d98cbe1ba58ecb89e62476056899c8a9f39148024",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/RC-qwen.yaml",
+      "document_sha256": "5036c90a24bc94eb5f0d100f6ead927859d95f100b01a5d719f0c9fa88b97102",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/RS-deepseek.yaml",
+      "document_sha256": "cc8d34aa8f10e50d642abae25b3d15700a12d314004767a3d4400466339b26e7",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/RS-qwen.yaml",
+      "document_sha256": "37262f40de207ab6e46a573e9e8e100e99dc8f6401bb9e7f169bd015d2ea409a",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v2",
+  "story": "S3.5b",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 0,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 1,
+    "loop": 1,
+    "loop_cap": 2,
+    "majors": 10,
+    "minors": 10
+  }
+}

@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 353be80b10343cc13e4c7402b04be583935279560dbb884f176675238836ec1a
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: a02c2e53cd36cc3f3ab84b9fa32816be20f5d6b9
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/package.py:518
+      evidence: "the manifest round-trip between the build side and the rebuild side is shape-asymmetric for label-less contract/gate specs — `_normalized_specs` encodes them as a bare `rel` while `_manifest_input_spec` always re-encodes them as `rel:label` — yet no test in the diff rebuilds a record whose manifest carries a non-empty contract or gate spec: every rebuild fixture renders with empty specs (test_manifest_record_package_deleted_*, test_check_rebuilds_from_manifest_without_package_file, TestCiGateManifestRecord), and test_manifest_out_records_scope_flags_in_cli_order only inspects the stored JSON without ever rebuilding from it. If the package header renders the spec string verbatim, `check` falsely refuses rebuilt records with unlabeled inputs and the T1 fresh-clone guarantee is unproven for them; the byte-determinism invariant the fix relies on stays green under either behavior."
+      required_change: "add a rebuild test that renders with a label-less and a label-carrying contract/gate spec, deletes the package file, and asserts `check` exits 0 with a digest match, or canonicalize `_normalized_specs` and `_manifest_input_spec` to one shared spec form so the round-trip is shape-identical by construction"
+      actionable: true
+    - id: RA-002
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/controller.py:925
+      evidence: "REVIEWING's new `review_record_pr` check derives the expected pr only from the persisted DRAFT_OPENED evidence detail, and the diff's own comment acknowledges rows that carry no such detail (`None when the row carries no evidence detail — historical rows are read, never re-judged`). For such a row `pr_expect` is None and the check refuses (fail closed) ever reaching REVIEWING; `no_duplicate_trigger` also refuses a compensating second DRAFT_OPENED request, so a pre-cutover story parked at DRAFT_OPENED with a detail-less row has no request path to REVIEWING at all — the backward-compat fold promise covers mechanism values but not this evidence-detail shape."
+      required_change: "when the DRAFT_OPENED row carries no pr_number detail, accept an evidence-supplied pr_number at REVIEWING and match it against the record's pr (instead of refusing), or document an explicit override path for detail-less historical rows"
+      actionable: true

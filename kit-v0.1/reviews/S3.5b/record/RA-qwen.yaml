@@ -1,0 +1,65 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record_gate.py:130
+      evidence: "head_rule_errors' v2 record-tail rule runs `git diff --name-only {record_head}..{pr_head}` and accepts when every changed path is under the record directory, but two-dot diff is direction-agnostic and ancestry is never checked: a pr_head that is EARLIER than the record head (e.g. the commit just before the record-tail commit, whose only difference is the record directory itself) satisfies `if paths and not outside` and returns []. The docstring claims the rule allows only 'a LATER head'. No test in the package feeds an ancestor pr_head whose diff is record-dir-only: test_record_at_wrong_head_exits_1 uses self.base, whose diff includes a.txt, so it refuses for the wrong reason and would stay green with the direction hole intact. In the controller path the record is read from the live working tree while review_head_sha is free-form evidence, so READY_FOR_REVIEW/MERGE_ELIGIBLE can pin an earlier head than the record actually reviewed."
+      required_change: "in head_rule_errors, require `git merge-base --is-ancestor {record_head} {pr_head}` to hold before applying the record-tail rule (exact match excepted), and add a fixture where pr_head is an ancestor of the record head with a record-dir-only diff that must be refused"
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/controller.py:632
+      evidence: "_review_evidence evaluates the record with `record_gate.evaluate(str(rec), str(self.root), pr_head, allow_v1_ancestor=True)` — the git oracle for the head rule is the control home (self.root), while review_head_sha/head_sha evidence names commits of the code repository. In the layout the shipped runbook documents ('All findings docs, gate evidence and the record live under ONE record directory (`stories/<id>/review/` in a control home)'), the control home is not the code repo: the record-tail diff and the v1 merge-base run against a repo that does not contain those SHAs, so head_rule_errors returns 'cannot diff' and, because a record commit necessarily lands after the reviewed head, READY_FOR_REVIEW/MERGE_ELIGIBLE become unreachable. Every controller test uses one temp repo as both control home and code repo (commit_all commits record and code together), so removing or breaking the tail/ancestor git calls in the split layout fails no test in the package."
+      required_change: "resolve the head rule against the repository that owns head_sha (an explicit code-repo parameter or evidence), or enforce the co-located layout with a named refusal, and add a fixture with the record directory in a control home separate from the code repo"
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/controller.py:915
+      evidence: "the REVIEWING review_head_match check is `rec_head == head_ev or rec_head.startswith(head_ev) or head_ev.startswith(rec_head)`: any string starts with the empty string, so an empty review_head_sha passes the comparison, and review_head_sha is never format-checked (7-40 hex per EVIDENCE_FORMATS) inside this branch — the guard holds only if the generic evidence-supplied gate rejects empty values, which the package does not show. test_reviewing_refuses_head_mismatch exercises only 'd'*40 and the head[:7] prefix path; no test pins an empty or non-hex review_head_sha, so a production change that admits empty evidence values leaves every test green."
+      required_change: "validate review_head_sha against the documented 7-40 hex format before the prefix comparison in the REVIEWING branch, and add a test that an empty/non-hex review_head_sha is refused"
+      actionable: true
+    - id: RA-004
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/ci_gate.py:128
+      evidence: "panel_slot_errors' duplicate-slot guard (`if len(slots) != len(seen)`) has no test: test_panel_mismatch_names_missing_slots only widens the declared panel to force a 'missing' mismatch. A record whose reviewers list the same (role, model) slot twice while still covering the declared set passes the set-equality branch (missing and unexpected both empty), so deleting the duplicate check is a production change that leaves every test in the package green while duplicated panel slots — the same lens+model counted twice — are admitted."
+      required_change: "add a ci_gate fixture with a duplicated (role, model) reviewer slot covering the full declared panel and assert the 'duplicate reviewer slots' refusal"
+      actionable: true
+    - id: RA-005
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@.github/workflows/kit-ci.yml:41
+      evidence: "the workflow invokes `python3 tools/review/ci_gate.py --repo . --pr ... --head ...` with no --records-root and no --panel, so the required check depends entirely on DEFAULT_RECORDS_ROOT ('kit-v0.1/reviews') and DEFAULT_PANEL ('kit-v0.1/review-panel.toml') — yet every test in test_ci_gate.py overrides both flags (run_gate always passes --records-root and --panel). Changing either default, or moving/renaming the panel file, is a production change that fails no test in the package while turning the live required check into a permanent refusal (or, for a records-root default pointing at stale records, a wrong-record pass)."
+      required_change: "add a ci_gate test that runs with the bare workflow invocation (no --records-root, no --panel) against the shipped defaults, asserting the committed kit-v0.1/review-panel.toml is loaded"
+      actionable: true
+    - id: RA-006
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/tests/test_ci_gate.py:236
+      evidence: "test_valid_v2_record_at_exact_head_exits_0 (and every other ci_gate happy-path test) renders records WITHOUT --package-manifest while the package file self.pkg = repo/package.md remains present in the fixture working tree, so record.py check resolves the package from a file that a fresh CI clone never contains (packages are never committed — the diff's own .gitignore adds kit-v0.1/reviews/**/package.md). The CI-realistic condition — a manifest-carrying record with no package file at the pinned head checkout — is exercised only at the record.py check level (test_check_rebuilds_from_manifest_without_package_file), never through ci_gate; a production change breaking rebuild_package_from_manifest's wiring inside the ci_gate subprocess chain would leave all ci_gate tests green."
+      required_change: "add a ci_gate fixture that renders with --package-manifest, deletes the package file (or commits only the record directory), and asserts exit 0 at the exact head and at a record-tail head"
+      actionable: true
+    - id: RA-007
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/review/package.py:520
+      evidence: "build_manifest stores contract/gate inputs as the raw CLI specs (`'contract': list(args.contract or [])`), which may be absolute or repo-external paths (the fixture itself uses temp-dir paths like self.dir/'contract.txt'), and rebuild_package_from_manifest re-reads those files at check time. Two failure modes the diff never handles: (1) a record rendered with non-committed/absolute contract or gate paths renders cleanly but is permanently unverifiable on a fresh clone — O2's acceptance promise — failing later in CI as 'package rebuild failed'; (2) any later commit that edits a committed contract/gate input changes the rebuilt bytes, so a previously valid record fails with 'package rebuild mismatch', indistinguishable from tampering. No test covers a manifest whose contract/gate path is unreachable or mutated after render."
+      required_change: "at render time refuse (or named-warn on) manifest contract/gate specs that are not repo-relative committed paths at the record head, and add a fixture where a contract input mutates after render showing the named refusal distinguishes staleness from tampering"
+      actionable: true
+    - id: RA-008
+      severity: info
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record.py:1434
+      evidence: "cmd_validate_doc requires --repo but never uses args.repo: validation binds only to the package file (parse_package + load_review_lens). Passing any --repo value yields the same OK line, so the flag claims a repo-scoped check that does not occur; the tests pass self.repo and cannot distinguish."
+      required_change: "either drop --repo from validate-doc or use it (e.g. resolve the package path against it); no gate behavior depends on this"
+      actionable: false

@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: docs_process
+      artifact_reference: package:diff@.github/workflows/kit-ci.yml:26
+      evidence: "Contract deliverable: 'Add to the branch ruleset as a required check (stage disabled -> verify -> active per the Pro ruleset lesson; never describe a disabled check as enforcement)'; acceptance bullet: 'A throwaway PR with no review record is blocked by the required check; the same PR with a valid record passes.' The package's Gate evidence section contains only the unit log ('Ran 1524 tests ... OK') and the gate-selftest log ('Ran 58 tests ... OK') — no artifact in the package shows the main ruleset requiring kit-ci + review-record (staged, verified on the live PR, flipped active) or the throwaway-PR drill result. Without the ruleset the added 'review-record' workflow job runs but blocks nothing, so the acceptance bullet is not shown satisfied by any package artifact."
+      required_change: "Attach gate-trail evidence to the record for T6: the main ruleset configuration/export showing kit-ci + review-record required (with its disabled -> verified -> active staging) and the throwaway-PR drill outcome (blocked with no record, passed with a valid record), or record an owner-granted deviation deferring the ruleset flip with a named follow-up."
+      actionable: true
+    - id: RC-002
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/tests/test_docs_consistency.py:31
+      evidence: "The T5 acceptance guard is 'REQUEST_A_BOT_REVIEW = re.compile(r\"(?i)(request|trigger|ask for)[^.\\n]{0,40}copilot[^.\\n]{0,40}review\")' scanned only over SHIP_TEMPLATES = README.md, onboarding/README.md and onboarding/templates/*.md, while the frozen deliverable says 'remove Copilot-request instructions from runbook.md, process/, templates, and the S3-shape onboarding docs where they are stated as the review mechanism' and T5's acceptance is 'no request-a-bot-review instruction remains'. Concrete production changes leave the check green: rephrasing an instruction to 'request a review from Copilot' or 'ask Copilot for a review' (the regex requires the order request...copilot...review and the literal 'ask for'), or leaving/adding such an instruction under process/ or agents/, which the scan set never reads. The cited check therefore does not prove the acceptance criterion it backs."
+      required_change: "Make the retirement guard prove 'no request-a-bot-review instruction remains': match Copilot-as-reviewer instructions order-independently (e.g. any copilot token co-occurring with request/trigger/ask/review wording in an instruction sentence, or refuse any residual copilot review-mechanism mention outright) and scan every path the deliverable names, including process/ and the shipped agents/onboarding docs, not only README.md, onboarding/README.md and onboarding/templates/*.md."
+      actionable: true

@@ -656,10 +656,17 @@ class Controller:
         """The shared READY_FOR_REVIEW / MERGE_ELIGIBLE record keys:
         review_record_valid, review_head_match, no_open_blocker_major."""
         head_errs = [e for e in errs if e.startswith("head rule")]
-        put("review_head_match", not head_errs,
-            head_errs or (f"record valid at head {head_ev!r} (exact match, "
-                          "record-tail commits, or a v1 ancestor)"
-                          if head_ev else "head rule not evaluated"))
+        if record is None:
+            # An unreadable record cannot establish a head match: fail the
+            # named check instead of letting an empty error list read green.
+            put("review_head_match", False,
+                "record unreadable — head match cannot be established "
+                "(fail closed)")
+        else:
+            put("review_head_match", not head_errs,
+                head_errs or (f"record valid at head {head_ev!r} (exact match, "
+                              "record-tail commits, or a v1 ancestor)"
+                              if head_ev else "head rule not evaluated"))
         if record is None:
             put("no_open_blocker_major", False,
                 "record unreadable — open blocker/major findings cannot be "

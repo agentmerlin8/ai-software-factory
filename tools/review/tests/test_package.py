@@ -8,6 +8,7 @@ re-builds as the acceptance property.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -607,6 +608,92 @@ class _GitFixtureTest(unittest.TestCase):
         self.git("remote", "add", "origin", "git@github.com:owner/repo.git")
         self.build_ok()
         self.assertIn("repo: git@github.com:owner/repo.git\n", self.pkg)
+
+    # -- S3.5b T1: --manifest-out -------------------------------------------
+
+    def test_manifest_out_deterministic_and_matches_package(self) -> None:
+        """Two builds with --manifest-out: byte-identical manifest AND
+        identical package digest; the manifest records resolved inputs."""
+        manifest1 = self.dir / "manifest1.json"
+        self.build_ok("--manifest-out", str(manifest1))
+        first_pkg = self.out.read_bytes()
+        first_sha = self.pkg_sha(self.pkg)
+        manifest2 = self.dir / "manifest2.json"
+        out2 = self.dir / "package-m2.md"
+        self.build_ok("--manifest-out", str(manifest2), out=out2)
+        self.assertEqual(manifest2.read_bytes(), manifest1.read_bytes())
+        self.assertEqual(out2.read_bytes(), first_pkg)
+        self.assertEqual(self.pkg_sha(self.pkg), first_sha)
+        raw = manifest1.read_bytes().decode("utf-8")
+        self.assertTrue(raw.endswith("\n"))
+        data = json.loads(raw)
+        self.assertEqual(data, {
+            "version": 1,
+            "base": self.base,
+            "head": self.head,
+            "include": [],
+            "contract": [],
+            "gate": [],
+            "allowed": None,
+            "withheld": None,
+            "max_diff_bytes": 1_500_000,
+            "max_input_bytes": 200_000,
+        })
+        # Canonical JSON form: sorted keys, 2-space indent.
+        self.assertEqual(raw, json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+    def test_manifest_out_records_scope_flags_in_cli_order(self) -> None:
+        """include is stripped in CLI order; contract/gate keep raw specs;
+        allowed/withheld carry resolved path lists from the list files."""
+        contract = self.dir / "contract.txt"
+        contract.write_text("C\n", encoding="utf-8")
+        gate = self.dir / "g.json"
+        gate.write_text("{}\n", encoding="utf-8")
+        allowed = self.dir / "allowed.txt"
+        allowed.write_text("a.txt\n sub/b.txt \n\n", encoding="utf-8")
+        withheld = self.dir / "withheld.txt"
+        withheld.write_text("bin.dat\n", encoding="utf-8")
+        manifest = self.dir / "manifest.json"
+        scoped = self.build_ok("--include", " sub ", "--include", "a.txt",
+                               "--contract", f"{contract}:Custom",
+                               "--gate", str(gate),
+                               "--allowed", str(allowed),
+                               "--withheld", str(withheld),
+                               "--max-diff-bytes", "999",
+                               "--max-input-bytes", "88",
+                               "--manifest-out", str(manifest),
+                               out=self.dir / "scoped.md")
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(data["include"], ["sub", "a.txt"])
+        self.assertEqual(data["contract"], [f"{contract}:Custom"])
+        self.assertEqual(data["gate"], [str(gate)])
+        self.assertEqual(data["allowed"], ["a.txt", "sub/b.txt"])
+        self.assertEqual(data["withheld"], ["bin.dat"])
+        self.assertEqual(data["max_diff_bytes"], 999)
+        self.assertEqual(data["max_input_bytes"], 88)
+        # The manifest never changes the package bytes themselves.
+        plain = self.dir / "plain.md"
+        self.build_ok("--include", "sub", "--include", "a.txt",
+                      "--contract", f"{contract}:Custom",
+                      "--gate", str(gate),
+                      "--allowed", str(allowed), "--withheld", str(withheld),
+                      "--max-diff-bytes", "999", "--max-input-bytes", "88",
+                      out=plain)
+        self.assertEqual(plain.read_bytes(), scoped.encode("utf-8"))
+
+    def test_manifest_out_not_accepted_by_check(self) -> None:
+        self.build_ok()
+        proc = self.check_proc(self.out, "--manifest-out",
+                               str(self.dir / "m.json"))
+        self.assertEqual(proc.returncode, 2)
+
+    def test_manifest_out_unwritable_refused(self) -> None:
+        proc = self.build_proc(self.dir / "x.md", "--manifest-out",
+                               str(self.dir / "no-such-dir" / "m.json"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review package: manifest path not writable: ",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
 
 
 class FenceIntegrityTests(unittest.TestCase):

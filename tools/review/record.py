@@ -34,6 +34,16 @@ CLI::
 
     record.py check --record DIR --repo PATH
 
+    record.py validate-doc --repo PATH --package FILE --role ROLE
+        --model MODEL --file DOC
+
+``validate-doc`` is the dispatch-time check a reviewer runs on its own
+findings document before returning: it verifies the document against the
+package (schema, reviewer role, package_sha256/base/head, no stop block)
+and refuses a missing/null findings list — which would otherwise silently
+read as an empty APPROVED review.  On success it prints exactly one line:
+``review document: OK (<role>@<model>, <N> finding(s), <path>)``.
+
 When ``render`` is given ``--package-manifest`` (the JSON build manifest
 emitted by ``package.py build --manifest-out``), the record stores it under
 ``package.manifest`` and ``check`` rebuilds the package from the pinned
@@ -1421,6 +1431,38 @@ def cmd_check(args) -> int:
     return 0
 
 
+def cmd_validate_doc(args, parser: argparse.ArgumentParser) -> int:
+    """Dispatch-time validation of one reviewer findings document (S3.5b T4).
+
+    The heavy lifting is ``load_review_lens``: schema, reviewer role,
+    package_sha256/base/head match, and stop-document rejection all come
+    from the existing loader.  On top of that, validate-doc refuses an
+    empty model, a rubric_version that is not a non-empty string, and a
+    missing/null/non-list findings list — which ``check`` coerces to []
+    but which here would silently read as an empty APPROVED review.
+    """
+    model = args.model.strip()
+    if not model:
+        parser.error("--model must be a non-empty string")
+    pkg = parse_package(args.package)
+    load_review_lens(args.file, args.role, pkg)
+    doc = findings_load(args.file)
+    review = doc.get("review", {})
+    rubric = review.get("rubric_version")
+    if not (isinstance(rubric, str) and rubric.strip()):
+        fail(f"review record: invalid rubric_version: {args.role} "
+             f"({args.file}): {rubric!r} is not a non-empty string")
+    found = review.get("findings")
+    if not isinstance(found, list):
+        fail(f"review record: missing findings list: {args.role} "
+             f"({args.file}): review.findings must be a list, got "
+             f"{found!r} — a document without a findings list is not an "
+             "empty APPROVED review")
+    print(f"review document: OK ({args.role}@{model}, {len(found)} "
+          f"finding(s), {args.file})")
+    return 0
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="record.py",
@@ -1465,6 +1507,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        help="directory containing review.json")
     check.add_argument("--repo", required=True,
                        help="path to the git repository")
+    validate_doc = subparsers.add_parser(
+        "validate-doc",
+        help="dispatch-time validation of one reviewer findings document")
+    validate_doc.add_argument("--repo", required=True,
+                              help="path to the git repository")
+    validate_doc.add_argument("--package", required=True,
+                              help="review package file")
+    validate_doc.add_argument("--role", required=True, choices=ROLES,
+                              help="reviewer role the document must declare")
+    validate_doc.add_argument("--model", required=True,
+                              help="model that produced the document")
+    validate_doc.add_argument("--file", required=True,
+                              help="the findings document to validate")
     return parser
 
 
@@ -1474,6 +1529,8 @@ def main(argv=None) -> int:
     try:
         if args.command == "render":
             return cmd_render(args, parser)
+        if args.command == "validate-doc":
+            return cmd_validate_doc(args, parser)
         return cmd_check(args)
     except Exception as exc:  # no bare tracebacks
         print(f"review record: internal error: {exc}", file=sys.stderr)

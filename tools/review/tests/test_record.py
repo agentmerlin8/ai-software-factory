@@ -1753,6 +1753,124 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("does not touch", proc.stderr)
 
+    def validate_doc(self, doc, role="review-adversary", model="test-model-v1",
+                     package=None, cwd=None):
+        """Run `record.py validate-doc` as a subprocess."""
+        return self.cli("validate-doc", "--repo", str(self.repo),
+                        "--package", str(package or self.pkg),
+                        "--role", role, "--model", model,
+                        "--file", str(doc), cwd=cwd)
+
+    def test_validate_doc_ok(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout,
+            f"review document: OK (review-adversary@test-model-v1, "
+            f"1 finding(s), {doc})\n")
+
+    def test_validate_doc_wrong_role_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        proc = self.validate_doc(doc, role="review-security", package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("reviewer role mismatch", proc.stderr)
+        self.assertIn("review-security", proc.stderr)
+
+    def test_validate_doc_wrong_package_sha_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary",
+                                  [self.finding("RA-001")],
+                                  sha="0" * 64)
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("package_sha256", proc.stderr)
+        self.assertIn("mismatch", proc.stderr)
+
+    def test_validate_doc_null_findings_refused(self) -> None:
+        """`findings: null` must be a refusal, not an empty APPROVED."""
+        package, pkg_sha = self.build_package()
+        doc = self.repo / "findings-null.yaml"
+        doc.write_text(
+            "schema: review.findings.v1\n"
+            "review:\n"
+            "  reviewer: review-adversary\n"
+            "  rubric_version: review-adversary-v1\n"
+            f"  package_sha256: {pkg_sha}\n"
+            f"  base_sha: {self.base}\n"
+            f"  head_sha: {self.head}\n"
+            "  decision: APPROVED\n"
+            "  findings: null\n",
+            encoding="utf-8")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        # The findings schema itself rejects `findings: null` ("'findings'
+        # must be a list") before validate-doc's own guard runs; either way
+        # it is a named refusal and never an OK line.
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("review document: OK", proc.stdout)
+
+    def test_validate_doc_missing_findings_key_refused(self) -> None:
+        """A document without a findings key at all is refused too."""
+        package, pkg_sha = self.build_package()
+        doc = self.repo / "findings-missing.yaml"
+        doc.write_text(
+            "schema: review.findings.v1\n"
+            "review:\n"
+            "  reviewer: review-adversary\n"
+            "  rubric_version: review-adversary-v1\n"
+            f"  package_sha256: {pkg_sha}\n"
+            f"  base_sha: {self.base}\n"
+            f"  head_sha: {self.head}\n"
+            "  decision: APPROVED\n",
+            encoding="utf-8")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("review document: OK", proc.stdout)
+
+    def test_validate_doc_empty_model_usage_refusal(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        proc = self.validate_doc(doc, model="   ", package=package)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("--model", proc.stderr)
+
+    def test_validate_doc_malformed_yaml_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.repo / "findings-broken.yaml"
+        doc.write_text("review: [unclosed\n  ::: not yaml\n",
+                       encoding="utf-8")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_validate_doc_stop_document_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_stop_findings("review-adversary")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("stopped review", proc.stderr)
+
+    def test_validate_doc_direct_file_path_invocation(self) -> None:
+        """validate-doc must work invoked as a bare file path from any
+        working directory (T1 lesson) — a real subprocess, not main()."""
+        package, _ = self.build_package()
+        doc = self.write_findings("review-contract",
+                                  [self.finding("RC-001", artifact="a.txt:2")])
+        proc = self.validate_doc(doc, role="review-contract",
+                                 model="direct-run-model",
+                                 package=package, cwd=self.repo)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertEqual(
+            proc.stdout,
+            f"review document: OK (review-contract@direct-run-model, "
+            f"1 finding(s), {doc})\n")
+
+
 
 
 class TestDispositionShaCoercion(unittest.TestCase):

@@ -22,3 +22,23 @@ jobs:
           templates/workspace/workspace.toml
           templates/workspace/environments/local.toml
           templates/workspace/environments/github.toml
+
+  review-record:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # the PR head, full history: shallow clones break pinned-SHA
+          # resolution (the kit's own rule)
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'   # the documented floor (stdlib tomllib)
+      - name: Review-record gate
+        run: >-
+          python3 tools/review/ci_gate.py
+          --repo .
+          --pr ${{ github.event.pull_request.number }}
+          --head ${{ github.event.pull_request.head.sha }}

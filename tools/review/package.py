@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -503,6 +504,30 @@ def parse_package_hash(data: bytes, path: str) -> str:
     return match.group(1)
 
 
+def build_manifest(args) -> dict:
+    """The build manifest: a pure function of the resolved build inputs.
+
+    Identical resolved inputs always produce byte-identical JSON, so a
+    record can pin the manifest and rebuild the package later (S3.5b T1).
+    Called only after compose_package succeeded, so the shas resolve and
+    the list files are readable.
+    """
+    return {
+        "version": 1,
+        "base": resolve_sha(args.repo, args.base),
+        "head": resolve_sha(args.repo, args.head),
+        "include": [value.strip() for value in (args.include or [])],
+        "contract": list(args.contract or []),
+        "gate": list(args.gate or []),
+        "allowed": (read_list_file(args.allowed, "--allowed")
+                    if args.allowed is not None else None),
+        "withheld": (read_list_file(args.withheld, "--withheld")
+                     if args.withheld is not None else None),
+        "max_diff_bytes": args.max_diff_bytes,
+        "max_input_bytes": args.max_input_bytes,
+    }
+
+
 def cmd_build(args) -> int:
     if not is_git_worktree(args.repo):
         fail(f"review package: not a git worktree: {args.repo}")
@@ -512,6 +537,15 @@ def cmd_build(args) -> int:
             fh.write(text.encode("utf-8"))
     except OSError:
         fail(f"review package: out path not writable: {args.out}")
+    if getattr(args, "manifest_out", None):
+        manifest_text = json.dumps(build_manifest(args), indent=2,
+                                   sort_keys=True) + "\n"
+        try:
+            with open(args.manifest_out, "wb") as fh:
+                fh.write(manifest_text.encode("utf-8"))
+        except OSError:
+            fail(f"review package: manifest path not writable: "
+                 f"{args.manifest_out}")
     print(f"package_path: {args.out}")
     print(f"package_sha256: {digest}")
     return 0
@@ -577,6 +611,9 @@ def add_common_arguments(parser: argparse.ArgumentParser, out_flag: bool) -> Non
                         default=DEFAULT_MAX_INPUT_BYTES)
     if out_flag:
         parser.add_argument("--out", required=True, help="package output path")
+        parser.add_argument("--manifest-out", metavar="PATH",
+                            help="also write a JSON build manifest (resolved "
+                                 "inputs) to PATH; build only")
     else:
         parser.add_argument("--package", required=True,
                             help="package file to verify")

@@ -85,6 +85,8 @@ review:
     detail: "the fired stop rule and the observed values, naming any withheld path"
 ```
 
+Before returning, validate the written findings document with the lane's document validator and only return when it passes: from the installed control home run `python3 factory/tools/review/record.py validate-doc --repo <repo> --package <package.md> --role review-adversary --model <your model> --file <doc>` (in the kit repo: `tools/review/record.py`). A failed validation is a stop-and-report — never hand-edit the document to make it pass.
+
 Your final chat message is exactly one line: the verdict (decision, or the fired rule) followed by the output path. No prose report.
 
 ## Severity

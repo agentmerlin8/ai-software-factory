@@ -56,6 +56,24 @@ The review gate the kit owns: a deterministic review package, three runtime-neut
 
 **Explicitly NOT in S3.5a:** state-machine evidence changes, the required CI check, ruleset changes (all S3.5b); the rest of S4's runbook/process/agent/adapter packages; any model spend beyond local adapter dispatch; any change to the owner merge gate.
 
+### S3.5b — Review gate cutover (owner-inserted 2026-10-30)
+
+The lane becomes mechanically required. A review lane that is not mechanically required is advisory — any gate whose absence still lets a PR reach READY_FOR_REVIEW or merge is documentation, not a gate. This slice wires the S3.5a record into the state machine, adds the required CI check, and retires every remaining "request a bot review" instruction.
+
+| # | Task | Deliverable | Acceptance |
+|---|---|---|---|
+| T1 | O2 — package-verifiable records | `record.json.package.manifest` + `check` rebuilds the package from pinned base/head | fresh-clone check passes; tampered manifest refused; absent package+manifest refused |
+| T2 | State-machine cutover | `DRAFT_OPENED` mechanism review-lane only; `REVIEWING` evidence record path+sha+head; READY/MERGE require a valid record | new ready-push refused; historical events fold; missing/stale/open blocker-major/verdict-inconsistent refused |
+| T3 | review-record required check | `tools/review/ci_gate.py` + workflow job + `kit-v0.1/review-panel.toml` | fails closed on no record, head mismatch, undispositioned finding, verdict inconsistency, wrong panel |
+| T4 | O3 — dispatch-time document validation | `record.py validate-doc` + role-package instruction | invalid document refused before record time |
+| T5 | Docs/template retirement | this section + architecture + gate catalog + templates | command-accuracy read; no request-a-bot-review instruction remains |
+| T6 | Ruleset staging + live drill | main ruleset: kit-ci + review-record | throwaway PR blocked without a record; passes with a valid record |
+| T7 | Dogfood + PR | lane record at this slice's final head + adversarial verdict | zero undispositioned findings; tree-verified delivery |
+
+**Pilot/carried items:** O2 folded into T1 — packages are never committed; the builder manifest is the oracle, and `check` rebuilds the package from the pinned base/head. O3 folded into T4. O1 resolved by owner decision 1a: pre-cutover `review.record.v1` records are grandfathered for READY_FOR_REVIEW/MERGE_ELIGIBLE when the record head is an ancestor of the PR head and every blocker/major is dispositioned, while v2 keeps the exact-head rule (plus record-only tail commits).
+
+**Explicitly not in S3.5b:** reviewer prompt/model tuning, new lenses, calibration-bench expansion, the rest of S4's packages, any change to the owner merge gate.
+
 ### S4 — Runbook + process + agents + adapter packages
 
 `runbook.md` (idea → merged PR; human and orchestrator modes; contained-mode section) + `process/` (process rules — the single source: planning, adversarial reviews, grill, recovery, UI-approval gate) + `agents/` (runtime-neutral role packages: instruction + inputs + outputs + stop rules, each with the per-role output contract the D-1 parity comparison uses) + `adapters/human` + `adapters/hermes` packages (`adapter.toml` + README). S4 acceptance includes the packages installed under `factory/` per C-7's canonical layout (`factory/process/`, `factory/agents/`, `factory/adapters/`, `factory/runbook.md`) and every `agents/` per-role output contract reading clean from a fresh clone. The hermes adapter's **live** leg: one real local dispatch through the standard dispatch mechanism (small token cost — no cloud), recorded as "live dispatch, non-sealed mechanism"; the sealed-mechanism re-run follows when the launch increment is authorized.

@@ -29,9 +29,27 @@ CLI::
         --package FILE --dispositions FILE
         (--findings ROLE@MODEL=FILE... | --findings ROLE=FILE... --model ROLE=MODEL...)
         --gate NAME=EXIT:EVIDENCE... [--loop N]
-        [--loop-cap 2] [--prior DIR]... [--out-dir DIR]
+        [--loop-cap 2] [--prior DIR]... [--package-manifest FILE]
+        [--out-dir DIR]
 
     record.py check --record DIR --repo PATH
+
+    record.py validate-doc --repo PATH --package FILE --role ROLE
+        --model MODEL --file DOC
+
+``validate-doc`` is the dispatch-time check a reviewer runs on its own
+findings document before returning: it verifies the document against the
+package (schema, reviewer role, package_sha256/base/head, no stop block)
+and refuses a missing/null findings list — which would otherwise silently
+read as an empty APPROVED review.  On success it prints exactly one line:
+``review document: OK (<role>@<model>, <N> finding(s), <path>)``.
+
+When ``render`` is given ``--package-manifest`` (the JSON build manifest
+emitted by ``package.py build --manifest-out``), the record stores it under
+``package.manifest`` and ``check`` rebuilds the package from the pinned
+base/head via ``tools.review.package.compose_package`` instead of requiring
+the package file: packages embed the diff and are never committed, so the
+manifest is what makes a record self-verifying on a fresh clone.
 
 Exit codes: 0 ok, 1 named refusal, 2 usage.  Refusals always carry the
 ``review record: `` prefix; nothing prints a bare traceback.
@@ -40,12 +58,15 @@ Exit codes: 0 ok, 1 named refusal, 2 usage.  Refusals always carry the
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import NamedTuple, NoReturn
 
@@ -56,6 +77,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.review.findings import DECISIONS, FindingsError, load as findings_load
+from tools.review.package import compose_package
 from tools.review.yamlish import YamlishError, loads as yamlish_loads
 
 SCHEMA = "review.record.v2"
@@ -191,16 +213,19 @@ def resolve_record_path(path: str, repo: str) -> str:
     return resolved
 
 
-def parse_package(path: str) -> PackageInfo:
-    """Verify a package against its own hash and extract identity + scope."""
-    data = read_bytes(path, "review record: package unreadable")
+def parse_package_bytes(data: bytes, label: str) -> PackageInfo:
+    """Verify package BYTES against their own hash; extract identity + scope.
+
+    ``label`` is the path used in refusal messages: the file path for a
+    stored package, the recorded package path for rebuilt bytes (S3.5b T1).
+    """
     head_parts = data.split(b"\n", 2)
     if len(head_parts) < 2:
-        fail(f"review record: package hash line missing: {path}")
+        fail(f"review record: package hash line missing: {label}")
     match = PACKAGE_HASH_RE.match(
         head_parts[1].strip().decode("utf-8", "replace"))
     if match is None:
-        fail(f"review record: package hash line missing: {path}")
+        fail(f"review record: package hash line missing: {label}")
     recorded = match.group(1)
     computed = hashlib.sha256(package_body(data)).hexdigest()
     if computed != recorded:
@@ -217,9 +242,137 @@ def parse_package(path: str) -> PackageInfo:
                 head_sha = found.group(2)
     if base_sha is None or head_sha is None:
         fail(f"review record: package head/base mismatch: "
-             f"package records no complete base_sha/head_sha identity: {path}")
-    return PackageInfo(os.path.abspath(path), recorded, base_sha, head_sha,
+             f"package records no complete base_sha/head_sha identity: {label}")
+    return PackageInfo(label, recorded, base_sha, head_sha,
                        parse_withheld(body_text))
+
+
+def parse_package(path: str) -> PackageInfo:
+    """Read a package file and verify it against its own hash."""
+    data = read_bytes(path, "review record: package unreadable")
+    return parse_package_bytes(data, os.path.abspath(path))
+
+
+# -- package build manifest (S3.5b T1) --------------------------------------
+
+MANIFEST_KEYS = ("version", "base", "head", "include", "contract", "gate",
+                 "allowed", "withheld", "max_diff_bytes", "max_input_bytes")
+
+
+def validate_manifest(manifest: object, base_sha: object, head_sha: object,
+                      label: str) -> list[str]:
+    """Strict shape errors for a package build manifest (empty when valid).
+
+    ``label`` names the manifest source in errors (the render input file or
+    ``package.manifest`` inside a stored record).
+    """
+    errors: list[str] = []
+    if not isinstance(manifest, dict):
+        return [f"{label}: manifest must be a mapping"]
+    for key in MANIFEST_KEYS:
+        if key not in manifest:
+            errors.append(f"{label}: missing manifest key {key!r}")
+    for key in manifest:
+        if key not in MANIFEST_KEYS:
+            errors.append(f"{label}: unknown manifest key {key!r}")
+    if errors:
+        return errors
+    if manifest["version"] != 1:
+        errors.append(f"{label}: unsupported manifest version "
+                      f"{manifest['version']!r}")
+    for key in ("base", "head"):
+        value = manifest[key]
+        if not (isinstance(value, str) and SHA40_RE.fullmatch(value)):
+            errors.append(f"{label}: {key} must be 40 lowercase hex "
+                          f"characters")
+    if (isinstance(manifest["base"], str)
+            and SHA40_RE.fullmatch(manifest["base"])
+            and manifest["base"] != base_sha):
+        errors.append(f"{label}: base {manifest['base']} != record base "
+                      f"{base_sha}")
+    if (isinstance(manifest["head"], str)
+            and SHA40_RE.fullmatch(manifest["head"])
+            and manifest["head"] != head_sha):
+        errors.append(f"{label}: head {manifest['head']} != record head "
+                      f"{head_sha}")
+    for key in ("include", "contract", "gate"):
+        value = manifest[key]
+        if not isinstance(value, list) or not all(
+                isinstance(item, str) and item.strip() for item in value):
+            errors.append(f"{label}: {key} must be a list of non-empty "
+                          "strings")
+    for key in ("allowed", "withheld"):
+        value = manifest[key]
+        if value is not None and (
+                not isinstance(value, list) or not all(
+                    isinstance(item, str) and item.strip()
+                    for item in value)):
+            errors.append(f"{label}: {key} must be null or a list of "
+                          "non-empty strings")
+    for key in ("max_diff_bytes", "max_input_bytes"):
+        value = manifest[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            errors.append(f"{label}: {key} must be a non-negative integer")
+    return errors
+
+
+def load_package_manifest(path: str, base_sha: str,
+                          head_sha: str) -> dict:
+    """Read and strictly validate a render --package-manifest input."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        fail(f"review record: package manifest unreadable: {path}")
+    try:
+        manifest = json.loads(text)
+    except json.JSONDecodeError as exc:
+        fail(f"review record: invalid package manifest: {path} ({exc.msg})")
+    errors = validate_manifest(manifest, base_sha, head_sha, path)
+    if errors:
+        fail("review record: invalid package manifest: " + "; ".join(errors))
+    return manifest
+
+
+def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
+    """Rebuild the package bytes + digest from a manifest.
+
+    The builder is byte-deterministic, so a rebuild from the manifest's
+    resolved inputs is a real oracle even when no package file exists (the
+    fresh-clone case).  Any builder refusal becomes a named check failure.
+    """
+    args = argparse.Namespace(
+        repo=repo,
+        base=manifest["base"],
+        head=manifest["head"],
+        include=list(manifest["include"]),
+        contract=list(manifest["contract"]),
+        gate=list(manifest["gate"]),
+        max_diff_bytes=manifest["max_diff_bytes"],
+        max_input_bytes=manifest["max_input_bytes"],
+        allowed=None,
+        withheld=None,
+    )
+    with tempfile.TemporaryDirectory(prefix="record-manifest-") as tmp:
+        if manifest["allowed"] is not None:
+            allowed_file = os.path.join(tmp, "allowed.txt")
+            with open(allowed_file, "w", encoding="utf-8") as fh:
+                fh.write("".join(p + "\n" for p in manifest["allowed"]))
+            args.allowed = allowed_file
+        if manifest["withheld"] is not None:
+            withheld_file = os.path.join(tmp, "withheld.txt")
+            with open(withheld_file, "w", encoding="utf-8") as fh:
+                fh.write("".join(p + "\n" for p in manifest["withheld"]))
+            args.withheld = withheld_file
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr):
+                text, digest = compose_package(args)
+        except SystemExit:
+            detail = stderr.getvalue().strip() or "builder exited nonzero"
+            fail(f"review record: package rebuild failed: {detail}")
+        except Exception as exc:  # builder contract: no bare tracebacks
+            fail(f"review record: package rebuild failed: {exc}")
+    return text.encode("utf-8"), digest
 
 
 def verify_cli_range(repo, cli_base: str, cli_head: str, pkg: PackageInfo) -> None:
@@ -742,14 +895,22 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
     decision = ("CHANGES_REQUESTED"
                 if counts["blocker"] or counts["major"] else "APPROVED")
 
+    package_entry: dict[str, object] = {
+        "path": record_path(pkg.path, args.repo),
+        "sha256": pkg.sha256}
+    if getattr(args, "package_manifest", None):
+        # The manifest makes the record self-verifying without the package
+        # file (packages are never committed): check rebuilds from it.
+        package_entry["manifest"] = load_package_manifest(
+            args.package_manifest, pkg.base_sha, pkg.head_sha)
+
     return {
         "schema": SCHEMA,
         "story": args.story,
         "pr": args.pr,
         "base_sha": pkg.base_sha,
         "head_sha": pkg.head_sha,
-        "package": {"path": record_path(pkg.path, args.repo),
-                    "sha256": pkg.sha256},
+        "package": package_entry,
         "lane": {"name": LANE_NAME, "version": LANE_VERSION},
         "reviewers": reviewers,
         "gate_results": gate_results,
@@ -1005,6 +1166,23 @@ def validate_record(doc: object) -> list[str]:
     for key in ("package", "lane", "verdict"):
         if key in doc and not isinstance(doc[key], dict):
             errors.append(f"{key} must be a mapping")
+    package = doc.get("package")
+    if isinstance(package, dict):
+        for key in package:
+            if key not in ("path", "sha256", "manifest"):
+                errors.append(f"unknown package key {key!r}")
+        if "manifest" in package:
+            if legacy:
+                errors.append("schema mismatch: v1 record carries "
+                              "package.manifest")
+            else:
+                base = doc.get("base_sha") \
+                    if isinstance(doc.get("base_sha"), str) else ""
+                head = doc.get("head_sha") \
+                    if isinstance(doc.get("head_sha"), str) else ""
+                errors.extend(validate_manifest(package["manifest"],
+                                                base, head,
+                                                "package.manifest"))
     for key in ("reviewers", "gate_results", "findings", "dispositions",
                 "prior_rounds", "open_findings", "undispositioned"):
         if key in doc and not isinstance(doc[key], list):
@@ -1060,7 +1238,32 @@ def cmd_check(args) -> int:
     if errors:
         fail("review record: invalid record: " + "; ".join(errors))
 
-    pkg = parse_package(resolve_record_path(data["package"]["path"], args.repo))
+    manifest = data["package"].get("manifest")
+    if manifest is not None:
+        # Self-verifying record (S3.5b T1): rebuild from the manifest and
+        # parse the rebuilt bytes — no package file required.
+        stored_path = resolve_record_path(data["package"]["path"], args.repo)
+        rebuilt_bytes, rebuilt_digest = rebuild_package_from_manifest(
+            args.repo, manifest)
+        if rebuilt_digest != data["package"]["sha256"]:
+            fail(f"review record: package rebuild mismatch: recorded "
+                 f"{data['package']['sha256']}, rebuilt {rebuilt_digest}")
+        if os.path.exists(stored_path):
+            # A stale/dirty package file must not be silently ignored: when
+            # one exists at the recorded path it must match the record too.
+            # The recorded sha256 is the digest of the package BODY (the
+            # package's own self-certification), not of the whole file.
+            file_data = read_bytes(stored_path,
+                                   "review record: package unreadable")
+            file_digest = hashlib.sha256(package_body(file_data)).hexdigest()
+            if file_digest != data["package"]["sha256"]:
+                fail(f"review record: package file mismatch: recorded "
+                     f"{data['package']['sha256']}, file {file_digest} "
+                     f"({stored_path})")
+        pkg = parse_package_bytes(rebuilt_bytes, stored_path)
+    else:
+        pkg = parse_package(
+            resolve_record_path(data["package"]["path"], args.repo))
     if pkg.sha256 != data["package"]["sha256"]:
         fail(f"review record: package hash mismatch: "
              f"recorded {data['package']['sha256']}, computed {pkg.sha256}")
@@ -1228,6 +1431,38 @@ def cmd_check(args) -> int:
     return 0
 
 
+def cmd_validate_doc(args, parser: argparse.ArgumentParser) -> int:
+    """Dispatch-time validation of one reviewer findings document (S3.5b T4).
+
+    The heavy lifting is ``load_review_lens``: schema, reviewer role,
+    package_sha256/base/head match, and stop-document rejection all come
+    from the existing loader.  On top of that, validate-doc refuses an
+    empty model, a rubric_version that is not a non-empty string, and a
+    missing/null/non-list findings list — which ``check`` coerces to []
+    but which here would silently read as an empty APPROVED review.
+    """
+    model = args.model.strip()
+    if not model:
+        parser.error("--model must be a non-empty string")
+    pkg = parse_package(args.package)
+    load_review_lens(args.file, args.role, pkg)
+    doc = findings_load(args.file)
+    review = doc.get("review", {})
+    rubric = review.get("rubric_version")
+    if not (isinstance(rubric, str) and rubric.strip()):
+        fail(f"review record: invalid rubric_version: {args.role} "
+             f"({args.file}): {rubric!r} is not a non-empty string")
+    found = review.get("findings")
+    if not isinstance(found, list):
+        fail(f"review record: missing findings list: {args.role} "
+             f"({args.file}): review.findings must be a list, got "
+             f"{found!r} — a document without a findings list is not an "
+             "empty APPROVED review")
+    print(f"review document: OK ({args.role}@{model}, {len(found)} "
+          f"finding(s), {args.file})")
+    return 0
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="record.py",
@@ -1243,6 +1478,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     render.add_argument("--base", required=True, help="base commit sha")
     render.add_argument("--head", required=True, help="head commit sha")
     render.add_argument("--package", required=True, help="review package file")
+    render.add_argument("--package-manifest", metavar="FILE",
+                        help="JSON build manifest from package.py build "
+                             "--manifest-out; stored in the record so check "
+                             "can rebuild the package without the file")
     render.add_argument("--findings", action="append", default=[],
                         metavar="ROLE@MODEL=FILE",
                         help="one findings doc per panel slot (repeatable); "
@@ -1268,6 +1507,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        help="directory containing review.json")
     check.add_argument("--repo", required=True,
                        help="path to the git repository")
+    validate_doc = subparsers.add_parser(
+        "validate-doc",
+        help="dispatch-time validation of one reviewer findings document")
+    validate_doc.add_argument("--repo", required=True,
+                              help="path to the git repository")
+    validate_doc.add_argument("--package", required=True,
+                              help="review package file")
+    validate_doc.add_argument("--role", required=True, choices=ROLES,
+                              help="reviewer role the document must declare")
+    validate_doc.add_argument("--model", required=True,
+                              help="model that produced the document")
+    validate_doc.add_argument("--file", required=True,
+                              help="the findings document to validate")
     return parser
 
 
@@ -1277,6 +1529,8 @@ def main(argv=None) -> int:
     try:
         if args.command == "render":
             return cmd_render(args, parser)
+        if args.command == "validate-doc":
+            return cmd_validate_doc(args, parser)
         return cmd_check(args)
     except Exception as exc:  # no bare tracebacks
         print(f"review record: internal error: {exc}", file=sys.stderr)

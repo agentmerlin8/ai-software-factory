@@ -62,10 +62,15 @@ supplies per-check inputs; machine-readable: tools/state_machine.py):
 |                   | transition); non-UI skip requires the declared non-UI line           |
 | BUILD_GREEN       | commit_sha resolves; build green; named tests green; coder lane      |
 |                   | closed dispatch or lane-skip deviation                               |
-| DRAFT_OPENED      | pr_number digits; review_request_mechanism in {ready-push,           |
-|                   | draft-mention-opportunistic} (ONE authenticated request); no         |
-|                   | duplicate DRAFT_OPENED                                               |
-| REVIEWING         | DRAFT_OPENED reached                                                 |
+| DRAFT_OPENED      | pr_number digits; review_request_mechanism == review-lane (the only   |
+|                   | new-transition value; ONE authenticated request); no duplicate        |
+|                   | DRAFT_OPENED                                                          |
+| REVIEWING         | DRAFT_OPENED reached; a valid review record at the pinned head:       |
+|                   | repo-relative record path under the control home with review.json,    |
+|                   | sha256(review.json) == review_record_sha, record head ==              |
+|                   | review_head_sha, record pr == the DRAFT_OPENED pr_number, and the     |
+|                   | record authority (tools/review/record.py check via                    |
+|                   | tools/review/record_gate.py) passes                                   |
 | FIXING            | REVIEWING reached (or post-review reentry from {FULL_TESTS_GREEN,    |
 |                   | READY_FOR_REVIEW, MERGE_ELIGIBLE})                                   |
 | FULL_TESTS_GREEN  | exact suite membership: projects, counts, exclusions, exit code;     |
@@ -73,11 +78,15 @@ supplies per-check inputs; machine-readable: tools/state_machine.py):
 | READY_FOR_REVIEW  | internal verdict in {PASS, PASS-WITH-NITS}; threads all resolved OR  |
 |                   | external-review-unavailable watchdog exception logged (absence is    |
 |                   | never recorded as PASS); <=1 fix push where both first-round sets    |
-|                   | arrived pre-edit                                                     |
+|                   | arrived pre-edit; a valid review record at review_head_sha           |
+|                   | (record-tail commits allowed; v1 ancestor allowed) with no open      |
+|                   | blocker/major findings                                               |
 | MERGE_ELIGIBLE    | tested_sha prefix-matches head_sha; verdict eligible; no             |
 |                   | logic-touched nits; external findings dispositioned; external-unique |
 |                   | findings attributed when instrumentation present;                    |
-|                   | unresolved_threads=0; answered human_gate gate=merge; multi-repo:    |
+|                   | unresolved_threads=0; answered human_gate gate=merge; a valid review |
+|                   | record at head_sha (record-tail commits allowed; v1 ancestor         |
+|                   | allowed) with no open blocker/major findings; multi-repo:            |
 |                   | set complete (tools/multirepo.set_completeness)                      |
 | MERGED            | merged_sha resolves in git; multi-repo: every repo folded >= MERGED  |
 | LIVE_PROVEN       | live-proof evidence is an existing path or http(s) URL; multi-repo:  |
@@ -125,6 +134,7 @@ try:
     from . import multirepo as MR
     from . import role_catalog as RC
     from . import state_machine as SM
+    from .review import record_gate
 except ImportError:  # direct-run layout: load the tools package itself
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools import contract_lib as C
@@ -133,12 +143,13 @@ except ImportError:  # direct-run layout: load the tools package itself
     from tools import multirepo as MR
     from tools import role_catalog as RC
     from tools import state_machine as SM
+    from tools.review import record_gate
 
 STATES = SM.STATES
 LINEAR = SM.LINEAR
 EVIDENCE_KEYS = SM.EVIDENCE_KEYS
 
-REVIEW_MECHANISMS = ("ready-push", "draft-mention-opportunistic")
+REVIEW_MECHANISMS = SM.REVIEW_MECHANISMS
 PASS_VERDICTS = ("PASS", "PASS-WITH-NITS")
 R1_ARRIVALS = ("both-pre-edit", "other")
 PLAN_LOOP_CAP = 2
@@ -585,6 +596,91 @@ class Controller:
                 return p
         return None
 
+    # -- review-record gate evidence (S3.5b cutover) ------------------------
+    def _contained_record_dir(self, rel: str) -> Path | None:
+        """A repo-relative review-record directory UNDER the control home,
+        or None. Refuses empty values, absolute paths, and `..` escapes
+        (Path.resolve + is_relative_to — never string surgery)."""
+        if not rel:
+            return None
+        p = Path(rel)
+        if p.is_absolute():
+            return None
+        resolved = (self.root / p).resolve()
+        if not resolved.is_relative_to(self.root.resolve()):
+            return None
+        return resolved
+
+    def _review_evidence(self, rel: str,
+                         pr_head: str | None) -> tuple[Path | None,
+                                                       dict | None,
+                                                       list[str]]:
+        """Resolve the `review_record` evidence and authority-evaluate it
+        (tools.review.record_gate). Returns (record_dir_abs | None, record
+        dict | None, error strings — empty = pass). pr_head None skips the
+        head rule (REVIEWING pins via review_head_sha equality instead)."""
+        rec = self._contained_record_dir(rel)
+        if rec is None or not (rec / "review.json").exists():
+            return rec, None, [
+                f"review_record={rel!r} must be a repo-relative record "
+                "directory under the control home containing review.json "
+                "(absolute paths and `..` escapes are refused)"]
+        try:
+            record = record_gate.load_record(str(rec))
+        except ValueError as exc:
+            return rec, None, [str(exc)]
+        errs = record_gate.evaluate(str(rec), str(self.root), pr_head,
+                                    allow_v1_ancestor=True)
+        return rec, record, errs
+
+    def _draft_opened_pr(self, sid: str) -> str | None:
+        """pr_number from the last DRAFT_OPENED transition's persisted
+        evidence (None when the row carries no evidence detail — historical
+        rows are read, never re-judged)."""
+        drafts = [t for t in self.story_events(sid, "transition")
+                  if t.get("to_state") == "DRAFT_OPENED"]
+        if not drafts:
+            return None
+        cr = drafts[-1].get("check_results") or {}
+        es = cr.get("evidence_supplied") or {}
+        detail = es.get("detail") if isinstance(es, dict) else None
+        if isinstance(detail, dict):
+            pr = detail.get("pr_number")
+            if pr is not None:
+                return str(pr)
+        return None
+
+    def _put_record_checks(self, put, rel: str, rec: Path | None,
+                           record: dict | None, errs: list[str],
+                           head_ev: str | None) -> None:
+        """The shared READY_FOR_REVIEW / MERGE_ELIGIBLE record keys:
+        review_record_valid, review_head_match, no_open_blocker_major."""
+        head_errs = [e for e in errs if e.startswith("head rule")]
+        if record is None:
+            # An unreadable record cannot establish a head match: fail the
+            # named check instead of letting an empty error list read green.
+            put("review_head_match", False,
+                "record unreadable — head match cannot be established "
+                "(fail closed)")
+        else:
+            put("review_head_match", not head_errs,
+                head_errs or (f"record valid at head {head_ev!r} (exact match, "
+                              "record-tail commits, or a v1 ancestor)"
+                              if head_ev else "head rule not evaluated"))
+        if record is None:
+            put("no_open_blocker_major", False,
+                "record unreadable — open blocker/major findings cannot be "
+                "ruled out (fail closed)")
+        else:
+            open_bm = record_gate.open_blocker_majors(record)
+            put("no_open_blocker_major", not open_bm,
+                open_bm and ("open blocker/major findings without "
+                             f"disposition: {', '.join(open_bm)}")
+                or "no blocker/major findings without disposition")
+        put("review_record_valid", not errs,
+            errs or f"review record {rel!r} passes the record authority "
+                    "(tools/review/record.py check via record_gate)")
+
     # -- transition checks. Each returns (ok, detail) via put().
     def check(self, sid: str, to: str, ev: dict[str, str],
               approved_by: str | None = None) -> dict[str, Any]:
@@ -775,13 +871,61 @@ class Controller:
             mech = ev.get("review_request_mechanism", "")
             put("review_request_mechanism", mech in REVIEW_MECHANISMS,
                 f"review_request_mechanism={mech!r} — ONE authenticated "
-                f"request; allowed: {list(REVIEW_MECHANISMS)} (a draft "
-                "mention is opportunistic extra, never re-sent)")
+                f"request; the only allowed value for a NEW transition is "
+                f"{SM.REVIEW_MECHANISM!r} (historical mechanisms "
+                f"{list(SM.HISTORICAL_REVIEW_MECHANISMS)} remain readable "
+                "in ledger history but are never accepted as new evidence)")
             prior = [t for t in self.story_events(sid, "transition")
                      if t["to_state"] == "DRAFT_OPENED"]
             put("no_duplicate_trigger", not prior,
                 "DRAFT_OPENED already recorded — duplicate review requests "
                 "are a success-metric violation")
+
+        if to == "REVIEWING":
+            # The review record IS the gate evidence (S3.5b cutover): the
+            # record must exist under the control home, its review.json
+            # hash and pinned head must match the supplied evidence, the
+            # record must name the DRAFT_OPENED pr, and the record
+            # authority must accept it. pr_head=None: REVIEWING pins by
+            # review_head_sha equality, not by the head rule.
+            rel = ev.get("review_record", "")
+            rec, record, errs = self._review_evidence(rel, None)
+            put("review_record_path",
+                rec is not None and (rec / "review.json").exists(),
+                f"review_record={rel!r} must be a repo-relative record "
+                "directory under the control home containing review.json "
+                "(absolute paths and `..` escapes are refused)")
+            sha_ev = ev.get("review_record_sha", "")
+            sha_ok = False
+            sha_detail = f"review_record_sha={sha_ev!r} must equal " \
+                         "sha256(review.json)"
+            if rec is not None and (rec / "review.json").exists():
+                try:
+                    actual = record_gate.record_sha256(str(rec))
+                    sha_ok = actual == sha_ev
+                    sha_detail = (f"review_record_sha={sha_ev!r} vs "
+                                  f"sha256(review.json)={actual!r}")
+                except OSError as exc:
+                    sha_detail = f"review.json unreadable: {exc}"
+            put("review_record_sha", sha_ok, sha_detail)
+            head_ev = ev.get("review_head_sha", "")
+            rec_head = str((record or {}).get("head_sha") or "")
+            put("review_head_match",
+                bool(record) and bool(rec_head)
+                and (rec_head == head_ev or rec_head.startswith(head_ev)
+                     or head_ev.startswith(rec_head)),
+                f"review_head_sha={head_ev!r} must equal the record's "
+                f"pinned head {rec_head or '(unreadable)'!r}")
+            pr_expect = self._draft_opened_pr(sid)
+            rec_pr = (record or {}).get("pr")
+            put("review_record_pr",
+                pr_expect is not None
+                and str(rec_pr) == pr_expect,
+                f"record pr={rec_pr!r} must equal the DRAFT_OPENED "
+                f"pr_number={pr_expect!r}")
+            put("review_record_valid", not errs,
+                errs or f"review record {rel!r} passes the record authority "
+                        "(tools/review/record.py check via record_gate)")
 
         if to == "FULL_TESTS_GREEN":
             need = ("projects", "tests_passed", "tests_failed",
@@ -817,6 +961,12 @@ class Controller:
                 f"fix_pushes={pushes!r}, r1_arrival={r1!r} — <=1 push where "
                 "both first-round sets arrived pre-edit (target, not safety "
                 "constraint; extra pushes need finding+fix events)")
+            # the record must be valid AT the pinned head: exact match, a
+            # record-only tail (v2), or a v1 ancestor.
+            rel = ev.get("review_record", "")
+            head_ev = ev.get("review_head_sha", "")
+            rec, record, errs = self._review_evidence(rel, head_ev)
+            self._put_record_checks(put, rel, rec, record, errs, head_ev)
 
         if to == "MERGE_ELIGIBLE":
             tested, head = ev.get("tested_sha", ""), ev.get("head_sha", "")
@@ -863,6 +1013,11 @@ class Controller:
             put("merge_approval", bool(gates),
                 "human_gate gate=merge with answered_at required (the human "
                 "merge gate is NEVER weakened)")
+            # the record must be valid AT the current head: exact match, a
+            # record-only tail (v2), or a v1 ancestor.
+            rel = ev.get("review_record", "")
+            rec, record, errs = self._review_evidence(rel, head)
+            self._put_record_checks(put, rel, rec, record, errs, head)
 
         if to == "MERGED":
             sha = ev.get("merged_sha", "")

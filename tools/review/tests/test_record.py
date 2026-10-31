@@ -1348,6 +1348,168 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertIn("review record: package hash mismatch:", proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
 
+    # -- S3.5b T1: rebuildable records via package manifests -----------------
+
+    def render_with_manifest(self, manifest_path: Path | None = None,
+                             build_extra: list[str] | None = None,
+                             ) -> tuple[Path, dict, Path]:
+        """Build package+manifest, render with --package-manifest.
+
+        Returns (out_dir, review.json data, manifest path).
+        """
+        manifest = manifest_path or (self.dir / "manifest.json")
+        pkg, _ = self.build_package("--manifest-out", str(manifest),
+                                    *(build_extra or []))
+        out, data, _ = self.render_ok(
+            package=str(pkg),
+            extra=["--package-manifest", str(manifest)])
+        return out, data, manifest
+
+    def test_render_with_manifest_stores_it_in_record(self) -> None:
+        out, data, manifest = self.render_with_manifest()
+        expected = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(data["package"]["manifest"], expected)
+        self.assertEqual(expected["base"], self.base)
+        self.assertEqual(expected["head"], self.head)
+        self.assertEqual(data["package"]["sha256"], self.pkg_sha)
+        # With the package file present, check still passes.
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_check_rebuilds_from_manifest_without_package_file(self) -> None:
+        """Fresh-clone case, via subprocess CLI: the package file is gone
+        and check still exits 0 by rebuilding from the manifest."""
+        out, _, _ = self.render_with_manifest()
+        self.pkg.unlink()  # the package was never committed
+        self.assertFalse(self.pkg.exists())
+        proc = subprocess.run(
+            [sys.executable, "tools/review/record.py", "check",
+             "--record", str(out), "--repo", str(self.repo)],
+            capture_output=True, text=True, env=self.env,
+            cwd=str(REVIEW_DIR.parents[1]))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record: OK (1 finding(s),", proc.stdout)
+
+    def test_check_tampered_manifest_include_rebuild_mismatch(self) -> None:
+        out, data, _ = self.render_with_manifest()
+        self.pkg.unlink()  # force the rebuild path
+
+        def tamper(record):
+            # A scope that still builds (extra/new.txt changed) but yields
+            # different package bytes than the recorded full diff.
+            record["package"]["manifest"]["include"] = ["extra"]
+
+        self.rewrite_record(out, tamper)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: package rebuild mismatch: recorded "
+                      f"{data['package']['sha256']}, rebuilt ", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_dirty_package_file_not_silently_ignored(self) -> None:
+        """Manifest present AND a stale package file at the recorded path:
+        the dirty file must be refused, not skipped."""
+        out, data, _ = self.render_with_manifest()
+        self.pkg.write_bytes(self.pkg.read_bytes() + b"X")
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: package file mismatch: recorded "
+                      f"{data['package']['sha256']}, file ", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_without_manifest_missing_package_still_refused(self) -> None:
+        out, _, _ = self.render_ok()  # no manifest
+        self.assertNotIn("manifest", json.loads(
+            (out / "review.json").read_text(encoding="utf-8"))["package"])
+        self.pkg.unlink()
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: package unreadable:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_v1_record_carrying_manifest_refused(self) -> None:
+        out, data, _ = self.render_with_manifest()
+        data["schema"] = "review.record.v1"
+        data["lane"]["version"] = 1
+        for finding in data["findings"]:
+            finding["id"] = finding["id"].split("@", 1)[0]
+            finding.pop("model", None)
+            finding.pop("location_key", None)
+            finding.pop("agreement", None)
+        for disposition in data["dispositions"]:
+            disposition["id"] = disposition["id"].split("@", 1)[0]
+        data["open_findings"] = [fid.split("@", 1)[0]
+                                 for fid in data["open_findings"]]
+        (out / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("schema mismatch: v1 record carries "
+                      "package.manifest", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_withheld_enforcement_derives_from_rebuilt_package(self) -> None:
+        withheld = self.dir / "withheld.txt"
+        withheld.write_text("extra/new.txt\n", encoding="utf-8")
+        out, data, _ = self.render_with_manifest(
+            build_extra=["--withheld", str(withheld)])
+        self.pkg.unlink()  # rebuild path only
+
+        def point_at_withheld(record):
+            record["findings"][0]["artifact_reference"] = "extra/new.txt:1"
+
+        self.rewrite_record(out, point_at_withheld)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: withheld artifact: "
+                      "RA-001@test-model-v1", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_render_refuses_manifest_with_wrong_range(self) -> None:
+        manifest = self.dir / "manifest-bad.json"
+        pkg, _ = self.build_package("--manifest-out", str(manifest))
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["head"] = self.fix_a  # not the record head
+        manifest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8")
+        proc = self.render(package=str(pkg),
+                           extra=["--package-manifest", str(manifest)])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: invalid package manifest:", proc.stderr)
+        self.assertIn(f"head {self.fix_a} != record head {self.head}",
+                      proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_render_refuses_malformed_manifest(self) -> None:
+        pkg, _ = self.build_package()
+        manifest = self.dir / "manifest-bad.json"
+        manifest.write_text("{not json", encoding="utf-8")
+        proc = self.render(package=str(pkg),
+                           extra=["--package-manifest", str(manifest)])
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: invalid package manifest:", proc.stderr)
+        # Unknown key / bad version shapes are refused too.
+        for mutate in (lambda d: d.update(extra_key=1),
+                       lambda d: d.update(version=2)):
+            base = json.loads((self.dir / "m2.json").read_text(
+                encoding="utf-8")) if (self.dir / "m2.json").exists() else None
+            if base is None:
+                m2 = self.dir / "m2.json"
+                _, _ = self.build_package("--manifest-out", str(m2),
+                                          out=self.repo / "package.md")
+                base = json.loads(m2.read_text(encoding="utf-8"))
+            doc = json.loads(json.dumps(base))
+            mutate(doc)
+            manifest.write_text(json.dumps(doc, indent=2, sort_keys=True),
+                                encoding="utf-8")
+            proc = self.render(package=str(pkg),
+                               extra=["--package-manifest", str(manifest)])
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("review record: invalid package manifest:",
+                          proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
+
     # -- P2: check re-derives the record -----------------------------------
 
     def rewrite_record(self, out: Path, mutate) -> None:
@@ -1590,6 +1752,124 @@ class _GitFixtureTest(unittest.TestCase):
                            dispositions=str(disp))
         self.assertEqual(proc.returncode, 1)
         self.assertIn("does not touch", proc.stderr)
+
+    def validate_doc(self, doc, role="review-adversary", model="test-model-v1",
+                     package=None, cwd=None):
+        """Run `record.py validate-doc` as a subprocess."""
+        return self.cli("validate-doc", "--repo", str(self.repo),
+                        "--package", str(package or self.pkg),
+                        "--role", role, "--model", model,
+                        "--file", str(doc), cwd=cwd)
+
+    def test_validate_doc_ok(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout,
+            f"review document: OK (review-adversary@test-model-v1, "
+            f"1 finding(s), {doc})\n")
+
+    def test_validate_doc_wrong_role_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        proc = self.validate_doc(doc, role="review-security", package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("reviewer role mismatch", proc.stderr)
+        self.assertIn("review-security", proc.stderr)
+
+    def test_validate_doc_wrong_package_sha_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary",
+                                  [self.finding("RA-001")],
+                                  sha="0" * 64)
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("package_sha256", proc.stderr)
+        self.assertIn("mismatch", proc.stderr)
+
+    def test_validate_doc_null_findings_refused(self) -> None:
+        """`findings: null` must be a refusal, not an empty APPROVED."""
+        package, pkg_sha = self.build_package()
+        doc = self.repo / "findings-null.yaml"
+        doc.write_text(
+            "schema: review.findings.v1\n"
+            "review:\n"
+            "  reviewer: review-adversary\n"
+            "  rubric_version: review-adversary-v1\n"
+            f"  package_sha256: {pkg_sha}\n"
+            f"  base_sha: {self.base}\n"
+            f"  head_sha: {self.head}\n"
+            "  decision: APPROVED\n"
+            "  findings: null\n",
+            encoding="utf-8")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        # The findings schema itself rejects `findings: null` ("'findings'
+        # must be a list") before validate-doc's own guard runs; either way
+        # it is a named refusal and never an OK line.
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("review document: OK", proc.stdout)
+
+    def test_validate_doc_missing_findings_key_refused(self) -> None:
+        """A document without a findings key at all is refused too."""
+        package, pkg_sha = self.build_package()
+        doc = self.repo / "findings-missing.yaml"
+        doc.write_text(
+            "schema: review.findings.v1\n"
+            "review:\n"
+            "  reviewer: review-adversary\n"
+            "  rubric_version: review-adversary-v1\n"
+            f"  package_sha256: {pkg_sha}\n"
+            f"  base_sha: {self.base}\n"
+            f"  head_sha: {self.head}\n"
+            "  decision: APPROVED\n",
+            encoding="utf-8")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("review document: OK", proc.stdout)
+
+    def test_validate_doc_empty_model_usage_refusal(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        proc = self.validate_doc(doc, model="   ", package=package)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("--model", proc.stderr)
+
+    def test_validate_doc_malformed_yaml_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.repo / "findings-broken.yaml"
+        doc.write_text("review: [unclosed\n  ::: not yaml\n",
+                       encoding="utf-8")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record:", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_validate_doc_stop_document_refused(self) -> None:
+        package, _ = self.build_package()
+        doc = self.write_stop_findings("review-adversary")
+        proc = self.validate_doc(doc, package=package)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("stopped review", proc.stderr)
+
+    def test_validate_doc_direct_file_path_invocation(self) -> None:
+        """validate-doc must work invoked as a bare file path from any
+        working directory (T1 lesson) — a real subprocess, not main()."""
+        package, _ = self.build_package()
+        doc = self.write_findings("review-contract",
+                                  [self.finding("RC-001", artifact="a.txt:2")])
+        proc = self.validate_doc(doc, role="review-contract",
+                                 model="direct-run-model",
+                                 package=package, cwd=self.repo)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertEqual(
+            proc.stdout,
+            f"review document: OK (review-contract@direct-run-model, "
+            f"1 finding(s), {doc})\n")
+
 
 
 

@@ -5,7 +5,7 @@
 - [ ] Plan review: APPROVED / REVISIONS (count: 0/2)
 - [ ] Handoff written (stories/STORY-{ID}/handoff.md)
 - [ ] Coder branch pushed (story/STORY-{ID}-{slug})
-- [ ] Code review: APPROVED / CHANGES REQUESTED (count: 0/2)
+- [ ] Review lane record pinned at head SHA (path: ___, zero undispositioned blocker/major)
 - [ ] Tests executed: PASS / FAIL
 - [ ] Merged
 

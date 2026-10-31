@@ -10,11 +10,12 @@ decompose → test-plan → impl-plan (DESIGN CONTRACT: file manifest, signature
   → script gate → PLAN REVIEW (fresh context, PASS/PASS-WITH-NITS/FAIL)
   ├─ PASS → coder (delegate_task subagent; sole code author;
   │           exit: build green + story's own tests green + committed)
-  │           → build+test results fed INTO code review prompt
-  │           → CODE REVIEW (fresh context, PASS/PASS-WITH-NITS/FAIL)
-  │               ├─ PASS/-WITH-NITS → nits fixed in-session (script/diff-verified,
-  │               │                    no loop consumed) → full test execution → merge-ready
-  │               └─ FAIL → back to coder (max 2)
+  │           → build+test results feed the review package (gate evidence)
+  │           → REVIEW LANE (deterministic package → three blind lenses × the
+  │               declared panel → dispositions → record at the head)
+  │               ├─ APPROVED → nits fixed in-session (script/diff-verified,
+  │               │             no loop consumed) → full test execution → merge-ready
+  │               └─ CHANGES REQUESTED → back to coder (max 2)
   └─ FAIL → back to planner (max 2)
 ```
 
@@ -24,7 +25,45 @@ loop is tagged at the moment it happens (mechanical/reasoning/contract/nit) —
 never backfilled. Mechanical checks run as a pre-review script gate
 (`factory/gates/pre_review_gate.py`, installed by onboarding) before any
 LLM reviewer spawns; loop-2 re-reviews are scoped to the artifact diff + prior
-findings only.
+findings only. The review lane's record at the pinned head IS the review
+evidence: any blocker/major → CHANGES REQUESTED, and every finding carries
+exactly one disposition (`fixed@sha`, `rejected`, `deferred`) — a record with
+an undispositioned finding will not render, and the `review-record` required
+CI check refuses a PR whose head has no valid record.
+
+## Review lane
+
+Commands (installed form — `factory/tools/review/...`; in the kit repo itself
+the same scripts live at `tools/review/...`). Packages are never committed:
+the record carries `package.manifest` and `check` rebuilds the package from
+the pinned base/head.
+
+```bash
+# 1. build the deterministic review package (base/head pinned; manifest for the record)
+python3 factory/tools/review/package.py build \
+  --repo . --base <BASE_SHA> --head <HEAD_SHA> \
+  [--contract <path>[:label]]... [--gate <path>[:label]]... \
+  [--allowed <list-file>] [--withheld <list-file>] \
+  --out <record-dir>/package.md --manifest-out <record-dir>/package-manifest.json
+
+# 2. render the record from the panel's findings docs + dispositions
+python3 factory/tools/review/record.py render \
+  --repo . --story <STORY-ID> --pr <N> --base <BASE_SHA> --head <HEAD_SHA> \
+  --package <record-dir>/package.md \
+  --package-manifest <record-dir>/package-manifest.json \
+  --findings <ROLE@MODEL>=<file>... --dispositions <ledger-file> \
+  --out-dir <record-dir>
+
+# 3. re-verify a rendered record (rebuilds the package from the manifest)
+python3 factory/tools/review/record.py check --record <record-dir> --repo .
+
+# 4. the review-record required check (CI runs this on every PR)
+python3 factory/tools/review/ci_gate.py --repo . --pr <N> --head <HEAD_SHA>
+```
+
+All findings docs, gate evidence and the record live under ONE record
+directory (`stories/<id>/review/` in a control home) so the post-review tail
+commit is record-only.
 
 ## Model allocation policy
 
@@ -45,7 +84,7 @@ with a kill rule (two consecutive consults with nothing adopted → stop).
 1. A story enters the coder ONLY with a written handoff at `stories/STORY-{ID}/handoff.md`: story summary, approved impl-plan path, acceptance criteria, exact files in scope (CREATE vs EXTEND), verification commands with expected output, exact commit message.
 2. The coder subagent prompt must be **mechanical**: read ONLY listed files, write the first edit within 10 tool calls, STOP and report if anything else is needed. Never "study the repo then fix."
 3. Coder works on a `story/STORY-{ID}-<slug>` branch, commits as it goes.
-4. Code review happens on the branch diff by a **fresh-context reviewer** that never saw the planning conversation; if it must build, it uses a worktree under /tmp — never the shared tree.
+4. The review lane runs on the branch diff by **fresh-context blind reviewers** that never saw the planning conversation (the deterministic package and pinned SHAs only); if a reviewer must build, it uses a worktree under /tmp — never the shared tree.
 5. Review feedback goes back as copy-paste-ready diffs, or the orchestrator applies small fixes directly.
 6. Stories that CREATE the same file run **sequentially**; EXTEND-only stories may parallelize.
 7. Merge only after local test execution is green (full suite + the story's named test project).

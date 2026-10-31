@@ -50,6 +50,67 @@ class TestStateSet(unittest.TestCase):
         self.assertEqual(SM.CLAIM_GATE, "CODING")
 
 
+class TestReviewMechanisms(unittest.TestCase):
+    """S3.5b cutover: the NEW-transition domain is review-lane only; the
+    historical values live on the read path."""
+
+    def test_review_mechanisms_exactly_review_lane(self):
+        self.assertEqual(SM.REVIEW_MECHANISM, "review-lane")
+        self.assertEqual(SM.REVIEW_MECHANISMS, ("review-lane",))
+
+    def test_historical_mechanisms_cover_both_old_values(self):
+        self.assertEqual(SM.HISTORICAL_REVIEW_MECHANISMS,
+                         ("ready-push", "draft-mention-opportunistic"))
+        # disjoint domains: a historical value is never a new-transition one
+        self.assertFalse(set(SM.HISTORICAL_REVIEW_MECHANISMS)
+                         & set(SM.REVIEW_MECHANISMS))
+
+    def test_mechanism_format_documents_review_lane(self):
+        self.assertEqual(SM.EVIDENCE_FORMATS["review_request_mechanism"],
+                         "review-lane")
+
+
+class TestReviewRecordEvidenceKeys(unittest.TestCase):
+    """S3.5b cutover: the review record is the gate evidence."""
+
+    def test_reviewing_evidence_keys_exact(self):
+        self.assertEqual(SM.EVIDENCE_KEYS["REVIEWING"],
+                         ("review_record", "review_record_sha",
+                          "review_head_sha"))
+
+    def test_ready_for_review_evidence_keys_exact(self):
+        self.assertEqual(SM.EVIDENCE_KEYS["READY_FOR_REVIEW"],
+                         ("internal_verdict", "threads_state",
+                          "fix_pushes", "r1_arrival",
+                          "review_record", "review_head_sha"))
+
+    def test_merge_eligible_evidence_keys_exact(self):
+        self.assertEqual(SM.EVIDENCE_KEYS["MERGE_ELIGIBLE"],
+                         ("tested_sha", "head_sha", "unresolved_threads",
+                          "review_record"))
+
+    def test_record_evidence_formats_documented(self):
+        self.assertEqual(SM.EVIDENCE_FORMATS["review_record"],
+                         "repo-relative review record directory containing "
+                         "review.json")
+        self.assertEqual(SM.EVIDENCE_FORMATS["review_record_sha"],
+                         "sha256 of review.json")
+        self.assertEqual(SM.EVIDENCE_FORMATS["review_head_sha"],
+                         "7-40 hex; the record's pinned head")
+
+    def test_check_summaries_name_the_record_requirement(self):
+        self.assertIn("review-lane", SM.CHECK_SUMMARY["DRAFT_OPENED"])
+        self.assertIn("review record", SM.CHECK_SUMMARY["REVIEWING"])
+        self.assertIn("review record",
+                      SM.CHECK_SUMMARY["READY_FOR_REVIEW"])
+        self.assertIn("review record", SM.CHECK_SUMMARY["MERGE_ELIGIBLE"])
+
+    def test_every_format_key_appears_in_evidence_keys_or_head(self):
+        all_keys = {k for keys in SM.EVIDENCE_KEYS.values() for k in keys}
+        for fk in SM.EVIDENCE_FORMATS:
+            self.assertIn(fk, all_keys | {"head_sha"})
+
+
 class TestOrder(unittest.TestCase):
     def test_next_in_sequence(self):
         self.assertTrue(SM.order_ok("BACKLOG", "GRILLED"))

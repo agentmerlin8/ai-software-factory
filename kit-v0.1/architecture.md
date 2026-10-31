@@ -206,7 +206,7 @@ Since the draft, the reference shipped a read-only CLI (`status`, `doctor`) and 
 
 ## Gate catalog (extracted)
 
-Four mechanical gates, extracted from the reference with descriptive slugs (no numeric ids):
+Four mechanical gates, extracted from the reference with descriptive slugs (no numeric ids), plus the S3.5b review-record required check:
 
 | Gate | What it checks | Script | Invocation | When |
 |---|---|---|---|---|
@@ -214,6 +214,7 @@ Four mechanical gates, extracted from the reference with descriptive slugs (no n
 | `plan-gate` | Plan-lane mechanical checks: contract block schema, AC coverage, cross-story collisions, anchor resolution, seam verification, coverage set-diffs, snippet annotations | `pre_review_gate.py` (plan mode) | `python3 factory/gates/pre_review_gate.py plan <story-dir> [--spec <path>] [--inflight auto\|none]` | PLANNED → GATE_PASSED (run live by the controller) and before any LLM plan review. Exit 0 = pass |
 | `build-gate` | Build-lane mechanical checks: manifest↔diff, AC↔test discovery, pinned command execution, api-shape + UI assertions (activation-gated project declarations; the reference's seed check families are not ported) | `pre_review_gate.py` (build mode) | `python3 factory/gates/pre_review_gate.py build <story-dir> [--base main] [--diff-file <name-status file>] [--discovery <project>=<list-tests file>]... [--run-discovery] [--run-verify]` | At BUILD_GREEN, before any LLM code review. Exit 0 = pass |
 | `gate-selftest` | Gate acceptance harness: seeded-invalid fixtures rejected, valid-but-unusual accepted | `test_gate.py` | `python3 factory/gates/test_gate.py` | CI and before any gate change deploys. Non-zero if any fixture behaves wrongly |
+| `review-record` | The PR's review record: valid record at the head (exact or record-only tail), no undispositioned blocker/major, verdict consistent, internal panel equals the declared panel | `review/ci_gate.py` | `python3 factory/tools/review/ci_gate.py --repo . --pr <n> --head <sha>` | on every pull request (required check). Exit 0 = a valid record at the head with the declared panel; non-zero = named refusal |
 
 Notes:
 
@@ -245,6 +246,8 @@ The review gate is **owned and reproducible**; no external/bot reviewer is a fac
 **Calibration** — `tools/review/bench/` holds adjudicated seed cases (field notes 18–25, the held slice's external findings, and clean controls); `tools/review/bench/score.py` reports per-lens and combined precision, critical/major recall, unnecessary-revision rate, and approval-escape rate. The committed baseline is a single-model panel (`qwen3.8-max`, all three lenses: 0.93 critical/major recall, 0 escapes, 0.29 precision); the second model's incremental detection is measured on real PRs from S3.5c forward, and the bench gains a per-model/union block before any lane promotion is claimed against it.
 
 **Boundary (S3.5a)** — records are not ledger events yet; state-machine evidence changes, the required CI check, and ruleset changes are S3.5b. The owner merge gate is unchanged.
+
+**Required check (S3.5b)** — the record is the state-machine evidence: `DRAFT_OPENED.review_request_mechanism` accepts only `review-lane` for new transitions (historical values remain readable in ledger history); `REVIEWING` requires evidence `review_record` + `review_record_sha` + `review_head_sha`; `READY_FOR_REVIEW` and `MERGE_ELIGIBLE` require a valid record at the current head with no undispositioned blocker/major findings. Head rule: exact match, or record-directory-only tail commits (a record commit necessarily lands after the reviewed head), with v1 ancestor grandfathering for pre-cutover records. The `review-record` CI job runs `tools/review/ci_gate.py` and fails closed on a missing/stale/mismatched record or a panel that differs from `kit-v0.1/review-panel.toml`. Packages are never committed — records carry `package.manifest` and `check` rebuilds the package from it. All findings docs, gate evidence and the record live under ONE record directory so the post-review tail is record-only.
 
 ## State machine
 
@@ -279,18 +282,18 @@ Required evidence keys are passed `k=v` on a transition request and persisted in
 | STORYBOOK_APPROVAL | — | answered `human_gate gate=visual` signed by an allowlisted human | UI stories only |
 | CODING | — | PLAN_APPROVED reached; claim (assignment) exists — the first gated transition; non-UI skip requires the declared non-UI line | `assignment` claim event (§Claim lifecycle) |
 | BUILD_GREEN | `commit_sha`, `build_result`, `named_tests_result` | `commit_sha` resolves; build green; named tests green; coder lane closed dispatch or lane-skip deviation | git object DB; the project's test runner |
-| DRAFT_OPENED | `pr_number`, `review_request_mechanism` | `pr_number` recorded; mechanism ∈ {ready-push, draft-mention-opportunistic} (ONE authenticated request); no duplicate DRAFT_OPENED | PR |
-| REVIEWING | — | DRAFT_OPENED reached | external review request |
+| DRAFT_OPENED | `pr_number`, `review_request_mechanism` | `pr_number` recorded; `review_request_mechanism` is `review-lane` (ONE authenticated request) — the historical values (ready-push, draft-mention-opportunistic) remain readable in ledger history but are refused as new evidence; no duplicate DRAFT_OPENED | PR; review lane (§Review lane) |
+| REVIEWING | `review_record`, `review_record_sha`, `review_head_sha` | DRAFT_OPENED reached; a valid review record at the pinned head (path, sha256, head) | review record directory (`review.json`); `record_gate.py` |
 | FIXING | — | REVIEWING reached (or post-review reentry) | `finding` + `loop` events |
 | FULL_TESTS_GREEN | `projects`, `tests_passed`, `tests_failed`, `tests_skipped`, `exclusions`, `exit_code` | exact suite membership (projects, skip/exclusion reasons, exit code); `exit_code=0`; `tests_failed=0` | full-suite `stage` event |
-| READY_FOR_REVIEW | `internal_verdict`, `threads_state`, `fix_pushes`, `r1_arrival` | internal verdict ∈ {PASS, PASS-WITH-NITS}; threads all resolved OR an external-review-unavailable watchdog exception logged (absence is never recorded as PASS); ≤1 fix push where both first-round sets arrived pre-edit (target, not safety constraint) | review threads |
-| MERGE_ELIGIBLE | `tested_sha`, `head_sha`, `unresolved_threads` | tested SHA == current head (re-checked at the gate); verdict eligible; no logic-touched nits; external findings dispositioned; external-unique findings attributed when instrumentation present; `unresolved_threads=0`; human merge approval recorded (`human_gate gate=merge`, answered) | `finding`/`review_attribution` events; merge gate |
+| READY_FOR_REVIEW | `internal_verdict`, `threads_state`, `fix_pushes`, `r1_arrival`, `review_record`, `review_head_sha` | internal verdict ∈ {PASS, PASS-WITH-NITS}; threads all resolved OR an external-review-unavailable watchdog exception logged (absence is never recorded as PASS); ≤1 fix push where both first-round sets arrived pre-edit (target, not safety constraint); a valid review record at the pinned head (record-tail commits allowed) with no open blocker/major findings | review threads; review record (`record_gate.py`) |
+| MERGE_ELIGIBLE | `tested_sha`, `head_sha`, `unresolved_threads`, `review_record` | tested SHA == current head (re-checked at the gate); verdict eligible; no logic-touched nits; external findings dispositioned; external-unique findings attributed when instrumentation present; `unresolved_threads=0`; human merge approval recorded (`human_gate gate=merge`, answered); a valid review record at the current head (record-tail commits allowed) with no open blocker/major findings | `finding`/`review_attribution` events; merge gate; review record (`record_gate.py`) |
 | MERGED | `merged_sha`, `merged_at`, `pr_number` | merge evidence complete | merge commit |
 | LIVE_PROVEN | `live_proof_evidence` | evidence is an existing path or http(s) URL | live-proof artifact |
 | CLOSED | `doc_sync`, `closeout_checklist` | doc-sync obligations checked; closeout checklist complete; outcome recorded (`outcome` event with `merged_sha`) | `outcome` event; closeout checklist |
 | BLOCKED | `reason` | from any state; reason required; resumes at the originating state; nothing else allowed while blocked | `transition` event (flag, not a column) |
 
-Evidence value formats: sha keys are 7–40 hex resolving in the repo object DB; `tested_sha` must prefix-match `head_sha`; `pr_number`/`fix_pushes` are digits; verdict keys ∈ {PASS, PASS-WITH-NITS}; `build_result`/`named_tests_result` = `green`; `exit_code`/`tests_failed`/`unresolved_threads` = `0`; `threads_state` ∈ {all-resolved, watchdog-exception}; `r1_arrival` ∈ {both-pre-edit, other}; `live_proof_evidence` = existing path or http(s) URL.
+Evidence value formats: sha keys are 7–40 hex resolving in the repo object DB; `tested_sha` must prefix-match `head_sha`; `pr_number`/`fix_pushes` are digits; verdict keys ∈ {PASS, PASS-WITH-NITS}; `build_result`/`named_tests_result` = `green`; `exit_code`/`tests_failed`/`unresolved_threads` = `0`; `threads_state` ∈ {all-resolved, watchdog-exception}; `r1_arrival` ∈ {both-pre-edit, other}; `live_proof_evidence` = existing path or http(s) URL; `review_request_mechanism` = `review-lane`; `review_record` = repo-relative review record directory containing `review.json`; `review_record_sha` = sha256 of `review.json`; `review_head_sha` = 7–40 hex, the record's pinned head.
 
 Rules:
 

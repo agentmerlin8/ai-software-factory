@@ -4,3 +4,5 @@ __pycache__/
 kit-v0.1/reviews/**/pkg*.md
 kit-v0.1/reviews/**/package.md
 kit-v0.1/reviews/**/package-manifest.json
+kit-v0.1/reviews/**/package*.md
+kit-v0.1/reviews/**/package-manifest*.json

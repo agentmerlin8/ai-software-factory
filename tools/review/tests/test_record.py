@@ -1510,6 +1510,64 @@ class _GitFixtureTest(unittest.TestCase):
                           proc.stderr)
             self.assertNotIn("Traceback", proc.stderr)
 
+    def test_render_refuses_manifest_with_unconfined_input_specs(self) -> None:
+        """Absolute or `..`-escaping contract/gate specs are refused by
+        name (S3.5b fix): the rebuild must never read outside the repo."""
+        pkg, _ = self.build_package()
+        for key in ("contract", "gate"):
+            for bad_spec in ("/etc/passwd:contract",
+                             "../../secret.md:contract",
+                             "docs/../../secret.md:contract"):
+                manifest = self.dir / f"manifest-esc-{key}.json"
+                _, _ = self.build_package("--manifest-out", str(manifest))
+                doc = json.loads(manifest.read_text(encoding="utf-8"))
+                doc[key] = [bad_spec]
+                manifest.write_text(
+                    json.dumps(doc, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8")
+                proc = self.render(
+                    package=str(pkg),
+                    extra=["--package-manifest", str(manifest)])
+                self.assertEqual(proc.returncode, 1, bad_spec)
+                self.assertIn("review record: invalid package manifest:",
+                              proc.stderr)
+                self.assertIn("repo-relative", proc.stderr)
+                self.assertIn(bad_spec, proc.stderr)
+                self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_refuses_stored_manifest_escaping_repo(self) -> None:
+        """A stored record whose manifest input resolves outside the repo
+        is refused at check time (validate_manifest + the rebuild
+        containment check)."""
+        out, data, _ = self.render_with_manifest()
+        # an absolute path passes no string-level scan in validate_manifest
+        # when it sits INSIDE the repo, so the containment refusal is the
+        # rebuild's resolve+is_relative_to check: point the spec outside.
+        self.pkg.unlink()  # force the rebuild path
+
+        def escape(record):
+            record["package"]["manifest"]["contract"] = [
+                "../../outside.md:contract"]
+
+        self.rewrite_record(out, escape)
+        proc = self.check_proc(out)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("review record: ", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
+    def test_check_rebuild_independent_of_caller_cwd(self) -> None:
+        """The manifest rebuild resolves inputs against the repo, not the
+        caller's cwd: check passes from an unrelated working directory."""
+        out, _, _ = self.render_with_manifest()
+        self.pkg.unlink()
+        proc = subprocess.run(
+            [sys.executable, str(RECORD_PY), "check",
+             "--record", str(out), "--repo", str(self.repo)],
+            capture_output=True, text=True, env=self.env,
+            cwd=str(self.dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record: OK (1 finding(s),", proc.stdout)
+
     # -- P2: check re-derives the record -----------------------------------
 
     def rewrite_record(self, out: Path, mutate) -> None:
@@ -1854,6 +1912,28 @@ class _GitFixtureTest(unittest.TestCase):
         proc = self.validate_doc(doc, package=package)
         self.assertEqual(proc.returncode, 1)
         self.assertIn("stopped review", proc.stderr)
+
+    def test_validate_doc_resolves_relative_package_against_repo(self) -> None:
+        """--repo is not decorative (S3.5b fix): a relative --package
+        resolves against --repo, so validate-doc passes when run from an
+        unrelated cwd."""
+        package, _ = self.build_package()
+        doc = self.write_findings("review-adversary", [self.finding("RA-001")])
+        rel_pkg = "package.md"  # repo-relative form of the built package
+        proc = subprocess.run(
+            [sys.executable, str(RECORD_PY), "validate-doc",
+             "--repo", str(self.repo), "--package", rel_pkg,
+             "--role", "review-adversary", "--model", "test-model-v1",
+             "--file", str(doc)],
+            capture_output=True, text=True, env=self.env,
+            cwd=str(self.dir))  # NOT the repo: cwd-relative would fail
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review document: OK (review-adversary@test-model-v1, "
+                      "1 finding(s), ", proc.stdout)
+        # an absolute --package is used as-is
+        proc = self.validate_doc(doc, package=str(package.resolve()),
+                                 cwd=str(self.dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
 
     def test_validate_doc_direct_file_path_invocation(self) -> None:
         """validate-doc must work invoked as a bare file path from any

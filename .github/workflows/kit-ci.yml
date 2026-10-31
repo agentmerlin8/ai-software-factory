@@ -26,6 +26,9 @@ jobs:
   review-record:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,8 +40,9 @@ jobs:
         with:
           python-version: '3.11'   # the documented floor (stdlib tomllib)
       - name: Review-record gate
+        # values arrive via env: — no ${{ }} expansion inside the shell
         run: >-
           python3 tools/review/ci_gate.py
           --repo .
-          --pr ${{ github.event.pull_request.number }}
-          --head ${{ github.event.pull_request.head.sha }}
+          --pr "$PR_NUMBER"
+          --head "$HEAD_SHA"

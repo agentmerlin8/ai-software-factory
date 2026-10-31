@@ -67,7 +67,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import NamedTuple, NoReturn
 
 # Tools modules must also run when invoked directly as a file path, not only
@@ -77,7 +77,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.review.findings import DECISIONS, FindingsError, load as findings_load
-from tools.review.package import compose_package
+from tools.review.package import compose_package, split_spec
 from tools.review.yamlish import YamlishError, loads as yamlish_loads
 
 SCHEMA = "review.record.v2"
@@ -301,6 +301,16 @@ def validate_manifest(manifest: object, base_sha: object, head_sha: object,
                 isinstance(item, str) and item.strip() for item in value):
             errors.append(f"{label}: {key} must be a list of non-empty "
                           "strings")
+    # contract/gate specs must be repo-relative: an absolute spec or a
+    # `..` segment could steer the rebuild into files outside the repo.
+    for key in ("contract", "gate"):
+        for item in manifest[key]:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            path, _ = split_spec(item)
+            if os.path.isabs(path) or ".." in PurePath(path).parts:
+                errors.append(f"{label}: {key} spec must be repo-relative "
+                              f"without `..` segments: {item!r}")
     for key in ("allowed", "withheld"):
         value = manifest[key]
         if value is not None and (
@@ -333,20 +343,43 @@ def load_package_manifest(path: str, base_sha: str,
     return manifest
 
 
+def _manifest_input_spec(repo, spec: str) -> str:
+    """Resolve one manifest contract/gate spec against `repo`.
+
+    The spec's PATH must stay inside the repository (containment via
+    resolve + is_relative_to — never string surgery); a violation is a
+    named rebuild failure.  The returned spec is repo-root-relative with
+    an explicit label so the rebuild neither depends on the caller's cwd
+    nor changes the rendered package bytes (the header renders the path
+    string, so it must match the original repo-relative build).
+    """
+    path, label = split_spec(spec)
+    root = Path(repo).resolve()
+    resolved = Path(repo, path).resolve()
+    if not resolved.is_relative_to(root):
+        fail(f"review record: package rebuild failed: manifest input "
+             f"outside the repo: {spec}")
+    return f"{resolved.relative_to(root).as_posix()}:{label}"
+
+
 def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
     """Rebuild the package bytes + digest from a manifest.
 
     The builder is byte-deterministic, so a rebuild from the manifest's
     resolved inputs is a real oracle even when no package file exists (the
-    fresh-clone case).  Any builder refusal becomes a named check failure.
+    fresh-clone case).  Contract/gate inputs are resolved against `repo`
+    (contained, repo-relative) and the builder runs with cwd=`repo`, so
+    the rebuild never depends on the caller's cwd.  Any builder refusal
+    becomes a named check failure.
     """
     args = argparse.Namespace(
         repo=repo,
         base=manifest["base"],
         head=manifest["head"],
         include=list(manifest["include"]),
-        contract=list(manifest["contract"]),
-        gate=list(manifest["gate"]),
+        contract=[_manifest_input_spec(repo, spec)
+                  for spec in manifest["contract"]],
+        gate=[_manifest_input_spec(repo, spec) for spec in manifest["gate"]],
         max_diff_bytes=manifest["max_diff_bytes"],
         max_input_bytes=manifest["max_input_bytes"],
         allowed=None,
@@ -364,7 +397,9 @@ def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
                 fh.write("".join(p + "\n" for p in manifest["withheld"]))
             args.withheld = withheld_file
         stderr = io.StringIO()
+        cwd = os.getcwd()
         try:
+            os.chdir(repo)  # repo-relative specs resolve identically
             with contextlib.redirect_stderr(stderr):
                 text, digest = compose_package(args)
         except SystemExit:
@@ -372,6 +407,8 @@ def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
             fail(f"review record: package rebuild failed: {detail}")
         except Exception as exc:  # builder contract: no bare tracebacks
             fail(f"review record: package rebuild failed: {exc}")
+        finally:
+            os.chdir(cwd)
     return text.encode("utf-8"), digest
 
 
@@ -1444,7 +1481,11 @@ def cmd_validate_doc(args, parser: argparse.ArgumentParser) -> int:
     model = args.model.strip()
     if not model:
         parser.error("--model must be a non-empty string")
-    pkg = parse_package(args.package)
+    # --package may be repo-relative: resolve it against --repo so the
+    # command works from any cwd (an absolute path is used as-is).
+    package = (Path(args.package) if Path(args.package).is_absolute()
+               else Path(args.repo) / args.package)
+    pkg = parse_package(str(package))
     load_review_lens(args.file, args.role, pkg)
     doc = findings_load(args.file)
     review = doc.get("review", {})

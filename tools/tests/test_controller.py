@@ -660,6 +660,96 @@ class TestEvidenceFormats(ControlHome):
             "merged_sha": self.head(), "merged_at": TS, "pr_number": "42"})
         self.assertEqual(rc, 0, out)
 
+    def test_merge_eligible_refuses_unresolvable_head_sha(self):
+        """head_sha must resolve in the repo object DB (S3.5b fix):
+        head_sha_resolves is a named check and an unresolvable (but
+        well-formed, prefix-matching) sha is refused."""
+        rel, _, _ = self.fake_record(head="d" * 40)
+        self.seed(chain_to("READY_FOR_REVIEW") + [
+            gate_row("g-1", self.sid, "merge")])
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", {
+            "tested_sha": "d" * 40, "head_sha": "d" * 40,
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel})
+        self.refused(rc, out, before, "head_sha_resolves")
+        # a real head still passes the resolution check
+        head = self.head()
+        rel2, _, _ = self.fake_record(rel="review/record-real", head=head)
+        self.seed(chain_to("READY_FOR_REVIEW") + [
+            gate_row("g-1", self.sid, "merge")])
+        rc, out = self.req("MERGE_ELIGIBLE", {
+            "tested_sha": head[:7], "head_sha": head,
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel2})
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        self.assertTrue(row["check_results"]["head_sha_resolves"]["ok"])
+
+    def test_ready_for_review_refuses_unresolvable_review_head(self):
+        """review_head_sha must resolve in the repo object DB (S3.5b fix):
+        review_head_resolves is a named check at READY_FOR_REVIEW."""
+        rel, _, _ = self.fake_record(head="e" * 40)
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": "e" * 40}
+        self.seed(chain_to("FULL_TESTS_GREEN"))
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_head_resolves")
+        # a real head passes
+        head = self.head()
+        rel2, _, _ = self.fake_record(rel="review/record-real", head=head)
+        rc, out = self.req("READY_FOR_REVIEW", {
+            **ev, "review_record": rel2, "review_head_sha": head})
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        self.assertTrue(row["check_results"]["review_head_resolves"]["ok"])
+
+    def test_draft_opened_to_reviewing_pr_number_roundtrip(self):
+        """One REAL controller-driven DRAFT_OPENED -> REVIEWING walk: the
+        DRAFT_OPENED pr_number is requested through the public request
+        path (never a hand-built row), persisted in the transition's
+        evidence_supplied detail, read back at REVIEWING, and matched
+        against the record's pr."""
+        head = self.head()
+        rel, sha, _ = self.fake_record(head=head, pr=42)
+        self.seed(chain_to("BUILD_GREEN"))
+        rc, out = self.req("DRAFT_OPENED", {
+            "pr_number": "42", "review_request_mechanism": "review-lane"})
+        self.assertEqual(rc, 0, out)
+        draft_row = L.load_events(self.ledger)[-1]
+        self.assertEqual(draft_row["to_state"], "DRAFT_OPENED")
+        self.assertEqual(
+            draft_row["check_results"]["evidence_supplied"]["detail"]
+                     ["pr_number"], "42")
+        # REVIEWING via the same request path: the persisted pr_number is
+        # what review_record_pr compares against
+        rc, out = self.req("REVIEWING", {
+            "review_record": rel, "review_record_sha": sha,
+            "review_head_sha": head})
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        self.assertEqual(row["to_state"], "REVIEWING")
+        self.assertEqual(row["from_state"], "DRAFT_OPENED")
+        self.assertTrue(row["check_results"]["review_record_pr"]["ok"])
+        self.assertEqual(
+            row["check_results"]["evidence_supplied"]["detail"]
+               ["review_head_sha"], head)
+        # a record pinned to a DIFFERENT pr than the requested
+        # DRAFT_OPENED pr_number is refused through the same path
+        rel2, sha2, _ = self.fake_record(rel="review/record-other",
+                                         head=head, pr=43)
+        self.seed(chain_to("BUILD_GREEN"))
+        rc, out = self.req("DRAFT_OPENED", {
+            "pr_number": "42", "review_request_mechanism": "review-lane"})
+        self.assertEqual(rc, 0, out)
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", {
+            "review_record": rel2, "review_record_sha": sha2,
+            "review_head_sha": head})
+        self.refused(rc, out, before, "review_record_pr")
+
     def test_live_proof_path_or_url(self):
         self.seed(chain_to("MERGED"))
         before = self.ledger_bytes()
@@ -760,6 +850,36 @@ class TestReviewingRecordEvidence(ControlHome):
         rc, out = self.req("REVIEWING",
                            self.reviewing_ev(rel, sha, head[:7]))
         self.assertEqual(rc, 0, out)
+
+    def test_reviewing_refuses_empty_and_non_hex_review_head(self):
+        """review_head_sha must be 7-40 lowercase hex BEFORE the equality
+        comparison (S3.5b fix): empty and non-hex values fail the named
+        check, and an empty value is already an intake refusal."""
+        rel, sha, _ = self.fake_record()
+        self.seed_at_draft()
+        # empty value: evidence intake refuses (rc 2) on the request path
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING",
+                           {"review_record": rel, "review_record_sha": sha,
+                            "review_head_sha": ""})
+        self.assertEqual(rc, 2, out)
+        self.assertIn("requires evidence", out)
+        self.assertEqual(self.ledger_bytes(), before)
+        # empty value straight through check(): review_head_match fails
+        results = self.ctrl().check(self.sid, "REVIEWING", {
+            "review_record": rel, "review_record_sha": sha,
+            "review_head_sha": ""})
+        self.assertFalse(results["review_head_match"]["ok"])
+        self.assertIn("7-40 lowercase hex",
+                      results["review_head_match"]["detail"])
+        # non-hex values of every flavour fail the named check
+        for bad in ("NOT-HEX!", "g" * 40, "z" * 7, "a" * 41,
+                    "0123456789abcdefABCDEF"):
+            self.seed_at_draft()
+            before = self.ledger_bytes()
+            rc, out = self.req("REVIEWING",
+                               self.reviewing_ev(rel, sha, bad))
+            self.refused(rc, out, before, "review_head_match")
 
     def test_reviewing_refuses_pr_mismatch(self):
         rel, sha, head = self.fake_record(pr=42)

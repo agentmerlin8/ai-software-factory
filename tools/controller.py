@@ -910,12 +910,13 @@ class Controller:
             put("review_record_sha", sha_ok, sha_detail)
             head_ev = ev.get("review_head_sha", "")
             rec_head = str((record or {}).get("head_sha") or "")
+            head_hex = record_gate.SHA_RE.fullmatch(head_ev) is not None
             put("review_head_match",
-                bool(record) and bool(rec_head)
-                and (rec_head == head_ev or rec_head.startswith(head_ev)
-                     or head_ev.startswith(rec_head)),
-                f"review_head_sha={head_ev!r} must equal the record's "
-                f"pinned head {rec_head or '(unreadable)'!r}")
+                bool(record) and bool(rec_head) and head_hex
+                and (rec_head == head_ev or rec_head.startswith(head_ev)),
+                f"review_head_sha={head_ev!r} must be 7-40 lowercase hex "
+                "and equal the record's pinned head "
+                f"{rec_head or '(unreadable)'!r}")
             pr_expect = self._draft_opened_pr(sid)
             rec_pr = (record or {}).get("pr")
             put("review_record_pr",
@@ -965,11 +966,16 @@ class Controller:
             # record-only tail (v2), or a v1 ancestor.
             rel = ev.get("review_record", "")
             head_ev = ev.get("review_head_sha", "")
+            put("review_head_resolves", commit_exists(self.root, head_ev),
+                f"review_head_sha={head_ev!r} (must resolve in the repo "
+                "object DB)")
             rec, record, errs = self._review_evidence(rel, head_ev)
             self._put_record_checks(put, rel, rec, record, errs, head_ev)
 
         if to == "MERGE_ELIGIBLE":
             tested, head = ev.get("tested_sha", ""), ev.get("head_sha", "")
+            put("head_sha_resolves", commit_exists(self.root, head),
+                f"head_sha={head!r} (must resolve in the repo object DB)")
             put("tested_sha_is_head",
                 bool(tested) and head.startswith(tested),
                 f"tested_sha={tested!r} vs head_sha={head[:12]!r} — exact "

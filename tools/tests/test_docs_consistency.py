@@ -12,7 +12,6 @@ Stdlib only. Python >= 3.11.
 """
 from __future__ import annotations
 
-import re
 import unittest
 from pathlib import Path
 
@@ -27,8 +26,21 @@ SHIP_TEMPLATES = (
     ),
 )
 
-REQUEST_A_BOT_REVIEW = re.compile(
-    r"(?i)(request|trigger|ask for)[^.\n]{0,40}copilot[^.\n]{0,40}review")
+# Order-independent retirement scan: any shipped line that mentions BOTH
+# "copilot" and "review" (case-insensitive, any order, any distance) is a
+# bot-review instruction until proven otherwise.  If a legitimate shipped
+# line trips, allowlist it in BOT_REVIEW_ALLOWLIST WITH a comment
+# explaining why it is not a review instruction.
+BOT_REVIEW_ALLOWLIST: dict[str, set[str]] = {
+    # rel path -> set of exact tripping lines allowed to ship
+}
+
+
+def bot_review_lines(text: str) -> list[str]:
+    """Every line mentioning copilot AND review (case-insensitive, either
+    order) — the retirement scan must not depend on word order."""
+    return [line for line in text.splitlines()
+            if "copilot" in line.lower() and "review" in line.lower()]
 
 
 def _read(rel: str) -> str:
@@ -72,7 +84,6 @@ class TestStoryStateTemplate(unittest.TestCase):
     def test_review_lane_record_line(self):
         self.assertIn("Review lane record",
                       _read("onboarding/templates/story-state.md"))
-
     def test_no_generic_code_review_line(self):
         self.assertNotIn("Code review:",
                          _read("onboarding/templates/story-state.md"))
@@ -82,9 +93,12 @@ class TestNoRequestABotReview(unittest.TestCase):
     def test_shipped_templates(self):
         for rel in SHIP_TEMPLATES:
             with self.subTest(template=rel):
-                self.assertIsNone(
-                    REQUEST_A_BOT_REVIEW.search(_read(rel)),
-                    f"{rel} still instructs requesting a Copilot/bot review")
+                tripping = [line for line in bot_review_lines(_read(rel))
+                            if line not in BOT_REVIEW_ALLOWLIST.get(rel, ())]
+                self.assertEqual(
+                    tripping, [],
+                    f"{rel} still instructs requesting a Copilot/bot "
+                    f"review: {tripping}")
 
 
 if __name__ == "__main__":

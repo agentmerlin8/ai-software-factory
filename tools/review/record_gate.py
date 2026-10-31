@@ -93,11 +93,28 @@ def check_record(record_dir: str, repo: str) -> list[str]:
     return [named or (out or f"record check exited {proc.returncode}")]
 
 
+CLEARING_DISPOSITIONS = ("fixed", "rejected", "deferred")
+
+
+def _disposition_clears(entry: dict) -> bool:
+    """A disposition entry clears a blocker/major ONLY when it names a
+    known disposition value and, for ``fixed``, carries a non-empty
+    fix_sha.  A value-less or unknown entry leaves the finding OPEN —
+    the ledger's own vocabulary is the ceiling, never a free pass."""
+    value = entry.get("disposition")
+    if value not in CLEARING_DISPOSITIONS:
+        return False
+    if value == "fixed":
+        fix = entry.get("fix_sha")
+        return isinstance(fix, str) and bool(fix.strip())
+    return True
+
+
 def open_blocker_majors(record: dict) -> list[str]:
-    """Ids of blocker|major findings with no matching disposition entry
-    (match by disposition.id == finding.id)."""
+    """Ids of blocker|major findings with no CLEARING disposition entry
+    (match by disposition.id == finding.id; see _disposition_clears)."""
     dispositioned = {d.get("id") for d in record.get("dispositions", [])
-                     if isinstance(d, dict)}
+                     if isinstance(d, dict) and _disposition_clears(d)}
     out = []
     for f in record.get("findings", []):
         if not isinstance(f, dict):
@@ -113,13 +130,17 @@ def head_rule_errors(record: dict, repo: str, record_dir: str,
     """The head rule: is `pr_head` covered by this record's pinned head?
 
     Exact equality always passes.  review.record.v2 additionally allows a
-    LATER head when every changed path between record head and pr_head is
-    under the record directory (the record-tail rule).  review.record.v1
-    allows the ancestor rule (merge-base --is-ancestor) only when
-    allow_v1_ancestor is true; otherwise exact only.
+    LATER head — ONLY when the record head is a real ancestor of the PR
+    head (merge-base --is-ancestor) AND every changed path between record
+    head and pr_head is under the record directory (the record-tail rule).
+    review.record.v1 allows the ancestor rule (merge-base --is-ancestor)
+    only when allow_v1_ancestor is true; otherwise exact only.
     """
     record_head = str(record.get("head_sha") or "")
-    if not record_head or not SHA_RE.fullmatch(pr_head or ""):
+    if not SHA_RE.fullmatch(record_head):
+        return [f"head rule: unusable record head {record_head!r} "
+                "(7-40 lowercase hex required)"]
+    if not SHA_RE.fullmatch(pr_head or ""):
         return [f"head rule: unusable heads: record {record_head!r}, "
                 f"pr_head {pr_head!r} (7-40 hex required)"]
     # prefix-tolerant exactness: resolve both to 40-hex for comparison
@@ -127,6 +148,11 @@ def head_rule_errors(record: dict, repo: str, record_dir: str,
         return []
     schema = record.get("schema")
     if schema == SCHEMA_V2:
+        if _git(repo, "merge-base", "--is-ancestor",
+                record_head, pr_head).returncode != 0:
+            return [f"head rule: record head {record_head} is not an "
+                    f"ancestor of pr head {pr_head} (the record-tail rule "
+                    "only covers commits AFTER the reviewed head)"]
         proc = _git(repo, "diff", "--name-only",
                     f"{record_head}..{pr_head}")
         if proc.returncode != 0:

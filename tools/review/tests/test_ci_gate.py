@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -313,6 +315,176 @@ class TestCiGate(CiGateFixture):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("legacy record schema review.record.v1 is not "
                       "accepted for a new PR", proc.stderr)
+
+
+class TestCiGatePanelSlots(CiGateFixture):
+    """Duplicate (role, model) reviewer slots are refused — never read as
+    extra panel coverage (S3.5b fix round)."""
+
+    def test_duplicate_slot_refused_in_panel_check(self):
+        # pure-function level: panel_slot_errors names the duplicate
+        record = {"reviewers": [
+            {"role": "review-adversary", "model": "test-model-v1"},
+            {"role": "review-adversary", "model": "test-model-v1"},
+        ]}
+        from tools.review.ci_gate import panel_slot_errors
+        errs = panel_slot_errors(Path("rec"), record,
+                                 ["review-adversary"], ["test-model-v1"])
+        self.assertEqual(len(errs), 1)
+        self.assertIn("duplicate reviewer slots", errs[0])
+        self.assertIn("(review-adversary, test-model-v1)", errs[0])
+
+    def test_duplicate_slot_record_refused_end_to_end(self):
+        import tools.review.ci_gate as ci_gate_mod
+        rel, data = self.render_ok()
+        # a duplicated reviewer entry: the gate must exit 1 naming the
+        # duplicate (the record authority refuses it first — either way
+        # the duplicate never reads as coverage)
+        data["reviewers"].append(dict(data["reviewers"][0]))
+        self.rewrite(rel, data)
+        proc = self.run_gate(self.head)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("duplicate", proc.stderr)
+        self.assertNotIn("review record gate: OK", proc.stdout)
+        # and panel_slot_errors is what names it at the panel step when
+        # the record itself is otherwise clean
+        errs = ci_gate_mod.panel_slot_errors(
+            self.repo / rel, data, ["review-adversary"], ["test-model-v1"])
+        self.assertTrue(any("duplicate" in e for e in errs), errs)
+
+
+class TestCiGateDefaults(CiGateFixture):
+    """Bare invocation (no --records-root/--panel) must discover records
+    under the default root and use the committed panel defaults."""
+
+    KIT_REPO = Path(__file__).resolve().parents[3]
+
+    def render_full_panel(self) -> str:
+        """Render a record covering the COMMITTED panel (every lens once
+        per model, all approvals) under the default records root."""
+        panel = tomllib.loads(
+            (self.KIT_REPO / "kit-v0.1" / "review-panel.toml")
+            .read_text(encoding="utf-8"))
+        lenses, models = panel["lenses"], panel["models"]
+        self.build_package()
+        disp = self.write_dispositions([])
+        out_rel = "kit-v0.1/reviews/S9.9/record"
+        out_dir = self.repo / out_rel
+        cmd = [sys.executable, str(RECORD_PY),
+               "render", "--repo", str(self.repo), "--story", "S9.9",
+               "--pr", "42", "--base", self.base, "--head", self.head,
+               "--package", str(self.pkg), "--dispositions", str(disp),
+               "--gate", f"lint=0:{self.gate_path}",
+               "--out-dir", str(out_dir)]
+        for lens in lenses:
+            for model in models:
+                doc = self.write_findings(
+                    lens, [], name=f"findings-{lens}-{model}.yaml")
+                cmd += ["--findings", f"{lens}@{model}={doc}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        return out_rel
+
+    def run_gate_defaults(self, head: str, pr: int = 42):
+        return subprocess.run(
+            [sys.executable, str(CI_GATE_PY),
+             "--repo", str(self.repo), "--pr", str(pr), "--head", head],
+            capture_output=True, text=True, env=self.env)
+
+    def test_bare_invocation_uses_committed_panel_defaults(self):
+        self.render_full_panel()
+        # the default panel file lives under --repo: copy the COMMITTED
+        # kit panel into the temp repo at its default location
+        (self.repo / "kit-v0.1").mkdir(parents=True, exist_ok=True)
+        shutil.copy(self.KIT_REPO / "kit-v0.1" / "review-panel.toml",
+                    self.repo / "kit-v0.1" / "review-panel.toml")
+        proc = self.run_gate_defaults(self.head)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record gate: OK (PR 42, 1 record(s), head "
+                      + self.head + ")", proc.stdout)
+
+    def test_bare_invocation_panel_mismatch_refused(self):
+        self.render_full_panel()
+        (self.repo / "kit-v0.1").mkdir(parents=True, exist_ok=True)
+        (self.repo / "kit-v0.1" / "review-panel.toml").write_text(
+            'lenses = ["review-adversary"]\nmodels = ["test-model-v1"]\n',
+            encoding="utf-8")
+        proc = self.run_gate_defaults(self.head)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("panel mismatch", proc.stderr)
+
+
+class TestCiGateManifestRecord(CiGateFixture):
+    """A record rendered WITH --package-manifest stays gate-verifiable
+    after the package file is deleted (packages are never committed) —
+    at the exact head and at a record-only tail head."""
+
+    def render_with_manifest(self, out_rel="review/record",
+                             pinned_head=None) -> tuple[str, dict]:
+        head = pinned_head or self.head
+        manifest = self.dir / "manifest.json"
+        proc = subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build",
+             "--repo", str(self.repo), "--base", self.base,
+             "--head", head, "--out", str(self.repo / "package-m.md"),
+             "--manifest-out", str(manifest)],
+            capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.pkg = self.repo / "package-m.md"
+        self.pkg_sha = proc.stdout.splitlines()[1].split(
+            "package_sha256: ", 1)[1]
+        self.pkg_head = head
+        findings_doc = self.write_findings(
+            "review-adversary", [self.finding("RA-001")])
+        disp = self.write_dispositions(
+            [{"id": "RA-001@test-model-v1", "disposition": "fixed",
+              "fix_sha": self.fix_a}])
+        out_dir = self.repo / out_rel
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.base, "--head", head,
+            "--package", str(self.pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings_doc}",
+            "--model", "review-adversary=test-model-v1",
+            "--package-manifest", str(manifest),
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(out_dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        data = json.loads(
+            (out_dir / "review.json").read_text(encoding="utf-8"))
+        self.assertIn("manifest", data["package"])
+        return out_rel, data
+
+    def test_manifest_record_package_deleted_passes_at_exact_head(self):
+        self.render_with_manifest()
+        self.pkg.unlink()  # fresh-clone case: only the manifest remains
+        self.assertFalse(self.pkg.exists())
+        proc = self.run_gate(self.head)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record gate: OK", proc.stdout)
+
+    def test_manifest_record_package_deleted_passes_at_record_tail(self):
+        rel, _ = self.render_with_manifest(pinned_head=self.fix_a)
+        self.pkg.unlink()
+        tail = self.commit_record(rel)
+        proc = self.run_gate(tail)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record gate: OK", proc.stdout)
+
+    def test_manifest_record_from_foreign_cwd_passes(self):
+        """The rebuild must not depend on the caller's cwd: run the gate
+        with a cwd outside the repo (relative --repo)."""
+        self.render_with_manifest()
+        self.pkg.unlink()
+        proc = subprocess.run(
+            [sys.executable, str(CI_GATE_PY),
+             "--repo", str(self.repo), "--pr", "42", "--head", self.head,
+             "--records-root", "review", "--panel", str(self.panel)],
+            capture_output=True, text=True, env=self.env,
+            cwd=str(self.dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record gate: OK", proc.stdout)
 
 
 class TestCiGateUsage(CiGateFixture):

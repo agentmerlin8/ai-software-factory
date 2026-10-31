@@ -281,6 +281,64 @@ class TestEvaluateRealRecords(RecordFixture):
                                     pr_head=self.fix_a)
         self.assertEqual(errs, [])
 
+    def test_non_ancestor_pr_head_with_clean_two_dot_diff_refused(self):
+        """A pr head that is NOT a descendant of the record head is refused
+        even when the two-dot diff <record_head>..<pr_head> shows only
+        record-directory changes (S3.5b fix: ancestry gates the tail rule).
+        """
+        rel, _ = self.render_ok(pinned_head=self.fix_a)
+        tail = self.commit_record(rel)
+        # divergent branch from BEFORE the record head: its tree differs
+        # from tail only under the record directory, so the two-dot diff
+        # is clean — but it is not a descendant of tail.
+        self.git("checkout", "-q", "-b", "divergent", self.head)
+        # match tail's tree content OUTSIDE the record dir (fix_a's a.txt)
+        # so the two-dot diff shows record-directory changes only
+        (self.repo / "a.txt").write_text("alpha\nbeta\ngamma\n",
+                                         encoding="utf-8")
+        rec_dir = self.repo / rel
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        (rec_dir / "extra-note.md").write_text("divergent record file\n",
+                                               encoding="utf-8")
+        self.git("add", "a.txt", rel)
+        self.git("commit", "-q", "-m", "divergent record-only commit")
+        divergent = self.rev_parse("HEAD")
+        self.git("checkout", "-q", "main")
+        # the two-dot diff IS record-only (the pre-fix green light)
+        diff = self.git("diff", "--name-only", f"{tail}..{divergent}")
+        self.assertTrue(all(p.startswith(rel + "/")
+                            for p in diff.stdout.split()), diff.stdout)
+        # ... but ancestry fails, so the head rule must refuse
+        errs = record_gate.head_rule_errors(
+            {"schema": "review.record.v2", "head_sha": tail},
+            str(self.repo), rel, divergent, allow_v1_ancestor=False)
+        self.assertTrue(any("head rule" in e and "is not an ancestor" in e
+                            for e in errs), errs)
+        errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
+                                    pr_head=divergent)
+        self.assertTrue(any("head rule" in e and "is not an ancestor" in e
+                            for e in errs), errs)
+
+    def test_non_hex_record_head_refused(self):
+        """A record head that is not 7-40 lowercase hex is a named error
+        BEFORE any comparison (S3.5b fix)."""
+        for bad in ("zzzzzzz", "NOT-A-SHA", "a" * 41, "", None):
+            errs = record_gate.head_rule_errors(
+                {"schema": "review.record.v2", "head_sha": bad},
+                str(self.repo), "review/record", self.head,
+                allow_v1_ancestor=False)
+            self.assertEqual(len(errs), 1, bad)
+            self.assertIn("head rule:", errs[0], bad)
+            self.assertIn("record head", errs[0], bad)
+        # and through evaluate() on a real record with a tampered head
+        rel, data = self.render_ok()
+        data["head_sha"] = "Z" * 40
+        self.rewrite(rel, data)
+        errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
+                                    pr_head=self.head)
+        self.assertTrue(any("head rule" in e and "unusable record head" in e
+                            for e in errs), errs)
+
     def test_open_blocker_major_fails_evaluate(self):
         rel, data = self.render_ok()
         # an undispositioned blocker: verdict recomputed consistently so
@@ -343,8 +401,8 @@ class TestOpenBlockerMajors(unittest.TestCase):
     def f(self, fid, severity):
         return {"id": fid, "severity": severity}
 
-    def d(self, fid):
-        return {"id": fid, "disposition": "fixed"}
+    def d(self, fid, disposition="fixed", fix_sha="a" * 40):
+        return {"id": fid, "disposition": disposition, "fix_sha": fix_sha}
 
     def test_empty_record(self):
         self.assertEqual(record_gate.open_blocker_majors({}), [])
@@ -378,6 +436,30 @@ class TestOpenBlockerMajors(unittest.TestCase):
         rec = self.record([self.f("N-1", "minor"), self.f("I-1", "info")],
                           [])
         self.assertEqual(record_gate.open_blocker_majors(rec), [])
+
+    def test_valueless_or_unknown_disposition_leaves_finding_open(self):
+        # a `fixed` entry WITHOUT a fix_sha does not clear (S3.5b fix)
+        rec = self.record([self.f("B-1", "blocker")],
+                          [{"id": "B-1", "disposition": "fixed"}])
+        self.assertEqual(record_gate.open_blocker_majors(rec), ["B-1"])
+        # empty/whitespace fix_sha does not clear either
+        for bad in ("", "   ", None, 42):
+            rec = self.record([self.f("B-1", "blocker")],
+                              [{"id": "B-1", "disposition": "fixed",
+                                "fix_sha": bad}])
+            self.assertEqual(record_gate.open_blocker_majors(rec), ["B-1"],
+                             bad)
+        # unknown disposition values never clear
+        for value in ("wontfix", "acknowledged", "", None):
+            rec = self.record([self.f("M-1", "major")],
+                              [{"id": "M-1", "disposition": value}])
+            self.assertEqual(record_gate.open_blocker_majors(rec), ["M-1"],
+                             value)
+        # rejected/deferred clear without a fix_sha
+        for value in ("rejected", "deferred"):
+            rec = self.record([self.f("M-1", "major")],
+                              [{"id": "M-1", "disposition": value}])
+            self.assertEqual(record_gate.open_blocker_majors(rec), [], value)
 
 
 if __name__ == "__main__":

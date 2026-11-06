@@ -11,7 +11,9 @@ Recorded 2026-10-31, before the record commit, on PR #32 (`kit/s35b-review-gate-
   flipped to `enforcement: active` (owner decision 2a). Active state re-read from
   `GET /repos/agentmerlin8/ai-software-factory/rulesets/26277566` after the flip.
 - No bypass actors: the owner merge gate is unchanged in who may merge; the
-  ruleset only requires the two checks.
+  ruleset requires the two checks. Branch protection additionally requires
+  code-owner review (owner decision 2026-11-06, see
+  `OWNER-DECISION-codeowner-review.md` in this directory).
 
 ## Red half (no record)
 

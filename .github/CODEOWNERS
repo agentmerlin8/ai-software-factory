@@ -8,6 +8,8 @@
 # ref); the verifier, its authority and the panel are checked out from the
 # base revision, and this file makes any workflow edit need an owner's
 # approval. Admin merges remain the owner's own trust boundary.
+#
+# Owner decision for this exception: kit-v0.1/reviews/S3.5b/record/OWNER-DECISION-codeowner-review.md
 /.github/workflows/  @randy-jerome @agentmerlin8-ops
 /tools/review/       @randy-jerome @agentmerlin8-ops
 /kit-v0.1/review-panel.toml  @randy-jerome @agentmerlin8-ops

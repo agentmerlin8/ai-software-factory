@@ -46,6 +46,7 @@ from typing import NoReturn
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.review import record as record_mod
 from tools.review import record_gate
 
 PREFIX = "review record gate: "
@@ -147,6 +148,65 @@ def panel_slot_errors(record_dir: Path, record: dict,
     return []
 
 
+def coverage_errors(repo: Path, base: str, head: str,
+                    qualifying: list[tuple[Path, dict]],
+                    roots: list[Path]) -> list[str]:
+    """Full-change coverage: every path the PR changes must have been in
+    SOME qualifying package.
+
+    The head rule alone proves only that the record is at the head — a
+    package built from ``HEAD~1..HEAD`` or ``--include one/file.py`` is at
+    the head too, and the rest of the PR was never reviewed (S3.5b external
+    review P1; the round-3 APPROVED record covered 2 of 62 files).
+
+    Coverage is DERIVED, never claimed: the record's manifest is rebuilt
+    with the trusted builder, so the file list cannot be widened by editing
+    review.json.  It is the union over qualifying records, so a large slice
+    split into area packages still passes.  The review-record tree itself
+    (the records root, and every qualifying record directory) is not review
+    input and is excluded.
+    """
+    required = record_gate.changed_paths(str(repo), base, head)
+    if required is None:
+        return [f"coverage: cannot diff {base}...{head} — --base must be a "
+                f"commit reachable from the PR head in this repository"]
+    excluded: list[str] = []
+    for prefix_path in list(roots) + [d for d, _ in qualifying]:
+        rel = _rel_to_repo(prefix_path, repo).strip("/")
+        if rel and not rel.startswith("/"):
+            excluded.append(rel + "/")
+    covered: set[str] = set()
+    for record_dir, record in qualifying:
+        package = record.get("package")
+        manifest = package.get("manifest") if isinstance(package, dict) else None
+        if not isinstance(manifest, dict):
+            return [f"coverage: record {_rel_to_repo(record_dir, repo)} "
+                    f"carries no package manifest; the gate cannot derive "
+                    f"what it packaged — rebuild the record with "
+                    f"--package-manifest"]
+        try:
+            _, _digest, coverage = record_mod.rebuild_package_from_manifest(
+                repo, manifest)
+        except SystemExit:
+            return [f"coverage: record {_rel_to_repo(record_dir, repo)} "
+                    f"package cannot be rebuilt from its manifest "
+                    f"(see the rebuild refusal above)"]
+        covered.update(coverage["shipped"])
+        # Binary files have no reviewable diff bytes; their paths are
+        # carried in the package's binary_files list, which is coverage.
+        covered.update(coverage["binary"])
+    missing = [path for path in required
+               if not any(path.startswith(prefix) for prefix in excluded)
+               and path not in covered]
+    if missing:
+        shown = ", ".join(missing[:10])
+        more = (f" (+{len(missing) - 10} more)"
+                if len(missing) > 10 else "")
+        return [f"coverage: {len(missing)} changed path(s) were never "
+                f"packaged for review: {shown}{more}"]
+    return []
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ci_gate.py",
@@ -157,6 +217,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="pull request number")
     parser.add_argument("--head", required=True,
                         help="PR head sha (7-40 lowercase hex)")
+    parser.add_argument("--base", required=True,
+                        help="PR base sha (7-40 lowercase hex) — the "
+                             "full-change coverage rule diffs "
+                             "base...head; CI passes the forge's PR base")
     parser.add_argument("--records-root", action="append", default=None,
                         dest="records_roots",
                         help=f"records root to scan, repeatable "
@@ -172,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not SHA_RE.fullmatch(args.head or ""):
         parser.error(f"--head must be 7-40 lowercase hex, got {args.head!r}")
+    if not SHA_RE.fullmatch(args.base or ""):
+        parser.error(f"--base must be 7-40 lowercase hex, got {args.base!r}")
 
     repo = Path(args.repo)
     if not repo.is_dir():
@@ -224,7 +290,17 @@ def main(argv: list[str] | None = None) -> int:
                 print(line, file=sys.stderr)
             raise SystemExit(1)
 
-    # 4. declared panel: internal slots == lenses x models, no duplicates
+    # 4. full-change coverage: every changed path was packaged for SOME
+    #    qualifying record.  The base is required: a gate that cannot see
+    #    the PR's full change must refuse, never imply coverage.
+    errs = coverage_errors(repo, args.base, head, qualifying, roots)
+    if errs:
+        for err in errs:
+            print(PREFIX + err, file=sys.stderr)
+        raise SystemExit(1)
+    coverage_note = f"full change {args.base}...{head}"
+
+    # 5. declared panel: internal slots == lenses x models, no duplicates
     lenses, models = load_panel(panel_path)
     for record_dir, record in qualifying:
         errs = panel_slot_errors(record_dir, record, lenses, models)
@@ -234,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(1)
 
     print(f"{PREFIX}OK (PR {pr}, {len(qualifying)} record(s), "
-          f"head {head})")
+          f"head {head}, coverage {coverage_note})")
     return 0
 
 

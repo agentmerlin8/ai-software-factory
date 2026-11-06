@@ -29,20 +29,56 @@ jobs:
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
-      - uses: actions/checkout@v4
+      # Trusted verifier + policy: the gate script, its authority and the
+      # declared panel come from the BASE revision, never from the PR.
+      # A pull_request workflow is read from the PR ref, so running the
+      # PR's own copy would let the PR stub out the check.
+      - name: Checkout base revision (trusted verifier)
+        uses: actions/checkout@v4
         with:
-          # the PR head, full history: shallow clones break pinned-SHA
-          # resolution (the kit's own rule)
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: verify
           fetch-depth: 0
+          persist-credentials: false
+      # The PR head is INPUT DATA ONLY: git objects + record JSON.
+      - name: Checkout PR head (data only)
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'   # the documented floor (stdlib tomllib)
       - name: Review-record gate
         # values arrive via env: — no ${{ }} expansion inside the shell
-        run: >-
-          python3 tools/review/ci_gate.py
-          --repo .
-          --pr "$PR_NUMBER"
-          --head "$HEAD_SHA"
+        run: |
+          set -euo pipefail
+          # Bootstrap: the gate itself lands with the PR that introduces
+          # it, so the base revision may carry no verifier yet. In that
+          # one case the PR copy runs — after merge the base copy always
+          # exists, and this branch is dead.
+          if [ -f verify/tools/review/ci_gate.py ]; then
+            VERIFIER=verify/tools/review/ci_gate.py
+            PANEL="$PWD/verify/kit-v0.1/review-panel.toml"
+          else
+            echo "::warning::base revision has no review gate yet — bootstrap run on the PR copy"
+            VERIFIER=pr/tools/review/ci_gate.py
+            PANEL="$PWD/pr/kit-v0.1/review-panel.toml"
+          fi
+          # Coverage needs the forge's PR base. A pre-coverage verifier
+          # (base revision before this slice) does not accept --base;
+          # omitting it there keeps that verifier's contract intact.
+          EXTRA=()
+          if python3 "$VERIFIER" --help | grep -q -- '--base'; then
+            EXTRA+=(--base "$BASE_SHA")
+          fi
+          python3 "$VERIFIER" \
+            --repo pr \
+            --pr "$PR_NUMBER" \
+            --head "$HEAD_SHA" \
+            "${EXTRA[@]}" \
+            --panel "$PANEL"

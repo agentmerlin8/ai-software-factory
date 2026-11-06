@@ -597,17 +597,39 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertIn("# Review package — repo ", self.pkg)
 
     def test_remote_origin_with_user_only_rebuilt_without_userinfo(self) -> None:
-        """P4: any userinfo (username or password) is rebuilt away."""
+        """P4 + S3.5b external review: any userinfo is rebuilt away, and
+        the identity is transport-independent (ssh -> https)."""
         self.git("remote", "add", "origin",
                  "ssh://git@example.com:2222/owner/repo.git")
         self.build_ok()
-        self.assertIn("repo: ssh://example.com:2222/owner/repo.git\n", self.pkg)
+        self.assertIn("repo: https://example.com:2222/owner/repo.git\n",
+                      self.pkg)
 
     def test_scp_style_origin_without_userinfo_kept(self) -> None:
-        """P4: scp-style origins carry no parsed userinfo and pass through."""
+        """P4 + S3.5b external review: scp-style origins canonicalize to the
+        same https identity a CI checkout produces."""
         self.git("remote", "add", "origin", "git@github.com:owner/repo.git")
         self.build_ok()
-        self.assertIn("repo: git@github.com:owner/repo.git\n", self.pkg)
+        self.assertIn("repo: https://github.com/owner/repo.git\n", self.pkg)
+
+    def test_all_transports_rebuild_the_same_package(self) -> None:
+        """https, ssh and scp origins name ONE repository: a record built
+        from an SSH clone must pass the check rebuilt from CI's HTTPS
+        checkout (S3.5b external review P1)."""
+        builds = {}
+        for name, url in (("https", "https://github.com/owner/repo"),
+                          ("https-git", "https://github.com/owner/repo.git"),
+                          ("ssh", "ssh://git@github.com/owner/repo.git"),
+                          ("scp", "git@github.com:owner/repo.git")):
+            self.git("remote", "remove", "origin") if "origin" in \
+                self.git("remote").stdout.split() else None
+            self.git("remote", "add", "origin", url)
+            self.build_ok(out=self.dir / f"{name}.md")
+            builds[name] = self.pkg
+        digests = {name: text.splitlines()[1] for name, text in builds.items()}
+        self.assertEqual(len(set(digests.values())), 1, digests)
+        self.assertIn("repo: https://github.com/owner/repo.git\n",
+                      builds["scp"])
 
     def test_origin_with_and_without_git_suffix_same_package(self) -> None:
         """The Identity line is canonical: a CI checkout (no .git) and a

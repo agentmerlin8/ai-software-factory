@@ -63,8 +63,13 @@ class CiGateFixture(unittest.TestCase):
         (self.repo / "a.txt").write_text("alpha\nbeta\ngamma\n",
                                          encoding="utf-8")
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", "commit three: fix a.txt")
+        self.git("commit", "-q", "-m", "commit two: fix a.txt")
         self.fix_a = self.rev_parse("HEAD")
+
+        (self.repo / "b.txt").write_text("beta file\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "commit three: the reviewed head")
+        self.head = self.rev_parse("HEAD")
         self.pkg_head = self.head  # default package pin until built
 
         self.gate_path = self.repo / "gate-lint.txt"
@@ -99,10 +104,12 @@ class CiGateFixture(unittest.TestCase):
 
     def run_gate(self, head: str, pr: int = 42,
                  panel: Path | None = None,
-                 records_root: str = "review") -> subprocess.CompletedProcess:
+                 records_root: str = "review",
+                 base: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, str(CI_GATE_PY),
              "--repo", str(self.repo), "--pr", str(pr), "--head", head,
+             "--base", base or self.base,
              "--records-root", records_root,
              "--panel", str(panel or self.panel)],
             capture_output=True, text=True, env=self.env)
@@ -111,15 +118,18 @@ class CiGateFixture(unittest.TestCase):
                       name: str = "package.md") -> tuple[Path, str]:
         head = head or self.head
         self.pkg = self.repo / name
+        self.manifest = self.dir / (name + ".manifest.json")
         proc = subprocess.run(
             [sys.executable, str(PACKAGE_PY), "build",
              "--repo", str(self.repo), "--base", self.base,
-             "--head", head, "--out", str(self.pkg)],
+             "--head", head, "--out", str(self.pkg),
+             "--manifest-out", str(self.manifest)],
             capture_output=True, text=True, env=self.env)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.pkg_sha = proc.stdout.splitlines()[1].split(
             "package_sha256: ", 1)[1]
         self.pkg_head = head
+        self.pkg_base = self.base
         return self.pkg, self.pkg_sha
 
     def write_findings(self, reviewer: str, findings: list[dict],
@@ -132,12 +142,13 @@ class CiGateFixture(unittest.TestCase):
                 "reviewer": reviewer,
                 "rubric_version": f"{reviewer}-v1",
                 "package_sha256": self.pkg_sha,
-                "base_sha": self.base,
+                "base_sha": getattr(self, "pkg_base", self.base),
                 "head_sha": self.pkg_head,
                 "decision": "CHANGES_REQUESTED" if findings else "APPROVED",
                 "findings": findings,
             },
         }
+        doc["review"]["base_sha"] = getattr(self, "pkg_base", self.base)
         out = self.repo / (name or f"findings-{reviewer}.yaml")
         out.write_text(yamlish_dumps(doc), encoding="utf-8")
         return out
@@ -177,6 +188,7 @@ class CiGateFixture(unittest.TestCase):
             "--package", str(self.pkg), "--dispositions", str(disp),
             "--findings", f"review-adversary={findings_doc}",
             "--model", "review-adversary=test-model-v1",
+            "--package-manifest", str(self.manifest),
             "--gate", f"lint=0:{self.gate_path}",
             "--out-dir", str(out_dir))
         self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
@@ -240,17 +252,17 @@ class TestCiGate(CiGateFixture):
         proc = self.run_gate(self.head)
         self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
         self.assertIn("review record gate: OK (PR 42, 1 record(s), head "
-                      + self.head + ")", proc.stdout)
+                      + self.head, proc.stdout)
 
     def test_record_only_tail_commit_exits_0(self):
-        rel, _ = self.render_ok(pinned_head=self.fix_a)
+        rel, _ = self.render_ok()
         tail = self.commit_record(rel)
         proc = self.run_gate(tail)
         self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
         self.assertIn("review record gate: OK", proc.stdout)
 
     def test_later_code_commit_exits_1(self):
-        rel, _ = self.render_ok(pinned_head=self.fix_a)
+        rel, _ = self.render_ok()
         self.commit_record(rel)
         (self.repo / "a.txt").write_text("alpha\nbeta\ngamma\ndelta\n",
                                          encoding="utf-8")
@@ -374,6 +386,7 @@ class TestCiGateDefaults(CiGateFixture):
                "render", "--repo", str(self.repo), "--story", "S9.9",
                "--pr", "42", "--base", self.base, "--head", self.head,
                "--package", str(self.pkg), "--dispositions", str(disp),
+               "--package-manifest", str(self.manifest),
                "--gate", f"lint=0:{self.gate_path}",
                "--out-dir", str(out_dir)]
         for lens in lenses:
@@ -389,7 +402,8 @@ class TestCiGateDefaults(CiGateFixture):
     def run_gate_defaults(self, head: str, pr: int = 42):
         return subprocess.run(
             [sys.executable, str(CI_GATE_PY),
-             "--repo", str(self.repo), "--pr", str(pr), "--head", head],
+             "--repo", str(self.repo), "--pr", str(pr), "--head", head,
+             "--base", self.base],
             capture_output=True, text=True, env=self.env)
 
     def test_bare_invocation_uses_committed_panel_defaults(self):
@@ -402,7 +416,7 @@ class TestCiGateDefaults(CiGateFixture):
         proc = self.run_gate_defaults(self.head)
         self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
         self.assertIn("review record gate: OK (PR 42, 1 record(s), head "
-                      + self.head + ")", proc.stdout)
+                      + self.head, proc.stdout)
 
     def test_bare_invocation_panel_mismatch_refused(self):
         self.render_full_panel()
@@ -465,7 +479,7 @@ class TestCiGateManifestRecord(CiGateFixture):
         self.assertIn("review record gate: OK", proc.stdout)
 
     def test_manifest_record_package_deleted_passes_at_record_tail(self):
-        rel, _ = self.render_with_manifest(pinned_head=self.fix_a)
+        rel, _ = self.render_with_manifest()
         self.pkg.unlink()
         tail = self.commit_record(rel)
         proc = self.run_gate(tail)
@@ -480,11 +494,102 @@ class TestCiGateManifestRecord(CiGateFixture):
         proc = subprocess.run(
             [sys.executable, str(CI_GATE_PY),
              "--repo", str(self.repo), "--pr", "42", "--head", self.head,
+             "--base", self.base,
              "--records-root", "review", "--panel", str(self.panel)],
             capture_output=True, text=True, env=self.env,
             cwd=str(self.dir))
         self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
         self.assertIn("review record gate: OK", proc.stdout)
+
+
+class TestCiGateCoverage(CiGateFixture):
+    """Full-change coverage: a record at the head whose package covered only
+    part of the PR is refused (S3.5b external review P1)."""
+
+    def render_narrow(self) -> tuple[str, dict]:
+        """Render a record whose package covers only ``fix_a..head``."""
+        out_dir = self.repo / "review/record"
+        manifest = self.dir / "manifest-narrow.json"
+        pkg = self.repo / "package-narrow.md"
+        proc = subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build",
+             "--repo", str(self.repo), "--base", self.fix_a,
+             "--head", self.head, "--out", str(pkg),
+             "--manifest-out", str(manifest)],
+            capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.pkg = pkg
+        self.pkg_sha = proc.stdout.splitlines()[1].split(
+            "package_sha256: ", 1)[1]
+        self.pkg_head = self.head
+        self.pkg_base = self.fix_a  # the narrow package's real base
+        findings = self.write_findings(
+            "review-adversary", [self.finding("RA-001")])
+        disp = self.write_dispositions(
+            [{"id": "RA-001@test-model-v1", "disposition": "fixed",
+              "fix_sha": self.fix_a}])
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.fix_a, "--head", self.head,
+            "--package", str(pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings}",
+            "--model", "review-adversary=test-model-v1",
+            "--package-manifest", str(manifest),
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(out_dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        return "review/record", json.loads(
+            (out_dir / "review.json").read_text(encoding="utf-8"))
+
+    def test_partial_package_refused_naming_uncovered_path(self):
+        self.render_narrow()  # a.txt was never in this package
+        proc = self.run_gate(self.head)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("never packaged for review", proc.stderr)
+        self.assertIn("a.txt", proc.stderr)
+
+    def test_head_only_package_refused(self):
+        """--include one file (or a tail package) cannot prove coverage."""
+        out_dir = self.repo / "review/record"
+        manifest = self.dir / "manifest-inc.json"
+        pkg = self.repo / "package-inc.md"
+        proc = subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build",
+             "--repo", str(self.repo), "--base", self.base,
+             "--head", self.head, "--include", "b.txt",
+             "--out", str(pkg), "--manifest-out", str(manifest)],
+            capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.pkg = pkg
+        self.pkg_sha = proc.stdout.splitlines()[1].split(
+            "package_sha256: ", 1)[1]
+        self.pkg_head = self.head
+        findings = self.write_findings(
+            "review-adversary", [self.finding("RA-001")])
+        disp = self.write_dispositions(
+            [{"id": "RA-001@test-model-v1", "disposition": "fixed",
+              "fix_sha": self.fix_a}])
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.base, "--head", self.head,
+            "--package", str(pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings}",
+            "--model", "review-adversary=test-model-v1",
+            "--package-manifest", str(manifest),
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(out_dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        proc = self.run_gate(self.head)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("a.txt", proc.stderr)
+
+    def test_record_dir_tail_is_excluded_from_coverage(self):
+        """The record commit's own files are not review inputs: a full
+        package + record-only tail passes with --base."""
+        rel, _ = self.render_ok()
+        tail = self.commit_record(rel)
+        proc = self.run_gate(tail)
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
 
 
 class TestCiGateUsage(CiGateFixture):

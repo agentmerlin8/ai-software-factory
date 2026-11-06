@@ -72,12 +72,14 @@ GATES: tuple[dict[str, str], ...] = (
         "purpose": "The PR's review record: valid record at the head (exact "
                    "or record-only tail), no undispositioned blocker/major, "
                    "verdict consistent, internal panel equals the declared "
-                   "panel",
+                   "panel, and full-change coverage — every path changed "
+                   "base...head was packaged for review and the manifest "
+                   "rebuilds",
         "script": "review/ci_gate.py",
         "invocation": "python3 factory/tools/review/ci_gate.py --repo . "
-                      "--pr <n> --head <sha>",
+                      "--pr <n> --head <sha> --base <sha>",
         "when": "on every pull request (required check)",
-        "exit": "0 = a valid record at the head with the declared panel; "
-                "non-zero = named refusal",
+        "exit": "0 = a valid record at the head with the declared panel "
+                "and full-change coverage; non-zero = named refusal",
     },
 )

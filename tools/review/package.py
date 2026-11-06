@@ -171,8 +171,14 @@ def changed_statuses(repo, base: str, head: str):
     C-quoting, so quotes/backslashes/tabs/newlines in filenames parse back
     to the real path instead of feeding the per-file diff a quoted name.
     """
+    # Three-dot range: the change on top of its merge base with ``base``.
+    # A forge's PR base is the base BRANCH tip, which may be ahead of the
+    # branch point; a two-dot diff would then fold unrelated main-branch
+    # changes into the package, and a record built from one clone would not
+    # describe the same change as the required check (S3.5b external review
+    # P1: coverage must mean the PR's own change).
     proc = git(repo, "-c", "core.quotepath=false", "diff", "--no-renames",
-               "--name-status", "-z", base, head)
+               "--name-status", "-z", f"{base}...{head}")
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip()
                            or "git diff --name-status failed")
@@ -195,7 +201,7 @@ def numstat_rows(repo, base: str, head: str):
     embedded tabs or newlines no longer break record boundaries either.
     """
     proc = git(repo, "-c", "core.quotepath=false", "diff", "--no-renames",
-               "--numstat", "-z", base, head)
+               "--numstat", "-z", f"{base}...{head}")
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip()
                            or "git diff --numstat failed")
@@ -220,7 +226,7 @@ def file_diff_text(repo, base: str, head: str, path: str) -> str:
                "--literal-pathspecs",
                "-c", "diff.renames=false", "-c", "core.quotepath=false",
                "diff", "--no-renames", "--no-color", "--no-ext-diff",
-               "--full-index", "-U3", base, head, "--", path)
+               "--full-index", "-U3", f"{base}...{head}", "--", path)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip()
                            or f"git diff failed for {path}")
@@ -283,13 +289,21 @@ def render_input_block(path: str, label: str, data: bytes,
             f"{marker}{lang}\n{payload}{marker}\n")
 
 
-def render_inputs(specs: list[str], max_input_bytes: int) -> str:
+def render_inputs(specs: list[str], max_input_bytes: int,
+                  display=None) -> str:
+    """Render input blocks.  ``display`` maps the resolved ``path`` to the
+    heading form only — file resolution keeps using the spec's own path, so
+    a package built from an absolute in-repo spec renders the same heading a
+    rebuild from its relative manifest form produces (S3.5b external review:
+    the original package embedded the absolute path and could not rebuild).
+    """
     if not specs:
         return ""
     blocks = []
     for spec in specs:
         path, label = split_spec(spec)
-        blocks.append(render_input_block(path, label, read_input_bytes(path),
+        shown = display(path) if display is not None else path
+        blocks.append(render_input_block(shown, label, read_input_bytes(path),
                                          max_input_bytes))
     return "\n".join(blocks)
 
@@ -361,21 +375,62 @@ def render_section(heading: str, payload: str) -> str:
     return f"## {heading}\n"
 
 
-def canonical_repo_url(url: str) -> str:
-    """Canonical Identity form for a remote origin.
+SCP_ORIGIN_RE = re.compile(r"^(?:[^@/]+@)?(?P<host>[^:/]+):(?P<path>.+)$")
 
-    GitHub Actions checks out with ``https://host/owner/repo`` while a local
-    clone normally carries ``…/repo.git``; both name the same repository.  A
-    package must rebuild byte-identically from either clone, so the Identity
-    line always carries the ``.git`` form (S3.5b round 3: the required CI
-    check surfaced the two-clone hash split).
+
+def canonical_repo_url(url: str) -> str:
+    """Canonical Identity form for a remote origin — transport-independent.
+
+    One repository has one identity no matter how it was cloned.  GitHub
+    Actions checks out ``https://host/owner/repo``, a local clone carries
+    ``…/repo.git``, and an SSH clone carries ``git@host:owner/repo.git``;
+    all three name the same repository and must produce the same Identity
+    line, or a record built from one clone fails the required check when it
+    is rebuilt from another (S3.5b: the round-3 fix only unified the
+    ``.git`` suffix and left the transport in the hash).
+
+    Every form collapses to ``https://host/owner/repo.git``.  A value that
+    is not a URL and not scp-like (a bare local path) keeps the historical
+    ``.git`` suffix rule.
     """
-    value = url.rstrip("/")
+    value = url.strip().rstrip("/")
+    if not value:
+        return value
+    if "://" in value:
+        try:
+            parsed = urllib.parse.urlsplit(value)
+        except ValueError:
+            return value if value.endswith(".git") else value + ".git"
+        host = parsed.hostname or ""
+        if not host:
+            return value if value.endswith(".git") else value + ".git"
+        if ":" in host and not host.startswith("["):  # IPv6 literal
+            host = f"[{host}]"
+        port = f":{parsed.port}" if parsed.port else ""
+        path = parsed.path.rstrip("/")
+        if not path.endswith(".git"):
+            path += ".git"
+        return urllib.parse.urlunsplit(("https", f"{host}{port}", path,
+                                        "", ""))
+    if not value.startswith("/"):
+        match = SCP_ORIGIN_RE.match(value)
+        if match:  # git@host:owner/repo[.git] / host:owner/repo
+            path = "/" + match.group("path").lstrip("/")
+            if not path.endswith(".git"):
+                path += ".git"
+            return f"https://{match.group('host')}{path}"
     return value if value.endswith(".git") else value + ".git"
 
 
-def compose_package(args) -> tuple[str, str]:
-    """Build package text + its sha256. Raises SystemExit on refusals."""
+def compose_package(args, coverage: dict | None = None) -> tuple[str, str]:
+    """Build package text + its sha256. Raises SystemExit on refusals.
+
+    ``coverage``, when given, is filled with what this package actually
+    SHIPPED: ``{"shipped": [...], "omitted": [...], "binary": [...],
+    "changed": [...]}``.  The record binds those lists so the required check
+    can prove full-PR coverage instead of trusting the package's range
+    (S3.5b external review P1: a ``--include``/tail package qualified).
+    """
     base = resolve_sha(args.repo, args.base)
     if base is None:
         fail(f"review package: unresolvable base sha: {args.base}")
@@ -459,6 +514,16 @@ def compose_package(args) -> tuple[str, str]:
     included = blocks[:cutoff]
     omitted = blocks[cutoff:]
 
+    if coverage is not None:
+        # What this package actually reviewed.  `changed` is the filtered
+        # set the builder considered (include/allowed/withheld applied);
+        # `shipped` is what survived the byte cap.  A record binds both so
+        # a later reader never has to re-derive the truncation arithmetic.
+        coverage["changed"] = sorted(path for _, path in statuses)
+        coverage["shipped"] = sorted(path for path, _, _ in included)
+        coverage["omitted"] = sorted(path for path, _, _ in omitted)
+        coverage["binary"] = list(binary_paths)
+
     origin = remote_origin_url(args.repo)
     if origin is not None:
         origin = canonical_repo_url(strip_userinfo(origin))
@@ -486,16 +551,23 @@ def compose_package(args) -> tuple[str, str]:
     stat_lines = [f"{a}\t{d}\t{p}\n" for a, d, p in stats]
     stat_lines.append(f"total: {len(blocks)} files, +{insertions} -{deletions}\n")
 
+    root = Path(args.repo).resolve()
+
+    def display_input_path(path: str) -> str:
+        return relative_in_repo(root, path)
+
     body = (
         title + "\n"
         + render_section("Identity", identity) + "\n"
         + render_section("Scope", scope) + "\n"
         + render_section("Contract inputs",
                          render_inputs(args.contract or [],
-                                       args.max_input_bytes)) + "\n"
+                                       args.max_input_bytes,
+                                       display=display_input_path)) + "\n"
         + render_section("Gate evidence",
                          render_inputs(args.gate or [],
-                                       args.max_input_bytes)) + "\n"
+                                       args.max_input_bytes,
+                                       display=display_input_path)) + "\n"
         + render_section("Diff stat", "".join(stat_lines)) + "\n"
         + render_section("Diff", "\n".join(text for _, _, text in included))
     )
@@ -517,6 +589,23 @@ def parse_package_hash(data: bytes, path: str) -> str:
     return match.group(1)
 
 
+def relative_in_repo(root: Path, path: str) -> str:
+    """Repo-relative POSIX form when ``path`` resolves inside ``root``,
+    else the path unchanged.  Used for BOTH the rendered package headings
+    and the manifest specs, so a package built from an absolute in-repo
+    spec rebuilds byte-identically from its relative manifest form."""
+    candidate = Path(path)
+    resolved = (candidate if candidate.is_absolute() else root / candidate)
+    try:
+        resolved = resolved.resolve()
+    except OSError:
+        return path
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return path
+
+
 def _normalized_specs(repo, specs: list[str]) -> list[str]:
     """Store manifest inputs repo-relative so a rebuild never depends on the
     caller's cwd.  Absolute paths inside the repo are relativized; anything
@@ -525,10 +614,7 @@ def _normalized_specs(repo, specs: list[str]) -> list[str]:
     out: list[str] = []
     for spec in specs:
         path, label = split_spec(spec)
-        candidate = Path(path)
-        resolved = (candidate if candidate.is_absolute()
-                    else root / candidate).resolve()
-        rel = resolved.relative_to(root).as_posix()
+        rel = relative_in_repo(root, path)
         out.append(f"{rel}:{label}" if ":" in spec else rel)
     return out
 

@@ -82,6 +82,18 @@ from tools.review.yamlish import YamlishError, loads as yamlish_loads
 
 SCHEMA = "review.record.v2"
 LEGACY_SCHEMA = "review.record.v1"
+
+# Emitted into every rendered record directory: review packages embed the
+# reviewed diff and must never be committed, wherever the record lives
+# (kit self-build reviews and control-home stories/<id>/review alike).
+PACKAGE_IGNORE_TEXT = (
+    "# Review packages embed the reviewed diff; they are never committed.\n"
+    "# The record stores the package manifest instead.\n"
+    "package*.md\n"
+    "pkg*.md\n"
+    "package-manifest*.json\n"
+)
+
 LANE_NAME = "review-lane-v1"
 LANE_VERSION = 2
 LEGACY_LANE_VERSION = 1
@@ -362,8 +374,9 @@ def _manifest_input_spec(repo, spec: str) -> str:
     return f"{resolved.relative_to(root).as_posix()}:{label}"
 
 
-def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
-    """Rebuild the package bytes + digest from a manifest.
+def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str,
+                                                                 dict]:
+    """Rebuild the package bytes + digest + coverage from a manifest.
 
     The builder is byte-deterministic, so a rebuild from the manifest's
     resolved inputs is a real oracle even when no package file exists (the
@@ -398,10 +411,11 @@ def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
             args.withheld = withheld_file
         stderr = io.StringIO()
         cwd = os.getcwd()
+        coverage: dict = {}
         try:
             os.chdir(repo)  # repo-relative specs resolve identically
             with contextlib.redirect_stderr(stderr):
-                text, digest = compose_package(args)
+                text, digest = compose_package(args, coverage=coverage)
         except SystemExit:
             detail = stderr.getvalue().strip() or "builder exited nonzero"
             fail(f"review record: package rebuild failed: {detail}")
@@ -409,7 +423,7 @@ def rebuild_package_from_manifest(repo, manifest: dict) -> tuple[bytes, str]:
             fail(f"review record: package rebuild failed: {exc}")
         finally:
             os.chdir(cwd)
-    return text.encode("utf-8"), digest
+    return text.encode("utf-8"), digest, coverage
 
 
 def verify_cli_range(repo, cli_base: str, cli_head: str, pkg: PackageInfo) -> None:
@@ -725,7 +739,12 @@ def _paths_in_text(text: str) -> list[str]:
 
 
 def fix_sha_violations(entries: list[dict], by_id: dict, repo) -> list[str]:
-    """Violations for every `fixed` disposition, each naming its finding id."""
+    """Violations for every `fixed` disposition, each naming its finding id.
+
+    Reachability from the PR head is NOT checked here: the authority does
+    not know the forge's head.  record_gate.fix_reachability_errors owns
+    that rule for every gate that does (S3.5b external review P1).
+    """
     bad: list[str] = []
     for entry in entries:
         if entry["disposition"] != "fixed":
@@ -938,8 +957,16 @@ def compose_record(args, parser: argparse.ArgumentParser) -> dict:
     if getattr(args, "package_manifest", None):
         # The manifest makes the record self-verifying without the package
         # file (packages are never committed): check rebuilds from it.
-        package_entry["manifest"] = load_package_manifest(
-            args.package_manifest, pkg.base_sha, pkg.head_sha)
+        manifest = load_package_manifest(args.package_manifest,
+                                        pkg.base_sha, pkg.head_sha)
+        package_entry["manifest"] = manifest
+        # A manifest that does not reproduce this package must be refused
+        # now, not at merge time.
+        _, rebuilt_digest, _ = rebuild_package_from_manifest(
+            args.repo, manifest)
+        if rebuilt_digest != pkg.sha256:
+            fail("review record: package manifest does not rebuild the "
+                 f"package: recorded {pkg.sha256}, rebuilt {rebuilt_digest}")
 
     return {
         "schema": SCHEMA,
@@ -1164,6 +1191,13 @@ def cmd_render(args, parser: argparse.ArgumentParser) -> int:
         (out_dir / "review.json").write_bytes(json_text.encode("utf-8"))
         (out_dir / f"REVIEW-{record['pr']}.md").write_bytes(
             markdown_text.encode("utf-8"))
+        # Packages embed the reviewed diff and are NEVER committed. The
+        # ignore lives INSIDE the record dir so it travels with the record
+        # into any control home, independent of the enclosing repo's rules
+        # (S3.5b external review: stories/<id>/review/package.md was
+        # stageable where only kit-v0.1/reviews/** was ignored).
+        (out_dir / ".gitignore").write_bytes(
+            PACKAGE_IGNORE_TEXT.encode("utf-8"))
     except OSError:
         fail(f"review record: out dir not writable: {os.path.abspath(args.out_dir)}")
     print(f"review record: rendered ({len(record['findings'])} finding(s), "
@@ -1280,8 +1314,8 @@ def cmd_check(args) -> int:
         # Self-verifying record (S3.5b T1): rebuild from the manifest and
         # parse the rebuilt bytes — no package file required.
         stored_path = resolve_record_path(data["package"]["path"], args.repo)
-        rebuilt_bytes, rebuilt_digest = rebuild_package_from_manifest(
-            args.repo, manifest)
+        rebuilt_bytes, rebuilt_digest, _ = \
+            rebuild_package_from_manifest(args.repo, manifest)
         if rebuilt_digest != data["package"]["sha256"]:
             fail(f"review record: package rebuild mismatch: recorded "
                  f"{data['package']['sha256']}, rebuilt {rebuilt_digest}")

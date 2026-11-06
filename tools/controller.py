@@ -652,10 +652,16 @@ class Controller:
 
     def _put_record_checks(self, put, rel: str, rec: Path | None,
                            record: dict | None, errs: list[str],
-                           head_ev: str | None) -> None:
+                           head_ev: str | None, sid: str) -> None:
         """The shared READY_FOR_REVIEW / MERGE_ELIGIBLE record keys:
-        review_record_valid, review_head_match, no_open_blocker_major."""
+        review_record_valid, review_head_match, review_record_pr,
+        no_open_blocker_major."""
         head_errs = [e for e in errs if e.startswith("head rule")]
+        # Everything that is not the head rule is an AUTHORITY failure: the
+        # record is not valid evidence, so its findings/dispositions must
+        # not be interpreted at all (S3.5b external review P2: a malformed
+        # record reached the iteration and raised TypeError).
+        authority_errs = [e for e in errs if not e.startswith("head rule")]
         if record is None:
             # An unreadable record cannot establish a head match: fail the
             # named check instead of letting an empty error list read green.
@@ -667,10 +673,26 @@ class Controller:
                 head_errs or (f"record valid at head {head_ev!r} (exact match, "
                               "record-tail commits, or a v1 ancestor)"
                               if head_ev else "head rule not evaluated"))
-        if record is None:
+        # The record must belong to THIS story's PR, not merely sit at a
+        # head this story also occupies: without this, a valid record for a
+        # sibling PR at the same head (or a qualifying v1 ancestor) is
+        # substituted at the later transitions (S3.5b external review P1).
+        pr_expect = self._draft_opened_pr(sid)
+        rec_pr = (record or {}).get("pr")
+        put("review_record_pr",
+            pr_expect is not None and str(rec_pr) == pr_expect,
+            (f"record pr={rec_pr!r} must equal the DRAFT_OPENED "
+             f"pr_number={pr_expect!r}" if pr_expect is not None
+             else "the story carries no DRAFT_OPENED pr_number — the PR "
+                  "binding cannot be established (fail closed; a historical "
+                  "row needs its pr_number backfilled at DRAFT_OPENED)"))
+        if record is None or authority_errs:
             put("no_open_blocker_major", False,
-                "record unreadable — open blocker/major findings cannot be "
-                "ruled out (fail closed)")
+                ("record unreadable" if record is None
+                 else "record rejected by the authority: "
+                      + "; ".join(authority_errs))
+                + " — open blocker/major findings cannot be ruled out "
+                  "(fail closed)")
         else:
             open_bm = record_gate.open_blocker_majors(record)
             put("no_open_blocker_major", not open_bm,
@@ -970,7 +992,8 @@ class Controller:
                 f"review_head_sha={head_ev!r} (must resolve in the repo "
                 "object DB)")
             rec, record, errs = self._review_evidence(rel, head_ev)
-            self._put_record_checks(put, rel, rec, record, errs, head_ev)
+            self._put_record_checks(put, rel, rec, record, errs, head_ev,
+                                    sid)
 
         if to == "MERGE_ELIGIBLE":
             tested, head = ev.get("tested_sha", ""), ev.get("head_sha", "")
@@ -1023,7 +1046,7 @@ class Controller:
             # record-only tail (v2), or a v1 ancestor.
             rel = ev.get("review_record", "")
             rec, record, errs = self._review_evidence(rel, head)
-            self._put_record_checks(put, rel, rec, record, errs, head)
+            self._put_record_checks(put, rel, rec, record, errs, head, sid)
 
         if to == "MERGED":
             sha = ev.get("merged_sha", "")

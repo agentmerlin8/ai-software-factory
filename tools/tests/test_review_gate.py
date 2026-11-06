@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools.review import record as record_mod
 from tools.review import record_gate
@@ -62,8 +63,13 @@ class RecordFixture(unittest.TestCase):
         (self.repo / "a.txt").write_text("alpha\nbeta\ngamma\n",
                                          encoding="utf-8")
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", "commit three: fix a.txt")
+        self.git("commit", "-q", "-m", "commit two: fix a.txt")
         self.fix_a = self.rev_parse("HEAD")
+
+        (self.repo / "b.txt").write_text("beta file\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "commit three: the reviewed head")
+        self.head = self.rev_parse("HEAD")
         self.pkg_head = self.head  # default package pin until built
 
         self.gate_path = self.repo / "gate-lint.txt"
@@ -242,10 +248,9 @@ class TestEvaluateRealRecords(RecordFixture):
         self.assertIn("review record gate:", errs[0])
 
     def test_record_tail_commit_passes_code_commit_fails(self):
-        # pin the record at fix_a (current HEAD) so the only later commits
-        # are ours: the record-dir commit is the tail, the code commit is
-        # outside it.
-        rel, _ = self.render_ok(pinned_head=self.fix_a)
+        # the record is pinned at the reviewed head; the only later commit
+        # is the record tail, then a code commit breaks the rule.
+        rel, _ = self.render_ok()
         # committing ONLY the record dir is the record-tail: every changed
         # path between the record head and the new head is under <rel>/
         tail = self.commit_record(rel)
@@ -265,7 +270,7 @@ class TestEvaluateRealRecords(RecordFixture):
                             for e in errs), errs)
 
     def test_v1_ancestor_head_only_with_flag(self):
-        rel, data = self.render_ok(pinned_head=self.fix_a)
+        rel, data = self.render_ok()
         self.to_v1(rel, data)
         tail = self.commit_record(rel)  # later than the record head
         # with the flag: merge-base --is-ancestor passes
@@ -278,7 +283,7 @@ class TestEvaluateRealRecords(RecordFixture):
         self.assertTrue(any("head rule" in e for e in errs), errs)
         # exact head still passes without the flag
         errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
-                                    pr_head=self.fix_a)
+                                    pr_head=self.head)
         self.assertEqual(errs, [])
 
     def test_non_ancestor_pr_head_with_clean_two_dot_diff_refused(self):
@@ -286,21 +291,22 @@ class TestEvaluateRealRecords(RecordFixture):
         even when the two-dot diff <record_head>..<pr_head> shows only
         record-directory changes (S3.5b fix: ancestry gates the tail rule).
         """
-        rel, _ = self.render_ok(pinned_head=self.fix_a)
+        rel, _ = self.render_ok()
         tail = self.commit_record(rel)
         # divergent branch from BEFORE the record head: its tree differs
         # from tail only under the record directory, so the two-dot diff
         # is clean — but it is not a descendant of tail.
-        self.git("checkout", "-q", "-b", "divergent", self.head)
-        # match tail's tree content OUTSIDE the record dir (fix_a's a.txt)
-        # so the two-dot diff shows record-directory changes only
+        self.git("checkout", "-q", "-b", "divergent", self.fix_a)
+        # match tail's tree content OUTSIDE the record dir (head's a.txt
+        # and b.txt) so the two-dot diff shows record-directory changes only
         (self.repo / "a.txt").write_text("alpha\nbeta\ngamma\n",
                                          encoding="utf-8")
+        (self.repo / "b.txt").write_text("beta file\n", encoding="utf-8")
         rec_dir = self.repo / rel
         rec_dir.mkdir(parents=True, exist_ok=True)
         (rec_dir / "extra-note.md").write_text("divergent record file\n",
                                                encoding="utf-8")
-        self.git("add", "a.txt", rel)
+        self.git("add", "a.txt", "b.txt", rel)
         self.git("commit", "-q", "-m", "divergent record-only commit")
         divergent = self.rev_parse("HEAD")
         self.git("checkout", "-q", "main")
@@ -336,13 +342,18 @@ class TestEvaluateRealRecords(RecordFixture):
         self.rewrite(rel, data)
         errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
                                     pr_head=self.head)
-        self.assertTrue(any("head rule" in e and "unusable record head" in e
+        # The authority refuses the malformed head first; the gate never
+        # interprets a record the authority rejected (S3.5b external P2).
+        self.assertTrue(any("head_sha" in e and "40 lowercase hex" in e
                             for e in errs), errs)
 
     def test_open_blocker_major_fails_evaluate(self):
         rel, data = self.render_ok()
         # an undispositioned blocker: verdict recomputed consistently so
-        # the authority's own verdict rule passes but the gate rule bites
+        # the authority's own verdict rule passes but the gate rule bites.
+        # The authority is stubbed because a real record cannot carry an
+        # undispositioned blocker (render refuses it); this isolates the
+        # gate's own safety net.
         data["findings"].append({
             **self.finding("RA-009", severity="blocker"),
             "id": "RA-009@test-model-v1", "source": "internal",
@@ -352,8 +363,9 @@ class TestEvaluateRealRecords(RecordFixture):
         data["verdict"] = {**data["verdict"], "decision":
                            "CHANGES_REQUESTED", "blockers": 1}
         self.rewrite(rel, data)
-        errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
-                                    pr_head=self.head)
+        with mock.patch.object(record_gate, "check_record", return_value=[]):
+            errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
+                                        pr_head=self.head)
         self.assertTrue(any("open blocker/major" in e for e in errs), errs)
         self.assertTrue(any("RA-009@test-model-v1" in e for e in errs), errs)
 

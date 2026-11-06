@@ -58,12 +58,22 @@ python3 factory/tools/review/record.py render \
 python3 factory/tools/review/record.py check --record <record-dir> --repo .
 
 # 4. the review-record required check (CI runs this on every PR)
-python3 factory/tools/review/ci_gate.py --repo . --pr <N> --head <HEAD_SHA>
+#    --base is the forge's PR base: full-change coverage diffs base...head
+python3 factory/tools/review/ci_gate.py --repo . --pr <N> \
+  --head <HEAD_SHA> --base <BASE_SHA>
 ```
 
 All findings docs, gate evidence and the record live under ONE record
 directory (`stories/<id>/review/` in a control home) so the post-review tail
 commit is record-only.
+
+The record directory carries a generated `.gitignore` that covers every
+package artifact name (`package*.md`, `pkg*.md`,
+`package-manifest*.json`). Packages embed the reviewed diff and are never
+committed: stage record paths by name, never the whole record directory
+with `git add -A`, and never remove that `.gitignore` — it is the
+never-commit boundary for control homes, whose enclosing repository has no
+kit-specific ignore rules.
 
 ## Model allocation policy
 

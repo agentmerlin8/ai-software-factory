@@ -81,10 +81,24 @@ def transition_row(eid: str, sid: str, frm: str, to: str,
 
 
 def chain_to(state: str, sid: str = STORY) -> list[dict]:
-    """Seeded story-level transitions BACKLOG -> ... -> `state`."""
+    """Seeded story-level transitions BACKLOG -> ... -> `state`.
+
+    The DRAFT_OPENED row carries its evidence detail (pr 42, review-lane):
+    the later record gates bind the selected record to that persisted PR.
+    """
     rows = []
     for i, (frm, to) in enumerate(CHAIN, 1):
-        rows.append(transition_row(f"tr-{sid}-{i}", sid, frm, to))
+        if to == "DRAFT_OPENED":
+            rows.append(transition_row(
+                f"tr-{sid}-{i}", sid, frm, to, check_results={
+                    "order": {"ok": True, "detail": "ok"},
+                    "evidence_supplied": {
+                        "ok": True,
+                        "detail": {"pr_number": "42",
+                                   "review_request_mechanism": "review-lane"}},
+                }))
+        else:
+            rows.append(transition_row(f"tr-{sid}-{i}", sid, frm, to))
         if to == state:
             break
     return rows

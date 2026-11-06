@@ -292,6 +292,31 @@ class _GitFixtureTest(unittest.TestCase):
         self.assertTrue((out / "REVIEW-42.md").is_file())
         self.assertFalse((out / "REVIEW-7.md").exists())
 
+    def test_render_emits_record_local_gitignore_for_packages(self) -> None:
+        """Packages are never committed, wherever the record lives: the
+        renderer writes the ignore INSIDE the record dir (S3.5b external
+        review: a control-home stories/<id>/review/package.md was stageable
+        because only kit-v0.1/reviews/** was ignored)."""
+        out = Path(self.repo / "rec-ignore")
+        proc = self.render(out_dir=str(out))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        text = (out / ".gitignore").read_text(encoding="utf-8")
+        for pattern in ("package*.md", "pkg*.md", "package-manifest*.json"):
+            self.assertIn(pattern, text)
+        # honest under git's own matcher, not just our intent
+        for name in ("package.md", "pkg-r2.md", "package-manifest.json"):
+            (out / name).write_text("x", encoding="utf-8")
+            ignored = subprocess.run(
+                ["git", "-C", str(self.repo), "check-ignore", "-q",
+                 str(out / name)], env=self.env)
+            self.assertEqual(ignored.returncode, 0, name)
+        # the record's own artifacts are NOT ignored
+        for name in ("review.json", "REVIEW-42.md"):
+            ignored = subprocess.run(
+                ["git", "-C", str(self.repo), "check-ignore", "-q",
+                 str(out / name)], env=self.env)
+            self.assertEqual(ignored.returncode, 1, name)
+
     def test_review_json_canonical_bytes_and_schema(self) -> None:
         out, data, _ = self.render_ok()
         raw = (out / "review.json").read_bytes().decode("utf-8")

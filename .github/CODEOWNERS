@@ -1,0 +1,9 @@
+# Trust boundaries: the review gate, its authority, the declared panel and
+# the workflow that enforces them. Changing any of these can weaken the
+# required review check, so they need an owner review.
+#
+# CODEOWNERS is advisory unless the branch protection rule requires
+# code-owner review ("Require review from Code Owners" on main).
+/.github/workflows/  @agentmerlin8-ops
+/tools/review/       @agentmerlin8-ops
+/kit-v0.1/review-panel.toml  @agentmerlin8-ops

@@ -112,11 +112,21 @@ def _disposition_clears(entry: dict) -> bool:
 
 def open_blocker_majors(record: dict) -> list[str]:
     """Ids of blocker|major findings with no CLEARING disposition entry
-    (match by disposition.id == finding.id; see _disposition_clears)."""
-    dispositioned = {d.get("id") for d in record.get("dispositions", [])
+    (match by disposition.id == finding.id; see _disposition_clears).
+
+    A record whose findings/dispositions are not lists is NOT "clean": it is
+    uninterpretable, and returning [] would read as a pass.  The sentinel
+    below is a non-empty result so every caller fails closed (S3.5b external
+    review P2: `"dispositions": null` reached the iteration and raised).
+    """
+    dispositions = record.get("dispositions", [])
+    findings = record.get("findings", [])
+    if not isinstance(dispositions, list) or not isinstance(findings, list):
+        return ["<malformed record: findings/dispositions must be lists>"]
+    dispositioned = {d.get("id") for d in dispositions
                      if isinstance(d, dict) and _disposition_clears(d)}
     out = []
-    for f in record.get("findings", []):
+    for f in findings:
         if not isinstance(f, dict):
             continue
         if f.get("severity") in ("blocker", "major") and \
@@ -153,7 +163,11 @@ def head_rule_errors(record: dict, repo: str, record_dir: str,
             return [f"head rule: record head {record_head} is not an "
                     f"ancestor of pr head {pr_head} (the record-tail rule "
                     "only covers commits AFTER the reviewed head)"]
-        proc = _git(repo, "diff", "--name-only",
+        # --no-renames: with rename detection a reviewed source file MOVED
+        # into the record directory reports only its destination path, so
+        # the deletion outside the record dir is invisible and an old
+        # record passes for a new head (S3.5b external review P1).
+        proc = _git(repo, "diff", "--name-only", "--no-renames",
                     f"{record_head}..{pr_head}")
         if proc.returncode != 0:
             err = proc.stderr.strip().decode("utf-8", "replace")
@@ -183,11 +197,70 @@ def head_rule_errors(record: dict, repo: str, record_dir: str,
             f"{record_head} (exact match required for {schema!r})"]
 
 
+def _resolve_commit(repo: str, sha: str) -> str | None:
+    """Full 40-hex commit id for ``sha``, or None when it does not resolve."""
+    proc = _git(repo, "rev-parse", "--verify", "--quiet",
+                f"{sha}^{{commit}}")
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode("utf-8", "replace").strip() or None
+
+
+def fix_reachability_errors(record: dict, repo: str,
+                            pr_head: str) -> list[str]:
+    """A `fixed` disposition must cite a commit on the PR's own history.
+
+    The authority proves the commit resolves and touches the cited file,
+    but it cannot see the forge's head — so a fix pushed to some other
+    branch cleared an unfixed finding at the evaluated head (S3.5b external
+    review P1).  Reachability is judged against the PR head because that is
+    the only head a merge depends on.
+    """
+    out: list[str] = []
+    findings = record.get("findings")
+    dispositions = record.get("dispositions")
+    if not isinstance(findings, list) or not isinstance(dispositions, list):
+        return []  # shape errors belong to the authority, not here
+    for entry in dispositions:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("disposition") != "fixed":
+            continue
+        sha = entry.get("fix_sha")
+        if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+            continue  # format/format-error is the authority's named refusal
+        full = _resolve_commit(repo, sha)
+        if full is None:
+            continue  # unresolvable fix_sha: the authority already refused
+        proc = _git(repo, "merge-base", "--is-ancestor", full, pr_head)
+        if proc.returncode != 0:
+            out.append(
+                f"review record gate: fixed disposition {entry.get('id')!r} "
+                f"cites {sha}, which is not reachable from pr head {pr_head} "
+                f"— a fix on another branch cannot clear a finding")
+    return out
+
+
 def _git(repo: str, *args: str) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["LC_ALL"] = "C"
     return subprocess.run(["git", "-C", str(repo), *args],
                           capture_output=True, env=env)
+
+
+def changed_paths(repo: str, base: str, head: str) -> list[str] | None:
+    """Paths changed by the change on top of its merge base with ``base``
+    (``git diff base...head``), renames DISABLED so a rename appears as a
+    delete plus an add.  None when git cannot answer — callers must treat
+    that as a refusal, never as "no files changed".
+    """
+    proc = _git(repo, "-c", "core.quotepath=false", "diff", "--name-only",
+                "--no-renames", f"{base}...{head}")
+    if proc.returncode != 0:
+        return None
+    return sorted({line for line in
+                   proc.stdout.decode("utf-8", "replace").splitlines()
+                   if line.strip()})
 
 
 def evaluate(record_dir: str, repo: str, pr_head: str | None,
@@ -208,6 +281,13 @@ def evaluate(record_dir: str, repo: str, pr_head: str | None,
     except ValueError as exc:
         return [str(exc)]
     errs.extend(check_record(str(rec), repo))
+    if errs:
+        # Fail closed: an authority failure means the record is not valid
+        # evidence, so nothing below may INTERPRET it.  Continuing let a
+        # malformed record (`"dispositions": null`) raise TypeError instead
+        # of returning a named refusal, and let derived checks read a
+        # record the authority had already rejected (S3.5b external P2).
+        return errs
     if pr_head is not None:
         # the tail rule matches repo-relative POSIX paths: derive them when
         # the caller passed an absolute record dir
@@ -217,6 +297,7 @@ def evaluate(record_dir: str, repo: str, pr_head: str | None,
             rel = record_dir
         errs.extend(head_rule_errors(record, repo, rel, pr_head,
                                      allow_v1_ancestor))
+        errs.extend(fix_reachability_errors(record, repo, pr_head))
     open_bm = open_blocker_majors(record)
     if open_bm:
         errs.append("review record gate: open blocker/major findings "

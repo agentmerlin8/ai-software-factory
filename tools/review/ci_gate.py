@@ -176,6 +176,7 @@ def coverage_errors(repo: Path, base: str, head: str,
         if rel and not rel.startswith("/"):
             excluded.append(rel + "/")
     covered: set[str] = set()
+    withheld_entries: list[str] = []
     for record_dir, record in qualifying:
         package = record.get("package")
         manifest = package.get("manifest") if isinstance(package, dict) else None
@@ -184,6 +185,9 @@ def coverage_errors(repo: Path, base: str, head: str,
                     f"carries no package manifest; the gate cannot derive "
                     f"what it packaged — rebuild the record with "
                     f"--package-manifest"]
+        for entry in manifest.get("withheld") or []:
+            if isinstance(entry, str) and entry.strip():
+                withheld_entries.append(entry.strip())
         try:
             _, _digest, coverage = record_mod.rebuild_package_from_manifest(
                 repo, manifest)
@@ -198,11 +202,32 @@ def coverage_errors(repo: Path, base: str, head: str,
     missing = [path for path in required
                if not any(path.startswith(prefix) for prefix in excluded)
                and path not in covered]
-    if missing:
-        shown = ", ".join(missing[:10])
-        more = (f" (+{len(missing) - 10} more)"
-                if len(missing) > 10 else "")
-        return [f"coverage: {len(missing)} changed path(s) were never "
+
+    def deliberately_withheld(path: str) -> bool:
+        for entry in withheld_entries:
+            scope = entry.rstrip("/")
+            if scope and (path == scope or path.startswith(scope + "/")):
+                return True
+        return False
+
+    withheld_missing = [path for path in missing if deliberately_withheld(path)]
+    unpackaged = [path for path in missing if path not in withheld_missing]
+    if withheld_missing:
+        # A withheld path is a DESIGN decision, not a packaging bug: name it
+        # as such (S3.5b round-4 RA-002).  It is still a refusal — the gate
+        # cannot certify a change the record did not review.
+        shown = ", ".join(withheld_missing[:10])
+        more = (f" (+{len(withheld_missing) - 10} more)"
+                if len(withheld_missing) > 10 else "")
+        return [f"coverage: {len(withheld_missing)} changed path(s) are "
+                f"deliberately withheld from review by the record's "
+                f"manifest: {shown}{more} — a PR cannot be certified on "
+                f"changes its reviewer never saw"]
+    if unpackaged:
+        shown = ", ".join(unpackaged[:10])
+        more = (f" (+{len(unpackaged) - 10} more)"
+                if len(unpackaged) > 10 else "")
+        return [f"coverage: {len(unpackaged)} changed path(s) were never "
                 f"packaged for review: {shown}{more}"]
     return []
 

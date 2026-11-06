@@ -247,6 +247,70 @@ class TestEvaluateRealRecords(RecordFixture):
         self.assertEqual(len(errs), 1)
         self.assertIn("review record gate:", errs[0])
 
+    def test_renamed_source_file_into_record_dir_is_refused(self):
+        """A tail that MOVES a reviewed source file into the record dir is
+        a rename, not a record-only edit: with rename detection the diff
+        would show only the destination and hide the source deletion
+        (S3.5b round-4 RA-003)."""
+        self.build_package()
+        findings = self.write_findings("review-adversary", [])
+        disp = self.write_dispositions([])
+        rel = "review/record-move"
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.base, "--head", self.head,
+            "--package", str(self.pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings}",
+            "--model", "review-adversary=test-model-v1",
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(self.repo / rel))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.git("mv", "a.txt", f"{rel}/a.txt")
+        self.git("commit", "-q", "-m", "rename reviewed source into record dir")
+        moved = self.rev_parse("HEAD")
+        # the pre-fix green light: rename detection shows only the
+        # destination, which sits inside the record directory
+        diff = self.git("diff", "--name-only", f"{self.head}..{moved}")
+        self.assertTrue(all(p.startswith(rel + "/")
+                            for p in diff.stdout.split()), diff.stdout)
+        # ... but the head rule disables renames, sees the source deletion
+        # outside the record dir, and refuses
+        errs = record_gate.evaluate(str(self.repo / rel), str(self.repo),
+                                    pr_head=moved)
+        self.assertTrue(any("head rule" in e and "a.txt" in e for e in errs),
+                        errs)
+
+    def test_fixed_disposition_off_pr_history_is_refused(self):
+        """A fix commit that resolves and touches the artifact but sits on
+        another branch cannot clear a finding (S3.5b round-4 RA-001)."""
+        self.git("checkout", "-q", "-b", "side", self.fix_a)
+        (self.repo / "a.txt").write_text("alpha\nbeta\ngamma\nside\n",
+                                         encoding="utf-8")
+        self.git("add", "a.txt")
+        self.git("commit", "-q", "-m", "side-only fix")
+        side = self.rev_parse("HEAD")
+        self.git("checkout", "-q", "main")
+        self.build_package()
+        findings = self.write_findings(
+            "review-adversary", [self.finding("RA-001")])
+        disp = self.write_dispositions(
+            [{"id": "RA-001@test-model-v1", "disposition": "fixed",
+              "fix_sha": side}])
+        out_rel = "review/record-side"
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.base, "--head", self.head,
+            "--package", str(self.pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings}",
+            "--model", "review-adversary=test-model-v1",
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(self.repo / out_rel))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        errs = record_gate.evaluate(str(self.repo / out_rel),
+                                    str(self.repo), pr_head=self.head)
+        self.assertTrue(any("not reachable from pr head" in e for e in errs),
+                        errs)
+
     def test_record_tail_commit_passes_code_commit_fails(self):
         # the record is pinned at the reviewed head; the only later commit
         # is the record tail, then a code commit breaks the rule.

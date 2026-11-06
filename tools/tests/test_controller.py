@@ -650,6 +650,26 @@ class TestEvidenceFormats(ControlHome):
             **ev, "review_record": rel2, "review_head_sha": head2})
         self.assertEqual(rc, 0, out)
 
+    def test_ready_for_review_authority_failure_never_claims_head_match(self):
+        """A record the authority rejected never reached the head rule: the
+        persisted check must fail closed rather than claim a head match it
+        never evaluated (S3.5b round-4 RC-001)."""
+        base = chain_to("FULL_TESTS_GREEN")
+        rel, _, head = self.fake_record()
+        self.stub_record_authority(
+            ["review record: dispositions must be a list"])
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_head_match",
+                     "review_record_valid")
+        self.assertIn("rejected by the authority", out)
+        self.assertIn("head match cannot be established", out)
+        self.assertNotIn("record valid at head", out)
+
     def test_full_tests_green_zero_rules_and_membership(self):
         base = chain_to("FIXING")
         ev_ok = {"projects": "app,lib", "tests_passed": "120",

@@ -54,6 +54,13 @@ jobs:
         with:
           python-version: '3.11'   # the documented floor (stdlib tomllib)
       - name: Review-record gate
+        # The verifier, its authority (record.py) and the panel TOML above
+        # come from the BASE revision; the PR checkout is data only.  This
+        # job BODY is still read from the PR ref (GitHub evaluates
+        # pull_request workflows from that ref), so .github/workflows/** is
+        # CODEOWNERS-protected and the main branch protection rule requires
+        # code-owner review — an agent push cannot self-clear the check.
+        # Admin/owner merges remain the owner's trust boundary.
         # values arrive via env: — no ${{ }} expansion inside the shell
         run: |
           set -euo pipefail

@@ -206,6 +206,16 @@ def _resolve_commit(repo: str, sha: str) -> str | None:
     return proc.stdout.decode("utf-8", "replace").strip() or None
 
 
+def _is_ancestor(repo: str, ancestor: str, descendant: str) -> bool:
+    """True when ``ancestor`` is reachable from ``descendant``.
+
+    One helper for every history question the gate asks, so the
+    merge-base rule cannot drift between call sites.
+    """
+    return _git(repo, "merge-base", "--is-ancestor",
+                ancestor, descendant).returncode == 0
+
+
 def fix_reachability_errors(record: dict, repo: str,
                             pr_head: str) -> list[str]:
     """A `fixed` disposition must cite a commit on the PR's own history.
@@ -232,8 +242,7 @@ def fix_reachability_errors(record: dict, repo: str,
         full = _resolve_commit(repo, sha)
         if full is None:
             continue  # unresolvable fix_sha: the authority already refused
-        proc = _git(repo, "merge-base", "--is-ancestor", full, pr_head)
-        if proc.returncode != 0:
+        if not _is_ancestor(repo, full, pr_head):
             out.append(
                 f"review record gate: fixed disposition {entry.get('id')!r} "
                 f"cites {sha}, which is not reachable from pr head {pr_head} "

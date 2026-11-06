@@ -2,8 +2,12 @@
 # the workflow that enforces them. Changing any of these can weaken the
 # required review check, so they need an owner review.
 #
-# CODEOWNERS is advisory unless the branch protection rule requires
-# code-owner review ("Require review from Code Owners" on main).
-/.github/workflows/  @agentmerlin8-ops
-/tools/review/       @agentmerlin8-ops
-/kit-v0.1/review-panel.toml  @agentmerlin8-ops
+# Enforced only when the branch protection rule on main requires code-owner
+# review ("Require review from Code Owners"). The workflow JOB BODY is still
+# read from the PR ref (GitHub evaluates pull_request workflows from that
+# ref); the verifier, its authority and the panel are checked out from the
+# base revision, and this file makes any workflow edit need an owner's
+# approval. Admin merges remain the owner's own trust boundary.
+/.github/workflows/  @randy-jerome @agentmerlin8-ops
+/tools/review/       @randy-jerome @agentmerlin8-ops
+/kit-v0.1/review-panel.toml  @randy-jerome @agentmerlin8-ops

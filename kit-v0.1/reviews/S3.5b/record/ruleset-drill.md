@@ -23,6 +23,22 @@ Recorded 2026-10-31, before the record commit, on PR #32 (`kit/s35b-review-gate-
   `review-record` by design (`if: github.event_name == 'pull_request'`).
 - PR #32 merge state at that head: `BLOCKED` (draft + required check red).
 
+## Code-owner review (round-4 fix, 2026-11-06)
+
+The workflow BODY ships with the PR (GitHub evaluates `pull_request` workflows
+from the PR ref), so the base-revision checkout protects the verifier, its
+authority and the panel — not the job definition. The compensation, read back
+from the API at the time of the round-4 fix:
+
+- `GET /repos/agentmerlin8/ai-software-factory/branches/main/protection/required_pull_request_reviews`
+  → `require_code_owner_reviews: true`, `required_approving_review_count: 1`.
+  The setting was PATCHed on 2026-11-06 and read back after the change.
+- `.github/CODEOWNERS` names `@randy-jerome` and `@agentmerlin8-ops` for
+  `.github/workflows/`, `tools/review/` and `kit-v0.1/review-panel.toml`.
+- Residual, stated rather than hidden: an admin (the owner) can still merge
+  without that approval. That is the owner's own trust boundary, documented
+  in `architecture.md`; no agent-pushed PR can self-clear the check.
+
 ## Green half
 
 The valid record is this directory's `review.json`; the `review-record` run on

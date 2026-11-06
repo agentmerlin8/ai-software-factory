@@ -668,6 +668,14 @@ class Controller:
             put("review_head_match", False,
                 "record unreadable — head match cannot be established "
                 "(fail closed)")
+        elif authority_errs:
+            # evaluate() returns immediately on an authority failure, so no
+            # "head rule" error was ever produced: the head rule DID NOT RUN.
+            # Recording that as a pass would claim a check that never
+            # happened (S3.5b round-4 RC-001).
+            put("review_head_match", False,
+                "record rejected by the authority — head match cannot be "
+                "established (fail closed)")
         else:
             put("review_head_match", not head_errs,
                 head_errs or (f"record valid at head {head_ev!r} (exact match, "

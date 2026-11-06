@@ -583,6 +583,44 @@ class TestCiGateCoverage(CiGateFixture):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("a.txt", proc.stderr)
 
+    def test_withheld_changed_path_refused_as_deliberate_not_missing(self):
+        """A withheld path is a design decision: the gate must name it as
+        deliberately withheld (S3.5b round-4 RA-002), not as a packaging
+        bug, and still refuse the record."""
+        withheld = self.dir / "withheld.txt"
+        withheld.write_text("a.txt\n", encoding="utf-8")
+        pkg = self.repo / "package-wh.md"
+        manifest = self.dir / "manifest-wh.json"
+        proc = subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build",
+             "--repo", str(self.repo), "--base", self.base,
+             "--head", self.head, "--withheld", str(withheld),
+             "--out", str(pkg), "--manifest-out", str(manifest)],
+            capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.pkg = pkg
+        self.pkg_sha = proc.stdout.splitlines()[1].split(
+            "package_sha256: ", 1)[1]
+        self.pkg_head = self.head
+        self.pkg_base = self.base
+        findings = self.write_findings("review-adversary", [])
+        disp = self.write_dispositions([])
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.base, "--head", self.head,
+            "--package", str(pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings}",
+            "--model", "review-adversary=test-model-v1",
+            "--package-manifest", str(manifest),
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(self.repo / "review/record"))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        proc = self.run_gate(self.head)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("deliberately withheld", proc.stderr)
+        self.assertIn("a.txt", proc.stderr)
+        self.assertNotIn("never packaged", proc.stderr)
+
     def test_record_dir_tail_is_excluded_from_coverage(self):
         """The record commit's own files are not review inputs: a full
         package + record-only tail passes with --base."""

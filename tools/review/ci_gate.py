@@ -148,6 +148,23 @@ def panel_slot_errors(record_dir: Path, record: dict,
     return []
 
 
+REVIEW_ARTIFACT_SUFFIXES = (".md", ".json", ".yaml", ".yml", ".log", ".txt")
+
+
+def _is_review_artifact(path: str) -> bool:
+    """True for the file kinds a record tree legitimately holds.
+
+    The coverage exclusion may not cover a whole records root: a source file
+    committed under it would then be certified without ever being packaged
+    (S3.5b round-5 RS-001).  Only evidence-shaped files are exempt; anything
+    else under a records root must be packaged like any other change.
+    """
+    name = path.rsplit("/", 1)[-1]
+    if name == ".gitignore":
+        return True
+    return name.endswith(REVIEW_ARTIFACT_SUFFIXES)
+
+
 def coverage_errors(repo: Path, base: str, head: str,
                     qualifying: list[tuple[Path, dict]],
                     roots: list[Path]) -> list[str]:
@@ -175,6 +192,13 @@ def coverage_errors(repo: Path, base: str, head: str,
         rel = _rel_to_repo(prefix_path, repo).strip("/")
         if rel and not rel.startswith("/"):
             excluded.append(rel + "/")
+
+    def is_evidence_artifact(path: str) -> bool:
+        """Exempt only evidence-shaped files under a records root — never a
+        whole subtree (S3.5b round-5 RS-001)."""
+        return (any(path.startswith(prefix) for prefix in excluded)
+                and _is_review_artifact(path))
+
     covered: set[str] = set()
     withheld_entries: list[str] = []
     for record_dir, record in qualifying:
@@ -200,7 +224,7 @@ def coverage_errors(repo: Path, base: str, head: str,
         # carried in the package's binary_files list, which is coverage.
         covered.update(coverage["binary"])
     missing = [path for path in required
-               if not any(path.startswith(prefix) for prefix in excluded)
+               if not is_evidence_artifact(path)
                and path not in covered]
 
     def deliberately_withheld(path: str) -> bool:

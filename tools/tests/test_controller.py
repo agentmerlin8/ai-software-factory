@@ -670,6 +670,36 @@ class TestEvidenceFormats(ControlHome):
         self.assertIn("head match cannot be established", out)
         self.assertNotIn("record valid at head", out)
 
+    def test_ready_for_review_refuses_record_for_another_pr(self):
+        """A valid record for a SIBLING PR at the same head cannot clear
+        READY_FOR_REVIEW (S3.5b round-5 RA-001)."""
+        base = chain_to("FULL_TESTS_GREEN")  # DRAFT_OPENED pr 42
+        rel, _, head = self.fake_record(rel="review/other-pr", pr=43)
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("pr=43", out)
+
+    def test_ready_for_review_historical_row_without_pr_fails_closed(self):
+        """A DRAFT_OPENED row with no persisted pr detail cannot establish
+        the record binding: READY_FOR_REVIEW fails closed (S3.5b round-5)."""
+        base = chain_to("BUILD_GREEN") + [transition_row(
+            "tr-draft", self.sid, "BUILD_GREEN", "DRAFT_OPENED",
+            check_results={"order": {"ok": True, "detail": "ok"}})]
+        rel, _, head = self.fake_record()
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("no DRAFT_OPENED pr_number", out)
+
     def test_full_tests_green_zero_rules_and_membership(self):
         base = chain_to("FIXING")
         ev_ok = {"projects": "app,lib", "tests_passed": "120",
@@ -999,6 +1029,32 @@ class TestMergeEligibleRecordHeadRule(ControlHome):
         return {"tested_sha": head[:7], "head_sha": head,
                 "unresolved_threads": "0", "internal_verdict": "PASS",
                 "review_record": rel}
+
+    def test_merge_eligible_historical_row_without_pr_fails_closed(self):
+        """A historical DRAFT_OPENED row with no pr detail cannot bind a
+        record: MERGE_ELIGIBLE fails closed (S3.5b round-5 RA-003)."""
+        rows = chain_to("READY_FOR_REVIEW")
+        for row in rows:
+            if row["to_state"] == "DRAFT_OPENED":
+                row["check_results"] = {"order": {"ok": True, "detail": "ok"}}
+        self.seed(rows + [gate_row("g-1", self.sid, "merge")])
+        head = self.head()
+        rel, _, _ = self.fake_record(head=head)
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(head, rel))
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("no DRAFT_OPENED pr_number", out)
+
+    def test_merge_eligible_refuses_record_for_another_pr(self):
+        """A valid record for a SIBLING PR at the same head cannot clear
+        MERGE_ELIGIBLE (S3.5b round-5 RA-001)."""
+        head = self.head()
+        rel, _, _ = self.fake_record(rel="review/other-pr", head=head, pr=43)
+        self.seed_ready()
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(head, rel))
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("pr=43", out)
 
     def test_v2_record_tail_commit_accepted(self):
         rel, _, _ = self.fake_record(rel="review/rec-tail")

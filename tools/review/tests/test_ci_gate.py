@@ -583,6 +583,66 @@ class TestCiGateCoverage(CiGateFixture):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("a.txt", proc.stderr)
 
+    def test_unresolvable_base_refused_not_treated_as_no_change(self):
+        """A well-formed base that git cannot resolve must REFUSE, never
+        read as 'nothing to cover' (S3.5b round-5 RA-001)."""
+        self.render_ok()
+        proc = self.run_gate(self.head, base="0" * 40)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("coverage: cannot diff", proc.stderr)
+
+    def test_record_without_manifest_refused_by_coverage(self):
+        """coverage_errors refuses a qualifying record with no manifest
+        instead of skipping it (S3.5b round-5 RA-002)."""
+        from tools.review import ci_gate as ci_gate_mod
+        errs = ci_gate_mod.coverage_errors(
+            self.repo, self.base, self.head,
+            [(self.repo / "review/record", {"package": {}})], [])
+        self.assertTrue(any("carries no package manifest" in e for e in errs),
+                        errs)
+
+    def test_source_file_under_records_root_is_not_silently_excluded(self):
+        """A source file committed under a records root must not be
+        certified without being packaged (S3.5b round-5 RS-001)."""
+        (self.repo / "review").mkdir(exist_ok=True)
+        (self.repo / "review" / "evil.py").write_text("x = 1\n",
+                                                     encoding="utf-8")
+        self.git("add", "review/evil.py")
+        self.git("commit", "-q", "-m", "source file under the records root")
+        self.head = self.rev_parse("HEAD")
+        withheld = self.dir / "withheld-root.txt"
+        withheld.write_text("review/\n", encoding="utf-8")
+        pkg = self.repo / "package-root.md"
+        manifest = self.dir / "manifest-root.json"
+        proc = subprocess.run(
+            [sys.executable, str(PACKAGE_PY), "build",
+             "--repo", str(self.repo), "--base", self.base,
+             "--head", self.head, "--withheld", str(withheld),
+             "--out", str(pkg), "--manifest-out", str(manifest)],
+            capture_output=True, text=True, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.pkg = pkg
+        self.pkg_sha = proc.stdout.splitlines()[1].split(
+            "package_sha256: ", 1)[1]
+        self.pkg_head = self.head
+        self.pkg_base = self.base
+        findings = self.write_findings("review-adversary", [])
+        disp = self.write_dispositions([])
+        proc = self.cli(
+            "render", "--repo", str(self.repo), "--story", "S35B",
+            "--pr", "42", "--base", self.base, "--head", self.head,
+            "--package", str(pkg), "--dispositions", str(disp),
+            "--findings", f"review-adversary={findings}",
+            "--model", "review-adversary=test-model-v1",
+            "--package-manifest", str(manifest),
+            "--gate", f"lint=0:{self.gate_path}",
+            "--out-dir", str(self.repo / "review/record"))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        proc = self.run_gate(self.head)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("deliberately withheld", proc.stderr)
+        self.assertIn("review/evil.py", proc.stderr)
+
     def test_withheld_changed_path_refused_as_deliberate_not_missing(self):
         """A withheld path is a design decision: the gate must name it as
         deliberately withheld (S3.5b round-4 RA-002), not as a packaging

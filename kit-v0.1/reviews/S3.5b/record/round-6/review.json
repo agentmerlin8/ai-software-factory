@@ -1,0 +1,143 @@
+{
+  "base_sha": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+  "dispositions": [],
+  "findings": [],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate-r6.log",
+      "evidence_sha256": "8b98169d635779124f82491628dc0c049813be151ea5b085ef6417cc197a8d77",
+      "exit": 0,
+      "gate": "gate-selftest"
+    },
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/ruleset-drill.md",
+      "evidence_sha256": "46990404cba9619ed3db0db71775ec6736a5e5d1423eb5cd33edfd1cf574d0ba",
+      "exit": 0,
+      "gate": "ruleset-drill"
+    },
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit-r6.log",
+      "evidence_sha256": "e9bd8e6568a2a533c8e156c0667630f044a21d1059ee146cc9046c80904a8731",
+      "exit": 0,
+      "gate": "unit"
+    }
+  ],
+  "head_sha": "4c2ac8d2906a387d6b099c77c074a35f0195ee90",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 2
+  },
+  "open_findings": [],
+  "package": {
+    "manifest": {
+      "allowed": null,
+      "base": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+      "contract": [
+        "kit-v0.1/reviews/S3.5b/record/CONTRACT-issue-25.md:contract",
+        "kit-v0.1/reviews/S3.5b/record/PRIOR-FINDINGS-R6.md:prior-findings"
+      ],
+      "gate": [
+        "kit-v0.1/reviews/S3.5b/record/unit-r6.log:unit",
+        "kit-v0.1/reviews/S3.5b/record/gate-r6.log:gate-selftest",
+        "kit-v0.1/reviews/S3.5b/record/ruleset-drill.md:ruleset-drill"
+      ],
+      "head": "4c2ac8d2906a387d6b099c77c074a35f0195ee90",
+      "include": [],
+      "max_diff_bytes": 1500000,
+      "max_input_bytes": 200000,
+      "version": 1,
+      "withheld": [
+        "kit-v0.1/reviews/"
+      ]
+    },
+    "path": "kit-v0.1/reviews/S3.5b/record/package-r6.md",
+    "sha256": "c1bad4bdb3f16758414e8f95f03400ff3a51402c0185ff137ffb85e31b961202"
+  },
+  "pr": 32,
+  "prior_rounds": [
+    {
+      "decision": "CHANGES_REQUESTED",
+      "dispositioned": 16,
+      "findings": 21,
+      "loop": 1,
+      "path": "kit-v0.1/reviews/S3.5b/record/round-1"
+    },
+    {
+      "decision": "APPROVED",
+      "dispositioned": 0,
+      "findings": 3,
+      "loop": 2,
+      "path": "kit-v0.1/reviews/S3.5b/record/round-2"
+    },
+    {
+      "decision": "APPROVED",
+      "dispositioned": 0,
+      "findings": 2,
+      "loop": 3,
+      "path": "kit-v0.1/reviews/S3.5b/record/round-3"
+    },
+    {
+      "decision": "CHANGES_REQUESTED",
+      "dispositioned": 8,
+      "findings": 8,
+      "loop": 4,
+      "path": "kit-v0.1/reviews/S3.5b/record/round-4"
+    }
+  ],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r6/RA-deepseek.yaml",
+      "document_sha256": "2b767a78ba61a0440e9523de7ff0024a1be183b7331c83ef73af6fab44c8ae98",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r6/RA-qwen.yaml",
+      "document_sha256": "34160cece98c706aa95eb0e8eb79f6ffc09d124f7232e2f86dfa0e81bc61eac4",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r6/RC-deepseek.yaml",
+      "document_sha256": "c12b0b8f51cd05c63d8950b6d8b50985260d8415a7f86f95eebeb00d61f771f7",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r6/RC-qwen.yaml",
+      "document_sha256": "14f439b35e7dbb500b675000c799105c79dac162b22c03663c8b372e3efb03a1",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r6/RS-deepseek.yaml",
+      "document_sha256": "5a1337e0882d80cd3bee43d62b6f28e58703a0ceb943275e6de9c8da0525b0da",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r6/RS-qwen.yaml",
+      "document_sha256": "9ca88d5ce5cf97dab830e6674062c6b3a5c4fbd4bef196ca71a33c8607e0a49f",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v2",
+  "story": "S3.5b",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 0,
+    "decision": "APPROVED",
+    "infos": 0,
+    "loop": 6,
+    "loop_cap": 6,
+    "majors": 0,
+    "minors": 0
+  }
+}

@@ -4,8 +4,8 @@
   "findings": [],
   "gate_results": [
     {
-      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate-r6.log",
-      "evidence_sha256": "8b98169d635779124f82491628dc0c049813be151ea5b085ef6417cc197a8d77",
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate-r7.log",
+      "evidence_sha256": "d3068f27c13a77bbd581c555fad1311c08be43f58da55eae196b4573dd057152",
       "exit": 0,
       "gate": "gate-selftest"
     },
@@ -16,13 +16,13 @@
       "gate": "ruleset-drill"
     },
     {
-      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit-r6.log",
-      "evidence_sha256": "e9bd8e6568a2a533c8e156c0667630f044a21d1059ee146cc9046c80904a8731",
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit-r7.log",
+      "evidence_sha256": "74be41f80e549de46f657db12dea042a1cbd4a3cc9ae5596fc6798f828491e22",
       "exit": 0,
       "gate": "unit"
     }
   ],
-  "head_sha": "4c2ac8d2906a387d6b099c77c074a35f0195ee90",
+  "head_sha": "17500c4e108f9e504cc6279d6d12ebb965b1625e",
   "lane": {
     "name": "review-lane-v1",
     "version": 2
@@ -34,14 +34,14 @@
       "base": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
       "contract": [
         "kit-v0.1/reviews/S3.5b/record/CONTRACT-issue-25.md:contract",
-        "kit-v0.1/reviews/S3.5b/record/PRIOR-FINDINGS-R6.md:prior-findings"
+        "kit-v0.1/reviews/S3.5b/record/PRIOR-FINDINGS-R7.md:prior-findings"
       ],
       "gate": [
-        "kit-v0.1/reviews/S3.5b/record/unit-r6.log:unit",
-        "kit-v0.1/reviews/S3.5b/record/gate-r6.log:gate-selftest",
+        "kit-v0.1/reviews/S3.5b/record/unit-r7.log:unit",
+        "kit-v0.1/reviews/S3.5b/record/gate-r7.log:gate-selftest",
         "kit-v0.1/reviews/S3.5b/record/ruleset-drill.md:ruleset-drill"
       ],
-      "head": "4c2ac8d2906a387d6b099c77c074a35f0195ee90",
+      "head": "17500c4e108f9e504cc6279d6d12ebb965b1625e",
       "include": [],
       "max_diff_bytes": 1500000,
       "max_input_bytes": 200000,
@@ -50,8 +50,8 @@
         "kit-v0.1/reviews/"
       ]
     },
-    "path": "kit-v0.1/reviews/S3.5b/record/package-r6.md",
-    "sha256": "c1bad4bdb3f16758414e8f95f03400ff3a51402c0185ff137ffb85e31b961202"
+    "path": "kit-v0.1/reviews/S3.5b/record/package-r7.md",
+    "sha256": "3ab8d2e2845ba13f678491c040fa28af621c86c7afb9ab01f1efe2954d1cae00"
   },
   "pr": 32,
   "prior_rounds": [
@@ -82,47 +82,54 @@
       "findings": 8,
       "loop": 4,
       "path": "kit-v0.1/reviews/S3.5b/record/round-4"
+    },
+    {
+      "decision": "APPROVED",
+      "dispositioned": 0,
+      "findings": 0,
+      "loop": 6,
+      "path": "kit-v0.1/reviews/S3.5b/record/round-6"
     }
   ],
   "reviewers": [
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/r6/RA-deepseek.yaml",
-      "document_sha256": "2b767a78ba61a0440e9523de7ff0024a1be183b7331c83ef73af6fab44c8ae98",
+      "document": "kit-v0.1/reviews/S3.5b/record/r7/RA-deepseek.yaml",
+      "document_sha256": "2d5bafcd60d38eb653adb554dc841c3c6ea4efbb9d9c80a417546ee51551a8c0",
       "model": "deepseek-v4-pro-0813",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/r6/RA-qwen.yaml",
-      "document_sha256": "34160cece98c706aa95eb0e8eb79f6ffc09d124f7232e2f86dfa0e81bc61eac4",
+      "document": "kit-v0.1/reviews/S3.5b/record/r7/RA-qwen.yaml",
+      "document_sha256": "0700bbc7e25bcbbaaf552342d95263a62fc11040c79fbdb0f5949cb9765d94a9",
       "model": "qwen3.8-max",
       "role": "review-adversary",
       "rubric_version": "review-adversary-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/r6/RC-deepseek.yaml",
-      "document_sha256": "c12b0b8f51cd05c63d8950b6d8b50985260d8415a7f86f95eebeb00d61f771f7",
+      "document": "kit-v0.1/reviews/S3.5b/record/r7/RC-deepseek.yaml",
+      "document_sha256": "787f3d423e9cc3d7f18eb26ab4185db726cefef900c54ecc4b9dce5796b07d15",
       "model": "deepseek-v4-pro-0813",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/r6/RC-qwen.yaml",
-      "document_sha256": "14f439b35e7dbb500b675000c799105c79dac162b22c03663c8b372e3efb03a1",
+      "document": "kit-v0.1/reviews/S3.5b/record/r7/RC-qwen.yaml",
+      "document_sha256": "e8ea4a838d99fef53151a140a8101ee54572657a37c3b8b6cef02a8b745c5a42",
       "model": "qwen3.8-max",
       "role": "review-contract",
       "rubric_version": "review-contract-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/r6/RS-deepseek.yaml",
-      "document_sha256": "5a1337e0882d80cd3bee43d62b6f28e58703a0ceb943275e6de9c8da0525b0da",
+      "document": "kit-v0.1/reviews/S3.5b/record/r7/RS-deepseek.yaml",
+      "document_sha256": "681a17de916de7775ccf68775f36d7d2d9a0fbe2aab979d01305bb273e55dbd0",
       "model": "deepseek-v4-pro-0813",
       "role": "review-security",
       "rubric_version": "review-security-v1"
     },
     {
-      "document": "kit-v0.1/reviews/S3.5b/record/r6/RS-qwen.yaml",
-      "document_sha256": "9ca88d5ce5cf97dab830e6674062c6b3a5c4fbd4bef196ca71a33c8607e0a49f",
+      "document": "kit-v0.1/reviews/S3.5b/record/r7/RS-qwen.yaml",
+      "document_sha256": "68821afa221a6b0272842bc9e349a60d208a893f5754b8e2121a5ed116d5f46e",
       "model": "qwen3.8-max",
       "role": "review-security",
       "rubric_version": "review-security-v1"
@@ -135,8 +142,8 @@
     "blockers": 0,
     "decision": "APPROVED",
     "infos": 0,
-    "loop": 6,
-    "loop_cap": 6,
+    "loop": 7,
+    "loop_cap": 7,
     "majors": 0,
     "minors": 0
   }

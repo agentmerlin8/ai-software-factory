@@ -1,0 +1,5 @@
+# Review packages embed the reviewed diff; they are never committed.
+# The record stores the package manifest instead.
+package*.md
+pkg*.md
+package-manifest*.json

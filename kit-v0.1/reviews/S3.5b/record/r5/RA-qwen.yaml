@@ -1,0 +1,30 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: 903fe89e23b9297eed2045826a32ae3f557420a39bcee9195b97ab08197dcf85
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 4c4987ddd5c2f8353e375157d27af9806b8a8dca
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/ci_gate.py:170
+      evidence: "coverage_errors' fail-closed branch for an underivable diff — `required = record_gate.changed_paths(str(repo), base, head)` / `if required is None: return [f\"coverage: cannot diff {base}...{head} — --base must be a commit reachable from the PR head in this repository\"]` — has no test anywhere in the package. Every test_ci_gate.py invocation passes a valid base (`run_gate(..., base=None)` defaults to `self.base`), and test_bad_head_is_usage_error_exit_2 covers only a malformed --head (parser-level exit 2), never a well-formed 40-hex --base that does not resolve in the object DB, which is exactly the input that reaches changed_paths and returns None. Named defeating production change: replace `return [f\"coverage: cannot diff ...\"]` with `return []` (treat 'cannot diff' as 'nothing to cover'); the whole full-change coverage rule then silently green-lights every PR whenever git cannot answer (stale clone, missing base object, operator-run invocation from the runbook), and the entire suite stays green. The function docstring's claim ('a gate that cannot see the PR's full change must refuse, never imply coverage') is an untested assertion."
+      required_change: "Add a ci_gate test that runs the gate with a well-formed but unresolvable --base (e.g. 40 hex that is not an object in the fixture repo) and asserts exit 1 with the 'coverage: cannot diff' refusal, so removing or inverting the `required is None` branch fails the suite."
+      actionable: true
+    - id: RA-002
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/ci_gate.py:183
+      evidence: "coverage_errors' manifest guard — `if not isinstance(manifest, dict): return [f\"coverage: record {...} carries no package manifest; the gate cannot derive what it packaged ...\"]` — is never exercised: every ci_gate test renders with --package-manifest (render_ok, render_with_manifest, render_narrow, test_head_only_package_refused, test_withheld_changed_path_refused...). Named defeating production change: make that branch `continue` (or `return []`) so a record whose coverage cannot be derived skips the check instead of refusing; no test fails. The escape is remote because a manifest-less record normally fails the authority earlier (its package file is never committed, so record.py check refuses first), which is why this is minor rather than major — but the guard is defense-in-depth for exactly the case where a package file IS present at the recorded path, and its refusal behavior is unproven."
+      required_change: "Add a coverage_errors test (unit-level is sufficient) with a qualifying record whose package.manifest is absent/non-dict, asserting the 'carries no package manifest' refusal, so weakening the branch to a skip fails a test."
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/controller.py:991
+      evidence: "The PR-binding check's no-pr_number branch is untested. `_put_record_checks` puts `review_record_pr` as `pr_expect is not None and str(rec_pr) == pr_expect`, with the fail-closed detail 'the story carries no DRAFT_OPENED pr_number — the PR binding cannot be established (fail closed; a historical row needs its pr_number backfilled at DRAFT_OPENED)'. Every controller test seeds DRAFT_OPENED rows WITH the evidence detail (chain_to's draft row and draft_row() both carry `detail: {pr_number: ...}`); TestHistoricalMechanismFold's later-transition test stops at FIXING and never reaches a record check. Named defeating production change: weaken the condition to `pr_expect is None or str(rec_pr) == pr_expect` — the sibling-PR substitution guard this round's comment names ('a valid record for a sibling PR at the same head ... is substituted') then passes vacuously for exactly the historical-ledger stories the contract's backward-compatibility clause keeps in circulation, and no test in the package fails. Minor rather than major because the branch as shipped is fail-closed and the escape requires a historical row lacking detail plus a valid same-head record for a different PR."
+      required_change: "Add a controller test that seeds a DRAFT_OPENED row without evidence detail (or strips check_results), requests READY_FOR_REVIEW/MERGE_ELIGIBLE with an otherwise-valid record, and asserts review_record_pr is refused with the 'no DRAFT_OPENED pr_number' detail, so relaxing the None branch fails a test."
+      actionable: true

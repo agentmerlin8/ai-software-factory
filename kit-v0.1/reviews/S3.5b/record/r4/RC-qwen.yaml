@@ -1,0 +1,16 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: bab82dcf50e57e5e3776a87e04986ec1b698da4988175a465a7f2964d5d092e6
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9b7bccdb82e89e8a8be6b0e49ef7c79145a0c699
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: docs_process
+      artifact_reference: package:diff@kit-v0.1/architecture.md:618
+      evidence: "architecture.md (Required check (S3.5b) paragraph) claims a PR cannot stub the gate because \"the `.github/workflows/` and `tools/review/` trees are CODEOWNERS-protected\", but no artifact in the package establishes that protection, and the package's own evidence points the other way: the CODEOWNERS file added by this same diff states \"CODEOWNERS is advisory unless the branch protection rule requires code-owner review (\\\"Require review from Code Owners\\\" on main)\", and the ruleset-drill gate evidence records \"Required status checks: `kit-ci`, `review-record`\" and \"the ruleset only requires the two checks\" — no code-owner-review requirement is read back anywhere. The workflow diff itself concedes \"A pull_request workflow is read from the PR ref, so running the PR's own copy would let the PR stub out the check\", so CODEOWNERS enforcement is the only cited compensation for that trust boundary, and it is claimed without an artifact — the same over-description the frozen contract warns against (\"never describe a disabled check as enforcement\")."
+      required_change: "Make the shipped claim match the recorded enforcement: either enable \"Require review from Code Owners\" on the main ruleset and record it in the ruleset-drill evidence (read back from the API like required_status_checks), or amend the architecture.md S3.5b paragraph to state that CODEOWNERS is advisory and name the actual recorded compensation for PR-ref workflow edits."
+      actionable: true

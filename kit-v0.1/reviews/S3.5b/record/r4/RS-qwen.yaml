@@ -1,0 +1,9 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: bab82dcf50e57e5e3776a87e04986ec1b698da4988175a465a7f2964d5d092e6
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9b7bccdb82e89e8a8be6b0e49ef7c79145a0c699
+  decision: APPROVED
+  findings: []

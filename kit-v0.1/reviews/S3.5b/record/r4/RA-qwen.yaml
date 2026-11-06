@@ -1,0 +1,30 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: bab82dcf50e57e5e3776a87e04986ec1b698da4988175a465a7f2964d5d092e6
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9b7bccdb82e89e8a8be6b0e49ef7c79145a0c699
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: blocker
+      rubric_dimension: behavior
+      artifact_reference: package:diff@.github/workflows/kit-ci.yml:36
+      evidence: "The workflow's own comment states 'A pull_request workflow is read from the PR ref, so running the PR's own copy would let the PR stub out the check' — but the base-checkout mitigation only covers the verifier script and panel file, not the job definition itself: a PR edit to the review-record job (env HEAD_SHA/BASE_SHA, the step body, or the if: condition) is what GitHub executes. The only stated backstop is CODEOWNERS, which the diff itself declares advisory — 'CODEOWNERS is advisory unless the branch protection rule requires code-owner review' (.github/CODEOWNERS:6-7) — and the ruleset-drill gate evidence records 'the ruleset only requires the two checks', with no code-owner-review requirement. A PR that rewrites the review-record job body to a no-op while keeping the job name therefore satisfies the required check, defeating architecture.md's claim 'a PR cannot stub the gate that judges it'."
+      required_change: "Make the enforcement claim true or retract it: enable 'Require review from Code Owners' on the main ruleset and record that setting in the T6 drill evidence, or move the gate to a trigger whose workflow definition the PR cannot edit; until one of those ships, architecture.md must not assert that a PR cannot stub the gate."
+      actionable: true
+    - id: RA-002
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record_gate.py:301
+      evidence: "evaluate() adds 'errs.extend(fix_reachability_errors(record, repo, pr_head))' — the EX-05 P1 guard whose refusal names a fix_sha 'not reachable from pr head ... a fix on another branch cannot clear a finding' — but no test in the package exercises it: every fixture disposition uses fix_sha=self.fix_a (an ancestor of every head evaluated), test_controller.py stubs the authority, and no shipped test asserts the 'not reachable' refusal. Deleting the fix_reachability_errors call from evaluate(), or inverting its merge-base --is-ancestor condition, leaves every test in the package green — the guard is not proof against its own removal."
+      required_change: "Add a regression test (in tools/tests/test_review_gate.py or tools/review/tests/test_ci_gate.py) that renders a real record whose 'fixed' disposition cites a commit that resolves in the repo but sits on a side branch that is not an ancestor of the PR head, and asserts evaluate()/the ci gate refuses naming 'not reachable from pr head'; the test must fail when the reachability call is removed."
+      actionable: true
+    - id: RA-003
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record_gate.py:171
+      evidence: "The record-tail head rule carries the EX-04 P1 guard 'proc = _git(repo, \"diff\", \"--name-only\", \"--no-renames\", ...)' with the comment 'with rename detection a reviewed source file MOVED into the record directory reports only its destination path, so the deletion outside the record dir is invisible and an old record passes for a new head' — but no shipped test constructs a move or rename: the tail-rule tests only add or edit files (test_record_tail_commit_passes_code_commit_fails, test_non_ancestor_pr_head_with_clean_two_dot_diff_refused). Dropping '--no-renames' from that diff leaves every test in the package green and silently re-opens the rename bypass the flag exists to close."
+      required_change: "Add a regression test where the post-record tail commit git-mv's a reviewed source file into the record directory, and assert head_rule_errors (and evaluate) refuse because the source-side deletion lies outside the record directory; the test must fail if the --no-renames flag is removed from the head-rule diff."
+      actionable: true

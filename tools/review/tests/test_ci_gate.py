@@ -254,6 +254,19 @@ class TestCiGate(CiGateFixture):
         self.assertIn("review record gate: OK (PR 42, 1 record(s), head "
                       + self.head, proc.stdout)
 
+    def test_relative_repo_from_parent_cwd_resolves(self):
+        """CI passes the checkout as a relative dir (--repo pr); the
+        authority must not double-join it (S3.5b round-7: the required
+        check failed in Actions while passing locally with --repo .)."""
+        self.render_ok()
+        proc = subprocess.run(
+            [sys.executable, str(CI_GATE_PY), "--repo", "repo", "--pr", "42",
+             "--head", self.head, "--base", self.base,
+             "--records-root", "review", "--panel", str(self.panel)],
+            capture_output=True, text=True, env=self.env, cwd=str(self.dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("review record gate: OK", proc.stdout)
+
     def test_record_only_tail_commit_exits_0(self):
         rel, _ = self.render_ok()
         tail = self.commit_record(rel)

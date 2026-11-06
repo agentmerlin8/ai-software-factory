@@ -285,11 +285,16 @@ def evaluate(record_dir: str, repo: str, pr_head: str | None,
     rec = Path(record_dir)
     if not rec.is_absolute():
         rec = Path(repo) / rec
+    # Resolve ONCE: check_record joins a relative record dir against the repo
+    # again, so a relative repo (CI passes `--repo pr`) would double-join and
+    # report a nonexistent path (S3.5b round-7: the required check failed in
+    # Actions while passing locally with `--repo .`).
+    rec = rec.resolve()
     try:
         record = load_record(str(rec))
     except ValueError as exc:
         return [str(exc)]
-    errs.extend(check_record(str(rec), repo))
+    errs.extend(check_record(str(rec), str(Path(repo).resolve())))
     if errs:
         # Fail closed: an authority failure means the record is not valid
         # evidence, so nothing below may INTERPRET it.  Continuing let a

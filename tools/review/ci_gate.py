@@ -288,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
     if not SHA_RE.fullmatch(args.base or ""):
         parser.error(f"--base must be 7-40 lowercase hex, got {args.base!r}")
 
-    repo = Path(args.repo)
+    repo = Path(args.repo).resolve()
     if not repo.is_dir():
         parser.error(f"--repo is not a directory: {args.repo}")
     head = args.head

@@ -1,0 +1,9 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: c1bad4bdb3f16758414e8f95f03400ff3a51402c0185ff137ffb85e31b961202
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 4c2ac8d2906a387d6b099c77c074a35f0195ee90
+  decision: APPROVED
+  findings: []

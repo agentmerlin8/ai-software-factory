@@ -1,0 +1,22 @@
+{
+  "dispositions": [
+    {
+      "id": "RA-001@qwen3.8-max",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
+      "evidence": "Round-2 minor: the fail-closed branch in controller._put_record_checks is not covered by a test. Deferred to issue #33 item 1; the branch itself is present and the round-1 authority tests cover the refusal path."
+    },
+    {
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
+      "evidence": "Round-2 minor: manifest label round-trip shape asymmetry between package._normalized_specs and record._manifest_input_spec. The rebuilt package digest still matches (the default label is the path stem either way); the missing test/canonicalization is deferred to issue #33 item 2."
+    },
+    {
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "disposition": "deferred",
+      "issue": "https://github.com/agentmerlin8/ai-software-factory/issues/33",
+      "evidence": "Round-2 minor: REVIEWING's review_record_pr refuses a historical DRAFT_OPENED row with no persisted pr detail. Fail-closed by design; the explicit historical-row path is deferred to issue #33 item 3."
+    }
+  ]
+}

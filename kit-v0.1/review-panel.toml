@@ -1,0 +1,4 @@
+# Declared review panel for lane v2 records (S3.5c owner decision).
+# A record must cover every lens once per model, no missing or extra slots.
+lenses = ["review-contract", "review-adversary", "review-security"]
+models = ["qwen3.8-max", "deepseek-v4-pro-0813"]

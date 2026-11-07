@@ -1,0 +1,15 @@
+# Trust boundaries: the review gate, its authority, the declared panel and
+# the workflow that enforces them. Changing any of these can weaken the
+# required review check, so they need an owner review.
+#
+# Enforced only when the branch protection rule on main requires code-owner
+# review ("Require review from Code Owners"). The workflow JOB BODY is still
+# read from the PR ref (GitHub evaluates pull_request workflows from that
+# ref); the verifier, its authority and the panel are checked out from the
+# base revision, and this file makes any workflow edit need an owner's
+# approval. Admin merges remain the owner's own trust boundary.
+#
+# Owner decision for this exception: kit-v0.1/reviews/S3.5b/record/OWNER-DECISION-codeowner-review.md
+/.github/workflows/  @randy-jerome @agentmerlin8-ops
+/tools/review/       @randy-jerome @agentmerlin8-ops
+/kit-v0.1/review-panel.toml  @randy-jerome @agentmerlin8-ops

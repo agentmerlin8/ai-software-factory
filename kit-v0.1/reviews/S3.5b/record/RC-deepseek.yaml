@@ -1,0 +1,47 @@
+schema: review.findings.v1
+review:
+  reviewer: review-contract
+  rubric_version: review-contract-v1
+  package_sha256: f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RC-001
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@tools/controller.py:967
+      evidence: |
+        The contract's state-machine deliverable requires "`READY_FOR_REVIEW` / `MERGE_ELIGIBLE` require: record exists, record head SHA == current head, no undispositioned BLOCKER/MAJOR, verdict-consistent". The READY_FOR_REVIEW hunk evaluates the head rule against operator-supplied evidence, never against the repository's current head:
+          +            rel = ev.get("review_record", "")
+          +            head_ev = ev.get("review_head_sha", "")
+          +            rec, record, errs = self._review_evidence(rel, head_ev)
+        and state_machine.py's evidence format for that key says:
+          +    "review_head_sha": "7-40 hex; the record's pinned head",
+        i.e. the comparison target is any 7-40 hex string supplied in the same transition request, with no requirement that it resolve to (let alone equal) the current HEAD. Echoing the record's own stale pin leaves every check green while the actual head contains unreviewed commits: review_head_sha == record.head_sha passes as an exact match by construction. MERGE_ELIGIBLE passes the evidence-supplied head_sha the same way. The mutation check confirms it: the concrete production change "supply the record's own pinned head as review_head_sha (READY) or head_sha (MERGE) after new commits land" leaves READY_FOR_REVIEW and MERGE_ELIGIBLE green with NO check comparing against the current head.
+      required_change: |
+        Bind the head rule's comparison target to the repository's actual current head: resolve the evidenced review_head_sha (READY_FOR_REVIEW) and head_sha (MERGE_ELIGIBLE) against the repo HEAD (rev-parse / resolve_sha) and refuse when the evidenced head is not the current commit, before evaluating the record head rule. Add a fixture whose record pin equals the supplied evidence but differs from the actual repo HEAD, asserting refusal under review_head_match.
+      actionable: true
+    - id: RC-002
+      severity: major
+      rubric_dimension: contract_fidelity
+      artifact_reference: package:diff@kit-v0.1/architecture.md:217
+      evidence: |
+        The contract requires the check to be added "to the branch ruleset as a required check (stage `disabled` → verify → `active` per the Pro ruleset lesson; never describe a disabled check as enforcement)" and accepts with "A throwaway PR with no review record is blocked by the required check; the same PR with a valid record passes." No artifact in the package evidences any of the ruleset facts: the Gate evidence section holds only unit.log (python suite) and gate.log (gate-selftest) — nothing showing the `main` ruleset exists, that kit-ci + review-record are required on it, that a throwaway PR was actually blocked/passed, or the ruleset's current stage. Yet the Diff's shipped docs assert enforcement as fact:
+          "on every pull request (required check). Exit 0 = a valid record at the head with the declared panel; non-zero = named refusal"  (kit-v0.1/architecture.md gate table)
+          "on every pull request (required check)"                                            (tools/gate_catalog.py, `when` field)
+        Per the frozen rule quoted above, describing a check as "required" while its ruleset stage is unevidenced is exactly the prohibited "describe a disabled check as enforcement". Acceptance criterion #1 (the throwaway-PR block/pass drill) is not shown satisfied by any artifact.
+      required_change: |
+        Provide gate evidence establishing the ruleset facts (main ruleset created with kit-ci + review-record; live drill result: throwaway PR blocked without a record, passes with a valid one; current stage disabled|verified|active). Until the flip to `active` is evidenced, rewrite the architecture gate row and tools/gate_catalog.py `when` field to state the verified stage (e.g. "staged disabled, verifying on the live PR") rather than "required check".
+      actionable: true
+    - id: RC-003
+      severity: minor
+      rubric_dimension: docs_process
+      artifact_reference: package:diff@onboarding/templates/runbook.md:31
+      evidence: |
+        The runbook template asserts:
+          "+an undispositioned finding will not render, and the `review-record` required"
+        No artifact in this package shows render refusing. The only enforcement visible in the Diff is the gate-time re-assertion in tools/review/record_gate.py ("undispositioned findings must be empty") and the record's verdict derivation in record.py — i.e. the record refuses at check/gate time, not at render time. The visible record.py hunks (compose_record, cmd_check, cmd_validate_doc) contain no render-time refusal of undispositioned findings, so the claim "will not render" as written has no supporting artifact.
+      required_change: |
+        Align the runbook claim with the implementation: either add (and evidence) a render-time refusal of undispositioned findings in record.py render, or reword the sentence to state that a record with an undispositioned finding is refused by `record.py check` / the review-record gate.
+      actionable: true

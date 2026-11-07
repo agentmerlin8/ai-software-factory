@@ -1,0 +1,52 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "controller._put_record_checks now fails review_head_match closed when the authority rejected the record, so the persisted trail never claims a head rule that never ran (4c4987d, test_ready_for_review_authority_failure_never_claims_head_match)."
+    },
+    {
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "fix_reachability_errors now has a refusal-branch regression test: a fixed disposition citing a side-branch commit that resolves and touches the artifact is refused with 'not reachable from pr head' (test_fixed_disposition_off_pr_history_is_refused); the merge-base call is one _is_ancestor helper."
+    },
+    {
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "coverage_errors reads the manifest's withheld list and refuses withheld changed paths with the named 'deliberately withheld' message, distinct from 'never packaged' (test_withheld_changed_path_refused_as_deliberate_not_missing)."
+    },
+    {
+      "id": "RS-001@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "Require review from Code Owners is enabled on main (PATCH + API readback), CODEOWNERS names both owner accounts for the workflow/tools/panel trees, the architecture claim names the exact mechanism and the admin-merge residual, and the T6 drill evidence records the readback; the workflow comment documents the boundary."
+    },
+    {
+      "id": "RC-001@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "The architecture.md S3.5b paragraph no longer claims unenforced protection: the claim is now backed by the enabled code-owner-review rule and the recorded API readback in the T6 drill evidence, with the admin-merge residual stated."
+    },
+    {
+      "id": "RA-001@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "Same trust-boundary fix as RS-001@deepseek: code-owner review enabled and read back, both owner accounts in CODEOWNERS, claim corrected to the exact mechanism; an agent-pushed PR cannot self-clear the check."
+    },
+    {
+      "id": "RA-002@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "New regression test renders a real record whose fixed disposition cites a side-branch commit that is not an ancestor of the PR head and asserts the evaluate() 'not reachable from pr head' refusal; removing the guard fails the test."
+    },
+    {
+      "id": "RA-003@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "evidence": "New regression test moves a reviewed source file into the record directory, proves the two-dot diff without --no-renames looks record-only, and asserts the head rule refuses; dropping the flag fails the test."
+    }
+  ]
+}

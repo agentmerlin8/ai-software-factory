@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: bab82dcf50e57e5e3776a87e04986ec1b698da4988175a465a7f2964d5d092e6
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9b7bccdb82e89e8a8be6b0e49ef7c79145a0c699
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/review/record_gate.py:209
+      evidence: "the EX-05 guard added at this head — `fix_reachability_errors`, wired into `evaluate` via `errs.extend(fix_reachability_errors(record, repo, pr_head))` — has no test that exercises its refusal branch. Every fixture in the shipped test diffs (test_review_gate.py, test_ci_gate.py, test_controller.py) renders dispositions whose `fix_sha` is `self.fix_a`, a commit that IS an ancestor of the reviewed head, so the `merge-base --is-ancestor` check only ever sees its pass path. The concrete production change that defeats the guard while leaving every test green: `return []` at the top of fix_reachability_errors (or deleting the extend call). With that change, a `fixed` disposition citing a commit on another branch clears a blocker/major at READY_FOR_REVIEW and MERGE_ELIGIBLE, and the review-record required check exits 0, while the 1549-test unit suite in the gate evidence log still passes."
+      required_change: "add a test (gate-level in test_review_gate.py or end-to-end in test_ci_gate.py) that renders a record whose disposition entry carries `disposition: fixed` with a fix_sha resolving in the repo but NOT an ancestor of the PR head, and asserts the named refusal `fixed disposition ... is not reachable from pr head` from evaluate() and exit 1 with that message from ci_gate."
+      actionable: true
+    - id: RA-002
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@tools/review/ci_gate.py:194
+      evidence: "coverage_errors derives `covered` only from `covered.update(coverage[\"shipped\"])` plus `covered.update(coverage[\"binary\"])`; a manifest-bearing record defeats the required check when any changed path is withheld — a first-class build input this same head continues to support end-to-end (`--withheld` list files, `manifest.withheld`, and check-endorsement via test_withheld_enforcement_derives_from_rebuilt_package). The only excluded prefixes are the records roots and qualifying record directories, so a withheld changed path outside those prefixes reads as `coverage: N changed path(s) were never packaged for review` — a refusal that misnames deliberate withholding as a packaging defect, and that arrives only at the merge-time required check (build, render and `record.py check` all pass). The builders do record `withheld` and `omitted`, so the gate could name the condition exactly; today it fires late, unnamed."
+      required_change: "either refuse at build/render time a manifest-bearing record whose withheld list intersects changed paths outside the coverage exclusions (a named, early refusal), or make coverage_errors inspect `manifest.withheld` and refuse withheld changed paths with a message that names them as deliberately withheld rather than never-packaged — and add the corresponding fixture test."
+      actionable: true

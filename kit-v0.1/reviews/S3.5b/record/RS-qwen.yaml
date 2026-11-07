@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/controller.py:913
+      evidence: "REVIEWING review_head_match is computed as `bool(record) and bool(rec_head) and (rec_head == head_ev or rec_head.startswith(head_ev) or head_ev.startswith(rec_head))` where `head_ev = ev.get(\"review_head_sha\", \"\")` is never format-validated in the changed hunk; `rec_head.startswith(\"\")` is True, so an empty (or 1-hex-char) review_head_sha evidence value matches ANY record head, defeating the pinned-head rule the same diff declares (`review_head_sha` = 7-40 hex, the record's pinned head), and no test exercises an empty or sub-7-hex value (tests cover only `\"d\"*40` mismatch and head[:7])"
+      required_change: "before the comparison, require `record_gate.SHA_RE.fullmatch(head_ev)` (7-40 lowercase hex) and fail the review_head_match check with a named refusal when the supplied review_head_sha does not match that format; restrict the prefix tolerance to head_ev values of at least 7 hex characters"
+      actionable: true
+    - id: RS-002
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@.github/workflows/kit-ci.yml:360
+      evidence: "the review-record job interpolates GitHub expressions directly into the run: shell block (`--pr ${{ github.event.pull_request.number }} --head ${{ github.event.pull_request.head.sha }}`); the interpolated values are platform-typed (int, hex sha) so no injection is demonstrable today, but direct expression expansion in a shell run step is the pattern that turns exploitable the moment a string-typed context (title, branch name, label) is added"
+      required_change: "pass the PR number and head sha through the job `env:` block and reference them as quoted shell variables (`--pr \"$PR_NUMBER\" --head \"$HEAD_SHA\"`) instead of expanding `${{ }}` expressions inside the run script"
+      actionable: true

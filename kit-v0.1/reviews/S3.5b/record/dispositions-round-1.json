@@ -1,0 +1,172 @@
+{
+  "dispositions": [
+    {
+      "id": "RC-001@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "T6 ruleset/drill evidence added as a record gate input: kit-v0.1/reviews/S3.5b/record/ruleset-drill.md records ruleset id 26277566 (active; kit-ci + review-record), the red run on 3aa3b59 (`no review record for PR 32`), and PR #32 BLOCKED at that head. The workflow also moved to env-indirected arguments in 01b0449."
+    },
+    {
+      "id": "RC-002@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "The retirement scan is now per-line, case-insensitive and order-independent (copilot AND review in the same line), so a Copilot-as-reviewer instruction cannot slip through by word order."
+    },
+    {
+      "id": "RA-001@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "head_rule_errors now requires `git merge-base --is-ancestor record_head pr_head` before the v2 record-tail diff, and a non-ancestor fixture asserts the refusal."
+    },
+    {
+      "id": "RA-002@qwen3.8-max",
+      "disposition": "rejected",
+      "fix_sha": null,
+      "reason": "The controller is deliberately forge-free and resolves every commit in the control home's object DB (the same assumption as BUILD_GREEN commit_sha and MERGED merged_sha). The required CI check is the forge-anchored layer: it compares the record head against github.event.pull_request.head.sha. Adding a per-story code-repo parameter is a controller-contract change outside this slice's boundary.",
+      "issue": null,
+      "evidence": "controllers checks: BUILD_GREEN `commit_exists(self.root, sha)`; MERGE_ELIGIBLE `head_sha_resolves` (added 01b0449); architecture \u00a7Review lane Required check paragraph states the two-layer split."
+    },
+    {
+      "id": "RA-003@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "REVIEWING now requires SHA_RE.fullmatch(review_head_sha) before the prefix comparison; empty/non-hex evidence fails with a named detail."
+    },
+    {
+      "id": "RA-004@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "fbceac56b3fbbda583f84577c41f01cd76820cf2",
+      "reason": null,
+      "issue": null,
+      "evidence": "ci_gate duplicate-slot guard covered by a new fixture asserting the 'duplicate reviewer slots' refusal."
+    },
+    {
+      "id": "RA-005@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "New ci_gate test runs the bare workflow invocation (default --records-root and --panel) and passes against the committed panel."
+    },
+    {
+      "id": "RA-006@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "New ci_gate fixture renders WITH --package-manifest, deletes the package file, and passes at the exact head and a record-tail head."
+    },
+    {
+      "id": "RA-007@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "fbceac56b3fbbda583f84577c41f01cd76820cf2",
+      "reason": null,
+      "issue": null,
+      "evidence": "manifest contract/gate specs are now repo-relative only (absolute or `..` refused at render and check); rebuild resolves them under the repo after a containment check."
+    },
+    {
+      "id": "RA-008@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "validate-doc now uses --repo to resolve a relative --package path; a foreign-cwd test pins the behaviour."
+    },
+    {
+      "id": "RS-001@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "record_head is validated with SHA_RE before the head comparison."
+    },
+    {
+      "id": "RS-002@qwen3.8-max",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "Workflow passes PR_NUMBER and HEAD_SHA through the job env and quotes them in the shell; no ${{ }} expansion in the run block."
+    },
+    {
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "disposition": "rejected",
+      "fix_sha": null,
+      "reason": "Same boundary as RA-002: the controller's evidence model is object-DB + human gate, not a forge client. 01b0449 adds head_sha_resolves/review_head_resolves so the evidenced head must exist in the repo; the required CI check binds the actual PR head.",
+      "issue": null,
+      "evidence": "controller.py REVIEWING/MERGE checks; architecture \u00a7Review lane Required check sentence (two complementary layers)."
+    },
+    {
+      "id": "RC-002@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "ruleset-drill.md is added as a record gate input (ruleset id, contexts, active state, red-run URL and message)."
+    },
+    {
+      "id": "RC-003@deepseek-v4-pro-0813",
+      "disposition": "rejected",
+      "fix_sha": null,
+      "reason": "The renderer already refuses an undispositioned finding: match_dispositions fails with `review record: undispositioned findings: ...` (record.py). The behaviour predates this slice's diff, so it is not visible in the package; the runbook sentence is accurate.",
+      "issue": null,
+      "evidence": "tools/review/record.py match_dispositions (undisposed list -> fail); S3.5a T3 acceptance shipped this behaviour."
+    },
+    {
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "disposition": "rejected",
+      "fix_sha": null,
+      "reason": "Same boundary as RC-001: forge-free controller; the CI required check is the forge-anchored head binding. The new head_sha_resolves check closes the fabricated-head case.",
+      "issue": null,
+      "evidence": "01b0449 controller checks; ci_gate.py --head from github.event.pull_request.head.sha."
+    },
+    {
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "open_blocker_majors now counts only fixed (with a non-empty fix_sha), rejected, or deferred entries; a value-less disposition leaves the finding OPEN."
+    },
+    {
+      "id": "RA-003@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "ruleset-drill.md records the ruleset state transition and the red drill; the green half is the PR check run after the record commit."
+    },
+    {
+      "id": "RA-004@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "A real request-path DRAFT_OPENED -> REVIEWING integration test now asserts the pr_number round-trips through the persisted row shape."
+    },
+    {
+      "id": "RS-001@deepseek-v4-pro-0813",
+      "disposition": "fixed",
+      "fix_sha": "01b04493f6d9041fde746071015984429b5be017",
+      "reason": null,
+      "issue": null,
+      "evidence": "record_head is validated with SHA_RE before the prefix comparison."
+    },
+    {
+      "id": "RS-002@deepseek-v4-pro-0813",
+      "disposition": "rejected",
+      "fix_sha": null,
+      "reason": "The declared panel is repository policy, not a universal controller constant. The required CI check enforces it via ci_gate.panel_slot_errors against kit-v0.1/review-panel.toml; the generic controller enforces panel symmetry through the record authority (check_panel_symmetry). Imposing a kit-specific panel file on every target repo would break the controller's repo-agnostic contract.",
+      "issue": null,
+      "evidence": "ci_gate.py panel_slot_errors + review-panel.toml; record.py check_panel_symmetry (v2 records)."
+    }
+  ]
+}

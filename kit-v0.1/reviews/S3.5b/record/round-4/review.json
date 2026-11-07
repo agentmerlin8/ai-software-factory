@@ -1,0 +1,292 @@
+{
+  "base_sha": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+  "dispositions": [
+    {
+      "disposition": "fixed",
+      "evidence": "fix_reachability_errors now has a refusal-branch regression test: a fixed disposition citing a side-branch commit that resolves and touches the artifact is refused with 'not reachable from pr head' (test_fixed_disposition_off_pr_history_is_refused); the merge-base call is one _is_ancestor helper.",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Same trust-boundary fix as RS-001@deepseek: code-owner review enabled and read back, both owner accounts in CODEOWNERS, claim corrected to the exact mechanism; an agent-pushed PR cannot self-clear the check.",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RA-001@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "coverage_errors reads the manifest's withheld list and refuses withheld changed paths with the named 'deliberately withheld' message, distinct from 'never packaged' (test_withheld_changed_path_refused_as_deliberate_not_missing).",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "New regression test renders a real record whose fixed disposition cites a side-branch commit that is not an ancestor of the PR head and asserts the evaluate() 'not reachable from pr head' refusal; removing the guard fails the test.",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RA-002@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "New regression test moves a reviewed source file into the record directory, proves the two-dot diff without --no-renames looks record-only, and asserts the head rule refuses; dropping the flag fails the test.",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RA-003@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "controller._put_record_checks now fails review_head_match closed when the authority rejected the record, so the persisted trail never claims a head rule that never ran (4c4987d, test_ready_for_review_authority_failure_never_claims_head_match).",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "The architecture.md S3.5b paragraph no longer claims unenforced protection: the claim is now backed by the enabled code-owner-review rule and the recorded API readback in the T6 drill evidence, with the admin-merge residual stated.",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RC-001@qwen3.8-max",
+      "issue": null,
+      "reason": null
+    },
+    {
+      "disposition": "fixed",
+      "evidence": "Require review from Code Owners is enabled on main (PATCH + API readback), CODEOWNERS names both owner accounts for the workflow/tools/panel trees, the architecture claim names the exact mechanism and the admin-merge residual, and the T6 drill evidence records the readback; the workflow comment documents the boundary.",
+      "fix_sha": "4c4987ddd5c2f8353e375157d27af9806b8a8dca",
+      "id": "RS-001@deepseek-v4-pro-0813",
+      "issue": null,
+      "reason": null
+    }
+  ],
+  "findings": [
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/review/record_gate.py:209",
+      "evidence": "the EX-05 guard added at this head \u2014 `fix_reachability_errors`, wired into `evaluate` via `errs.extend(fix_reachability_errors(record, repo, pr_head))` \u2014 has no test that exercises its refusal branch. Every fixture in the shipped test diffs (test_review_gate.py, test_ci_gate.py, test_controller.py) renders dispositions whose `fix_sha` is `self.fix_a`, a commit that IS an ancestor of the reviewed head, so the `merge-base --is-ancestor` check only ever sees its pass path. The concrete production change that defeats the guard while leaving every test green: `return []` at the top of fix_reachability_errors (or deleting the extend call). With that change, a `fixed` disposition citing a commit on another branch clears a blocker/major at READY_FOR_REVIEW and MERGE_ELIGIBLE, and the review-record required check exits 0, while the 1549-test unit suite in the gate evidence log still passes.",
+      "id": "RA-001@deepseek-v4-pro-0813",
+      "lens": "review-adversary",
+      "location_key": "8fb5fd6afbfef0832adc9eecc1913c06b2fff1895295e730da295c6f295c7942",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "add a test (gate-level in test_review_gate.py or end-to-end in test_ci_gate.py) that renders a record whose disposition entry carries `disposition: fixed` with a fix_sha resolving in the repo but NOT an ancestor of the PR head, and asserts the named refusal `fixed disposition ... is not reachable from pr head` from evaluate() and exit 1 with that message from ci_gate.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:36",
+      "evidence": "The workflow's own comment states 'A pull_request workflow is read from the PR ref, so running the PR's own copy would let the PR stub out the check' \u2014 but the base-checkout mitigation only covers the verifier script and panel file, not the job definition itself: a PR edit to the review-record job (env HEAD_SHA/BASE_SHA, the step body, or the if: condition) is what GitHub executes. The only stated backstop is CODEOWNERS, which the diff itself declares advisory \u2014 'CODEOWNERS is advisory unless the branch protection rule requires code-owner review' (.github/CODEOWNERS:6-7) \u2014 and the ruleset-drill gate evidence records 'the ruleset only requires the two checks', with no code-owner-review requirement. A PR that rewrites the review-record job body to a no-op while keeping the job name therefore satisfies the required check, defeating architecture.md's claim 'a PR cannot stub the gate that judges it'.",
+      "id": "RA-001@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "90bea8ef36d746c2f9b6fd139a0c11717d2955a8f10a0a92c7d5b83c1bd65a4e",
+      "model": "qwen3.8-max",
+      "required_change": "Make the enforcement claim true or retract it: enable 'Require review from Code Owners' on the main ruleset and record that setting in the T6 drill evidence, or move the gate to a trigger whose workflow definition the PR cannot edit; until one of those ships, architecture.md must not assert that a PR cannot stub the gate.",
+      "rubric_dimension": "behavior",
+      "severity": "blocker",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/review/ci_gate.py:194",
+      "evidence": "coverage_errors derives `covered` only from `covered.update(coverage[\"shipped\"])` plus `covered.update(coverage[\"binary\"])`; a manifest-bearing record defeats the required check when any changed path is withheld \u2014 a first-class build input this same head continues to support end-to-end (`--withheld` list files, `manifest.withheld`, and check-endorsement via test_withheld_enforcement_derives_from_rebuilt_package). The only excluded prefixes are the records roots and qualifying record directories, so a withheld changed path outside those prefixes reads as `coverage: N changed path(s) were never packaged for review` \u2014 a refusal that misnames deliberate withholding as a packaging defect, and that arrives only at the merge-time required check (build, render and `record.py check` all pass). The builders do record `withheld` and `omitted`, so the gate could name the condition exactly; today it fires late, unnamed.",
+      "id": "RA-002@deepseek-v4-pro-0813",
+      "lens": "review-adversary",
+      "location_key": "296a671cf2e5e7e7c412c078d27885bbed2f628ff39f4b61e364e2f157b78ad1",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "either refuse at build/render time a manifest-bearing record whose withheld list intersects changed paths outside the coverage exclusions (a named, early refusal), or make coverage_errors inspect `manifest.withheld` and refuse withheld changed paths with a message that names them as deliberately withheld rather than never-packaged \u2014 and add the corresponding fixture test.",
+      "rubric_dimension": "operational",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/review/record_gate.py:301",
+      "evidence": "evaluate() adds 'errs.extend(fix_reachability_errors(record, repo, pr_head))' \u2014 the EX-05 P1 guard whose refusal names a fix_sha 'not reachable from pr head ... a fix on another branch cannot clear a finding' \u2014 but no test in the package exercises it: every fixture disposition uses fix_sha=self.fix_a (an ancestor of every head evaluated), test_controller.py stubs the authority, and no shipped test asserts the 'not reachable' refusal. Deleting the fix_reachability_errors call from evaluate(), or inverting its merge-base --is-ancestor condition, leaves every test in the package green \u2014 the guard is not proof against its own removal.",
+      "id": "RA-002@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "8fb5fd6afbfef0832adc9eecc1913c06b2fff1895295e730da295c6f295c7942",
+      "model": "qwen3.8-max",
+      "required_change": "Add a regression test (in tools/tests/test_review_gate.py or tools/review/tests/test_ci_gate.py) that renders a real record whose 'fixed' disposition cites a commit that resolves in the repo but sits on a side branch that is not an ancestor of the PR head, and asserts evaluate()/the ci gate refuses naming 'not reachable from pr head'; the test must fail when the reachability call is removed.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 2,
+      "artifact_reference": "package:diff@tools/review/record_gate.py:171",
+      "evidence": "The record-tail head rule carries the EX-04 P1 guard 'proc = _git(repo, \"diff\", \"--name-only\", \"--no-renames\", ...)' with the comment 'with rename detection a reviewed source file MOVED into the record directory reports only its destination path, so the deletion outside the record dir is invisible and an old record passes for a new head' \u2014 but no shipped test constructs a move or rename: the tail-rule tests only add or edit files (test_record_tail_commit_passes_code_commit_fails, test_non_ancestor_pr_head_with_clean_two_dot_diff_refused). Dropping '--no-renames' from that diff leaves every test in the package green and silently re-opens the rename bypass the flag exists to close.",
+      "id": "RA-003@qwen3.8-max",
+      "lens": "review-adversary",
+      "location_key": "8fb5fd6afbfef0832adc9eecc1913c06b2fff1895295e730da295c6f295c7942",
+      "model": "qwen3.8-max",
+      "required_change": "Add a regression test where the post-record tail commit git-mv's a reviewed source file into the record directory, and assert head_rule_errors (and evaluate) refuse because the source-side deletion lies outside the record directory; the test must fail if the --no-renames flag is removed from the head-rule diff.",
+      "rubric_dimension": "test_quality",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@tools/controller.py:673",
+      "evidence": "Asymmetric check bookkeeping vs the frozen decision \"a malformed record is not valid evidence\" (S3.5b external review P2 fix applied in this round): _put_record_checks writes `put(\"review_head_match\", not head_errs, head_errs or (f\"record valid at head {head_ev!r} (exact match, record-tail commits, or a v1 ancestor)\" if head_ev else \"head rule not evaluated\"))` and computes `head_errs = [e for e in errs if e.startswith(\"head rule\")]`. But record_gate.evaluate returns right after an authority failure (\"errs.extend(check_record(...)) ... if errs: return errs\"), so when the record authority rejects the record no error ever starts with \"head rule\". Failed record authority => the gate has never evaluated the head rule; `_put_record_checks` receives a non-None record and errs containing only authority errors; head_errs is empty; so the persisted transition check `review_head_match` lands as ok with the detail 'record valid at head ... (exact match, record-tail commits, or a v1 ancestor)' \u2014 a claim that the sibling check in the same check_results (`review_record_valid`: 'record rejected by the authority: ...') explicitly contradicts. The record-unreadable branch (record is None) correctly fails this check closed ('head match cannot be established' \u2014 fail closed), but the readable-but-rejected branch records a false positive claim. This is a demonstrable reading of the delivered code, it does not change any verdict (review_record_valid and no_open_blocker_major both fail closed, so the transition is still refused \u2014 severity is therefore capped at minor), but it falsifies the internal evidence trail for exactly the case the round-4 'authority first' defect-fix order was built for.",
+      "id": "RC-001@deepseek-v4-pro-0813",
+      "lens": "review-contract",
+      "location_key": "bca8d843dfbfb0d5b5d5382ecec920e4ad0d74cd0a6a248245d4c0543ab3e9ae",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "When authority_errs are non-empty, review_head_match must be recorded as False with a fail-closed detail (e.g. 'head match cannot be established \u2014 the record was rejected by the authority'), mirroring the record-unreadable branch; only a head-rule evaluation that actually ran on an authority-accepted record may set review_head_match true. This requires an authority-clean guard before the `not head_errs` computation in _put_record_checks.",
+      "rubric_dimension": "contract_fidelity",
+      "severity": "minor",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@kit-v0.1/architecture.md:618",
+      "evidence": "architecture.md (Required check (S3.5b) paragraph) claims a PR cannot stub the gate because \"the `.github/workflows/` and `tools/review/` trees are CODEOWNERS-protected\", but no artifact in the package establishes that protection, and the package's own evidence points the other way: the CODEOWNERS file added by this same diff states \"CODEOWNERS is advisory unless the branch protection rule requires code-owner review (\\\"Require review from Code Owners\\\" on main)\", and the ruleset-drill gate evidence records \"Required status checks: `kit-ci`, `review-record`\" and \"the ruleset only requires the two checks\" \u2014 no code-owner-review requirement is read back anywhere. The workflow diff itself concedes \"A pull_request workflow is read from the PR ref, so running the PR's own copy would let the PR stub out the check\", so CODEOWNERS enforcement is the only cited compensation for that trust boundary, and it is claimed without an artifact \u2014 the same over-description the frozen contract warns against (\"never describe a disabled check as enforcement\").",
+      "id": "RC-001@qwen3.8-max",
+      "lens": "review-contract",
+      "location_key": "0aa07c6188d958a7ea11cc09200d0e0aa4f56bd86512467d91adbc64ee249813",
+      "model": "qwen3.8-max",
+      "required_change": "Make the shipped claim match the recorded enforcement: either enable \"Require review from Code Owners\" on the main ruleset and record it in the ruleset-drill evidence (read back from the API like required_status_checks), or amend the architecture.md S3.5b paragraph to state that CODEOWNERS is advisory and name the actual recorded compensation for PR-ref workflow edits.",
+      "rubric_dimension": "docs_process",
+      "severity": "major",
+      "source": "internal"
+    },
+    {
+      "actionable": true,
+      "agreement": 1,
+      "artifact_reference": "package:diff@.github/workflows/kit-ci.yml:467",
+      "evidence": "The diff pins only the VERIFIER script out of the base revision; the job body that selects and invokes the verifier ships in .github/workflows/kit-ci.yml, which for a pull_request event is itself read from the PR ref. The workflow's own comment concedes the mechanism: 'A pull_request workflow is read from the PR ref, so running the PR's own copy would let the PR stub out the check' \u2014 the mitigation stops at the script, so a PR that also edits the review-record job (e.g. a run step that exits 0) clears the required check named 'review-record' without any record. The residual is uncompensated: .github/CODEOWNERS protects /.github/workflows/ and /tools/review/ but its own text says enforcement exists only 'unless the branch protection rule requires code-owner review (\"Require review from Code Owners\" on main)', and the ruleset-drill evidence shows the main ruleset requires only the two status checks ('the ruleset only requires the two checks'), so the CODEOWNERS entries are advisory. The claim that a PR 'cannot stub the gate that judges it' is therefore false at the invocation layer for every lane actor with branch push access.",
+      "id": "RS-001@deepseek-v4-pro-0813",
+      "lens": "review-security",
+      "location_key": "71cfd0ccffb6654ab59c7dc1ba523135fe6860199a393c207c19d9e0c2f0d2a9",
+      "model": "deepseek-v4-pro-0813",
+      "required_change": "make the gate invocation un-stubbable before relying on the check: enable code-owner review for the .github/workflows/ and tools/review/ trees the CODEOWNERS file already names (or otherwise pin the review-record job body outside the PR-controlled tree), so a PR-authored workflow change cannot self-clear the required check. Until that enforcement exists, stop describing the check as one a PR cannot stub.",
+      "rubric_dimension": "security",
+      "severity": "major",
+      "source": "internal"
+    }
+  ],
+  "gate_results": [
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/gate-r4.log",
+      "evidence_sha256": "ac72423ce960c1626ba191001f33f980ec22a1bf6cedaf77e9f4374dd06ab795",
+      "exit": 0,
+      "gate": "gate-selftest"
+    },
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/ruleset-drill.md",
+      "evidence_sha256": "3f153f92471832a4d17731573dcf955536679c62bc99d340a0a2a36193549241",
+      "exit": 0,
+      "gate": "ruleset-drill"
+    },
+    {
+      "evidence_path": "kit-v0.1/reviews/S3.5b/record/unit-r4.log",
+      "evidence_sha256": "eb17d3250600652b48e3e97b577f31091ca93b7acf9404f2d37fec46097f6e87",
+      "exit": 0,
+      "gate": "unit"
+    }
+  ],
+  "head_sha": "9b7bccdb82e89e8a8be6b0e49ef7c79145a0c699",
+  "lane": {
+    "name": "review-lane-v1",
+    "version": 2
+  },
+  "open_findings": [],
+  "package": {
+    "manifest": {
+      "allowed": null,
+      "base": "bca959a63db7ddcaf12270e01ad70d6722b2442e",
+      "contract": [
+        "kit-v0.1/reviews/S3.5b/record/CONTRACT-issue-25.md:contract",
+        "kit-v0.1/reviews/S3.5b/record/PRIOR-FINDINGS-R4.md:prior-findings"
+      ],
+      "gate": [
+        "kit-v0.1/reviews/S3.5b/record/unit-r4.log:unit",
+        "kit-v0.1/reviews/S3.5b/record/gate-r4.log:gate-selftest",
+        "kit-v0.1/reviews/S3.5b/record/ruleset-drill.md:ruleset-drill"
+      ],
+      "head": "9b7bccdb82e89e8a8be6b0e49ef7c79145a0c699",
+      "include": [],
+      "max_diff_bytes": 1500000,
+      "max_input_bytes": 200000,
+      "version": 1,
+      "withheld": [
+        "kit-v0.1/reviews/"
+      ]
+    },
+    "path": "kit-v0.1/reviews/S3.5b/record/package-r4.md",
+    "sha256": "bab82dcf50e57e5e3776a87e04986ec1b698da4988175a465a7f2964d5d092e6"
+  },
+  "pr": 32,
+  "prior_rounds": [],
+  "reviewers": [
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r4/RA-deepseek.yaml",
+      "document_sha256": "22cb4153eae0edf732d3ae741de47e99b76a2ee1a3d2f352c072b155ebd4c949",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r4/RA-qwen.yaml",
+      "document_sha256": "b96f9f47070dcb978058049b63b4afeef4b6330deba24e55830fd80583775ad1",
+      "model": "qwen3.8-max",
+      "role": "review-adversary",
+      "rubric_version": "review-adversary-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r4/RC-deepseek.yaml",
+      "document_sha256": "8d60508fd754076fbcaf36ced4d5c1f47736b986ed5db99f1e4710a09d6954af",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r4/RC-qwen.yaml",
+      "document_sha256": "cb31c9e7b219fb11ba48c1574670e639d2148e5b0da9e0d3357edba33750750f",
+      "model": "qwen3.8-max",
+      "role": "review-contract",
+      "rubric_version": "review-contract-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r4/RS-deepseek.yaml",
+      "document_sha256": "015958ff70192908eeb2f895cadb4d8f9b277c25e42691ead13a4ddd5a7ccc03",
+      "model": "deepseek-v4-pro-0813",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    },
+    {
+      "document": "kit-v0.1/reviews/S3.5b/record/r4/RS-qwen.yaml",
+      "document_sha256": "e8d084ef5dcec4151bb927c35085472d1ce963169848a3d74703c4fc69516c84",
+      "model": "qwen3.8-max",
+      "role": "review-security",
+      "rubric_version": "review-security-v1"
+    }
+  ],
+  "schema": "review.record.v2",
+  "story": "S3.5b",
+  "undispositioned": [],
+  "verdict": {
+    "blockers": 1,
+    "decision": "CHANGES_REQUESTED",
+    "infos": 0,
+    "loop": 4,
+    "loop_cap": 5,
+    "majors": 5,
+    "minors": 2
+  }
+}

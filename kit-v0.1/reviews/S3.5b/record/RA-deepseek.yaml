@@ -1,0 +1,37 @@
+schema: review.findings.v1
+review:
+  reviewer: review-adversary
+  rubric_version: review-adversary-v1
+  package_sha256: f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RA-001
+      severity: major
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/tests/test_controller.py:584
+      evidence: "The head rule at READY_FOR_REVIEW/MERGE_ELIGIBLE compares the record head only against caller-supplied evidence (_review_evidence(rel, head_ev) feeds evaluate with the transition's own review_head_sha/head_sha string) and never against the repository's actual current HEAD. A story whose tree contains unreviewed code commits reaches READY_FOR_REVIEW when the transition names the stale pre-code head: test_ready_for_review_record_head_rule commits late.py on top of the record's head, refuses review_head_sha=later, then asserts rc==0 for review_head_sha=<old head> while the unreviewed commit is still the repo HEAD. The same mechanism at MERGE_ELIGIBLE runs the head rule against evidence head_sha (test_v2_later_code_commit_refused refuses only when the HONEST later head is supplied; a stale named head is unexercised). No production change is required to defeat the 'record valid AT the current head' guard — it binds nothing to the true current head — and any actual-HEAD binding, if added, could be removed with every packaged test green."
+      required_change: "Anchor the head rule to the repository's actual HEAD at transition time (resolve the current commit and require the record to cover it under the exact / record-only-tail / v1-ancestor rules), and add a test that advances the tree with a code commit and asserts READY_FOR_REVIEW and MERGE_ELIGIBLE are refused even when the stale head is named as evidence."
+      actionable: true
+    - id: RA-002
+      severity: minor
+      rubric_dimension: behavior
+      artifact_reference: package:diff@tools/review/record_gate.py:97
+      evidence: "open_blocker_majors treats a disposition as clearing a blocker/major purely by id membership — dispositioned = {d.get('id') for d in record.get('dispositions', []) if isinstance(d, dict)} — never checking the entry's disposition VALUE: a finding dispositioned as {'id': 'RA-001@m'} with no disposition field, or a garbage value, counts as dispositioned and clears the open blocker/major at the gate re-assertion layer. The controller tests stub the record authority (mock.patch.object(CT.record_gate, 'check_record', ...)), so no packaged test exercises a malformed disposition entry at the gate layer, and the gate's own invariant would clear the blocker while every test stays green."
+      required_change: "Count a disposition entry only when it carries a recognized disposition value in {fixed, rejected, deferred} (and a fix_sha for fixed), and add a controller test seeding a blocker with a value-less disposition entry that asserts the transition is refused."
+      actionable: true
+    - id: RA-003
+      severity: minor
+      rubric_dimension: operational
+      artifact_reference: package:diff@.github/workflows/kit-ci.yml:25
+      evidence: "The review-record job's refusal only blocks merges once the branch ruleset flips from the staged disabled state to active (owner decision: create ruleset, stage disabled, verify on the live PR, then flip active). The packaged gate evidence (unit.log, gate.log) contains no live-drill artifact showing a throwaway PR blocked without a record and passing with one — the T6 acceptance. While the ruleset stays disabled the required check runs but binds nothing, the cutover's own premise ('a review lane that is not mechanically required is advisory') remains unresolved, and no CI or state-machine test can fail: activating the ruleset is a state outside the diff, and its omission leaves every test green."
+      required_change: "Record the T6 live-drill evidence (throwaway PR blocked without a record / passes with a valid record, plus the ruleset state transition) in the record's gate evidence before the owner flips the ruleset active, so the mechanical requirement is evidenced rather than assumed."
+      actionable: true
+    - id: RA-004
+      severity: minor
+      rubric_dimension: test_quality
+      artifact_reference: package:diff@tools/controller.py:633
+      evidence: "_draft_opened_pr reads the DRAFT_OPENED pr out of the persisted row shape (check_results.evidence_supplied.detail.pr_number), but every REVIEWING test fabricates that row by hand via draft_row() instead of driving a real DRAFT_OPENED transition through the controller. The read-back contract that review_record_pr depends on is therefore never exercised against rows the controller itself persisted: a production change to transition-row persistence that drops the evidence detail leaves pr_expect None and fails closed every new REVIEWING (the 'pr_expect is not None' guard is False), while all packaged tests continue to pass because their fabricated rows carry the expected shape."
+      required_change: "Add one controller-driven integration test that performs a real DRAFT_OPENED transition and then REVIEWING, asserting the pr_number round-trips through the actually-persisted row shape (and that a persisted row without the detail refuses with review_record_pr rather than silently greening)."
+      actionable: true

@@ -24,6 +24,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import controller as CT
 from tools import ledger_lib as L
@@ -80,10 +81,24 @@ def transition_row(eid: str, sid: str, frm: str, to: str,
 
 
 def chain_to(state: str, sid: str = STORY) -> list[dict]:
-    """Seeded story-level transitions BACKLOG -> ... -> `state`."""
+    """Seeded story-level transitions BACKLOG -> ... -> `state`.
+
+    The DRAFT_OPENED row carries its evidence detail (pr 42, review-lane):
+    the later record gates bind the selected record to that persisted PR.
+    """
     rows = []
     for i, (frm, to) in enumerate(CHAIN, 1):
-        rows.append(transition_row(f"tr-{sid}-{i}", sid, frm, to))
+        if to == "DRAFT_OPENED":
+            rows.append(transition_row(
+                f"tr-{sid}-{i}", sid, frm, to, check_results={
+                    "order": {"ok": True, "detail": "ok"},
+                    "evidence_supplied": {
+                        "ok": True,
+                        "detail": {"pr_number": "42",
+                                   "review_request_mechanism": "review-lane"}},
+                }))
+        else:
+            rows.append(transition_row(f"tr-{sid}-{i}", sid, frm, to))
         if to == state:
             break
     return rows
@@ -306,6 +321,59 @@ class ControlHome(unittest.TestCase):
             self.assertIn(name, out)
         self.assertEqual(self.ledger_bytes(), before)
 
+    # -- review-record fixtures (S3.5b cutover) ------------------------------
+    # The record AUTHORITY (record.py check, a real subprocess inside
+    # record_gate) is stubbed here — controller tests already stub gate
+    # scripts; the one real-subprocess integration lives in
+    # tools/tests/test_review_gate.py.
+    def stub_record_authority(self, errors: list[str] | None = None) -> None:
+        p = mock.patch.object(CT.record_gate, "check_record",
+                              return_value=list(errors or []))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def fake_record(self, rel: str = "review/record-1", head: str | None = None,
+                    schema: str = "review.record.v2", pr: int = 42,
+                    findings: list | None = None,
+                    dispositions: list | None = None,
+                    verdict: dict | None = None) -> tuple[str, str, str]:
+        """Write a minimal review record under the control home and stub the
+        authority to accept it. Returns (rel, sha256(review.json), head)."""
+        head = head if head is not None else self.head()
+        self.stub_record_authority()
+        d = self.root / rel
+        d.mkdir(parents=True, exist_ok=True)
+        rec = {
+            "schema": schema, "story": self.sid, "pr": pr,
+            "base_sha": "0" * 40, "head_sha": head,
+            "package": {"path": "package.md", "sha256": "f" * 64},
+            "lane": {"name": "review-lane-v1", "version": 2},
+            "reviewers": [], "gate_results": [],
+            "findings": findings or [], "dispositions": dispositions or [],
+            "prior_rounds": [], "open_findings": [], "undispositioned": [],
+            "verdict": verdict or {"decision": "APPROVED", "blockers": 0,
+                                   "majors": 0, "minors": 0, "infos": 0,
+                                   "loop": 1, "loop_cap": 2},
+        }
+        (d / "review.json").write_text(
+            json.dumps(rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return rel, CT.record_gate.record_sha256(str(d)), head
+
+    def draft_row(self, pr: str = "42", mech: str = "review-lane",
+                  eid: str = "tr-draft",
+                  sid: str | None = None) -> dict:
+        """A DRAFT_OPENED transition row carrying its evidence detail (the
+        controller reads pr_number back out of it at REVIEWING)."""
+        return transition_row(eid, sid or self.sid, "BUILD_GREEN",
+                              "DRAFT_OPENED", check_results={
+                                  "order": {"ok": True, "detail": "ok"},
+                                  "evidence_supplied": {
+                                      "ok": True,
+                                      "detail": {
+                                          "pr_number": pr,
+                                          "review_request_mechanism": mech}},
+                              })
+
 
 GOOD_OVERRIDE = ("scope: STORY-001\nby: human-ops\n"
                  "reason: stuck claim lock recovery\ndate: 2026-10-25T00:00:00Z\n")
@@ -406,26 +474,31 @@ class TestEvidenceFormats(ControlHome):
 
     def test_tested_sha_prefix_match(self):
         head = self.head()
+        rel, _, _ = self.fake_record(head=head)
         self.seed(chain_to("READY_FOR_REVIEW") + [
             gate_row("g-1", self.sid, "merge")])
         before = self.ledger_bytes()
         rc, out = self.req("MERGE_ELIGIBLE", {
             "tested_sha": "b" * 7, "head_sha": head,
-            "unresolved_threads": "0", "internal_verdict": "PASS"})
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel})
         self.refused(rc, out, before, "tested_sha_is_head")
         # a 7-hex prefix of the head passes (prefix match)
         rc, out = self.req("MERGE_ELIGIBLE", {
             "tested_sha": head[:7], "head_sha": head,
-            "unresolved_threads": "0", "internal_verdict": "PASS"})
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel})
         self.assertEqual(rc, 0, out)
 
     def test_merge_eligible_zero_threads_and_gate(self):
         head = self.head()
+        rel, _, _ = self.fake_record(head=head)
         self.seed(chain_to("READY_FOR_REVIEW"))
         before = self.ledger_bytes()
         rc, out = self.req("MERGE_ELIGIBLE", {
             "tested_sha": head[:7], "head_sha": head,
-            "unresolved_threads": "1", "internal_verdict": "PASS"})
+            "unresolved_threads": "1", "internal_verdict": "PASS",
+            "review_record": rel})
         self.refused(rc, out, before, "zero_unresolved_threads",
                      "merge_approval")
         # a pending gate row does not satisfy the human merge gate
@@ -434,28 +507,37 @@ class TestEvidenceFormats(ControlHome):
         before = self.ledger_bytes()
         rc, out = self.req("MERGE_ELIGIBLE", {
             "tested_sha": head[:7], "head_sha": head,
-            "unresolved_threads": "0", "internal_verdict": "PASS"})
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel})
         self.refused(rc, out, before, "merge_approval")
 
     def test_pr_number_digits_and_mechanism_enum(self):
         self.seed(chain_to("BUILD_GREEN"))
         before = self.ledger_bytes()
         rc, out = self.req("DRAFT_OPENED", {
-            "pr_number": "abc", "review_request_mechanism": "ready-push"})
+            "pr_number": "abc", "review_request_mechanism": "review-lane"})
         self.refused(rc, out, before, "pr_number")
         rc, out = self.req("DRAFT_OPENED", {
             "pr_number": "42", "review_request_mechanism": "cc-mention"})
         self.refused(rc, out, before, "review_request_mechanism")
-        for mech in ("ready-push", "draft-mention-opportunistic"):
+        # S3.5b cutover: the historical mechanisms are refused as NEW
+        # evidence; review-lane is the only accepted value.
+        for mech in SM.HISTORICAL_REVIEW_MECHANISMS:
             self.seed(chain_to("BUILD_GREEN"))
+            before = self.ledger_bytes()
             rc, out = self.req("DRAFT_OPENED", {
                 "pr_number": "42", "review_request_mechanism": mech})
-            self.assertEqual(rc, 0, out)
+            self.refused(rc, out, before, "review_request_mechanism")
+            self.assertIn("review-lane", out)
+        self.seed(chain_to("BUILD_GREEN"))
+        rc, out = self.req("DRAFT_OPENED", {
+            "pr_number": "42", "review_request_mechanism": "review-lane"})
+        self.assertEqual(rc, 0, out)
 
     def test_no_duplicate_draft_opened(self):
         self.seed(chain_to("BUILD_GREEN"))
         rc, out = self.req("DRAFT_OPENED", {
-            "pr_number": "42", "review_request_mechanism": "ready-push"})
+            "pr_number": "42", "review_request_mechanism": "review-lane"})
         self.assertEqual(rc, 0, out)
         # a prior DRAFT_OPENED poisons any re-request: the order check
         # refuses, and the duplicate-trigger check is the named backstop
@@ -463,11 +545,11 @@ class TestEvidenceFormats(ControlHome):
             transition_row("dup-1", self.sid, "CODING", "DRAFT_OPENED")])
         before = self.ledger_bytes()
         rc, out = self.req("DRAFT_OPENED", {
-            "pr_number": "43", "review_request_mechanism": "ready-push"})
+            "pr_number": "43", "review_request_mechanism": "review-lane"})
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.ledger_bytes(), before)
         results = self.ctrl().check(self.sid, "DRAFT_OPENED", {
-            "pr_number": "43", "review_request_mechanism": "ready-push"})
+            "pr_number": "43", "review_request_mechanism": "review-lane"})
         self.assertIn("no_duplicate_trigger", results)
         self.assertFalse(results["no_duplicate_trigger"]["ok"])
 
@@ -483,8 +565,10 @@ class TestEvidenceFormats(ControlHome):
 
     def test_ready_for_review_verdict_threads_and_pushes(self):
         base = chain_to("FULL_TESTS_GREEN")
+        rel, _, head = self.fake_record()
         ev_ok = {"internal_verdict": "PASS", "threads_state": "all-resolved",
-                 "fix_pushes": "1", "r1_arrival": "both-pre-edit"}
+                 "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+                 "review_record": rel, "review_head_sha": head}
         before = None
         for bad in ({**ev_ok, "internal_verdict": "FAIL"},
                     {**ev_ok, "threads_state": "resolved"},
@@ -511,6 +595,111 @@ class TestEvidenceFormats(ControlHome):
             **ev_ok, "fix_pushes": "2", "r1_arrival": "other"})
         self.assertEqual(rc, 0, out)
 
+    def test_ready_for_review_record_head_rule(self):
+        """READY_FOR_REVIEW refuses a v2 record whose pinned head differs
+        from review_head_sha (no record-tail cover) and accepts exact."""
+        base = chain_to("FULL_TESTS_GREEN")
+        rel, _, head = self.fake_record()  # record pinned at the OLD head
+        (self.stories / self.sid).mkdir(parents=True, exist_ok=True)
+        (self.stories / self.sid / "late.py").write_text("x = 1\n",
+                                                         encoding="utf-8")
+        later = self.commit_all("code change after the record")
+        self.assertNotEqual(later, head)
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": later}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_head_match",
+                     "review_record_valid")
+        # exact head passes
+        rc, out = self.req("READY_FOR_REVIEW", {**ev,
+                                                "review_head_sha": head})
+        self.assertEqual(rc, 0, out)
+
+    def test_ready_for_review_refuses_open_blocker_major(self):
+        base = chain_to("FULL_TESTS_GREEN")
+        rel, _, head = self.fake_record(
+            findings=[{"id": "RA-001@m", "severity": "blocker"}],
+            verdict={"decision": "CHANGES_REQUESTED", "blockers": 1,
+                     "majors": 0, "minors": 0, "infos": 0,
+                     "loop": 1, "loop_cap": 2})
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "no_open_blocker_major",
+                     "review_record_valid")
+        self.assertIn("RA-001@m", out)
+        # a matching disposition clears it: open_blocker_majors is empty and
+        # the CHANGES_REQUESTED verdict is consistent with blockers=1, so
+        # the record gate passes.
+        rel2, _, head2 = self.fake_record(
+            rel="review/record-2",
+            findings=[{"id": "RA-001@m", "severity": "blocker"}],
+            dispositions=[{"id": "RA-001@m", "disposition": "fixed",
+                           "fix_sha": "a" * 40}],
+            verdict={"decision": "CHANGES_REQUESTED", "blockers": 1,
+                     "majors": 0, "minors": 0, "infos": 0,
+                     "loop": 1, "loop_cap": 2})
+        self.seed(base)
+        rc, out = self.req("READY_FOR_REVIEW", {
+            **ev, "review_record": rel2, "review_head_sha": head2})
+        self.assertEqual(rc, 0, out)
+
+    def test_ready_for_review_authority_failure_never_claims_head_match(self):
+        """A record the authority rejected never reached the head rule: the
+        persisted check must fail closed rather than claim a head match it
+        never evaluated (S3.5b round-4 RC-001)."""
+        base = chain_to("FULL_TESTS_GREEN")
+        rel, _, head = self.fake_record()
+        self.stub_record_authority(
+            ["review record: dispositions must be a list"])
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_head_match",
+                     "review_record_valid")
+        self.assertIn("rejected by the authority", out)
+        self.assertIn("head match cannot be established", out)
+        self.assertNotIn("record valid at head", out)
+
+    def test_ready_for_review_refuses_record_for_another_pr(self):
+        """A valid record for a SIBLING PR at the same head cannot clear
+        READY_FOR_REVIEW (S3.5b round-5 RA-001)."""
+        base = chain_to("FULL_TESTS_GREEN")  # DRAFT_OPENED pr 42
+        rel, _, head = self.fake_record(rel="review/other-pr", pr=43)
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("pr=43", out)
+
+    def test_ready_for_review_historical_row_without_pr_fails_closed(self):
+        """A DRAFT_OPENED row with no persisted pr detail cannot establish
+        the record binding: READY_FOR_REVIEW fails closed (S3.5b round-5)."""
+        base = chain_to("BUILD_GREEN") + [transition_row(
+            "tr-draft", self.sid, "BUILD_GREEN", "DRAFT_OPENED",
+            check_results={"order": {"ok": True, "detail": "ok"}})]
+        rel, _, head = self.fake_record()
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": head}
+        self.seed(base)
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("no DRAFT_OPENED pr_number", out)
+
     def test_full_tests_green_zero_rules_and_membership(self):
         base = chain_to("FIXING")
         ev_ok = {"projects": "app,lib", "tests_passed": "120",
@@ -535,6 +724,96 @@ class TestEvidenceFormats(ControlHome):
             "merged_sha": self.head(), "merged_at": TS, "pr_number": "42"})
         self.assertEqual(rc, 0, out)
 
+    def test_merge_eligible_refuses_unresolvable_head_sha(self):
+        """head_sha must resolve in the repo object DB (S3.5b fix):
+        head_sha_resolves is a named check and an unresolvable (but
+        well-formed, prefix-matching) sha is refused."""
+        rel, _, _ = self.fake_record(head="d" * 40)
+        self.seed(chain_to("READY_FOR_REVIEW") + [
+            gate_row("g-1", self.sid, "merge")])
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", {
+            "tested_sha": "d" * 40, "head_sha": "d" * 40,
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel})
+        self.refused(rc, out, before, "head_sha_resolves")
+        # a real head still passes the resolution check
+        head = self.head()
+        rel2, _, _ = self.fake_record(rel="review/record-real", head=head)
+        self.seed(chain_to("READY_FOR_REVIEW") + [
+            gate_row("g-1", self.sid, "merge")])
+        rc, out = self.req("MERGE_ELIGIBLE", {
+            "tested_sha": head[:7], "head_sha": head,
+            "unresolved_threads": "0", "internal_verdict": "PASS",
+            "review_record": rel2})
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        self.assertTrue(row["check_results"]["head_sha_resolves"]["ok"])
+
+    def test_ready_for_review_refuses_unresolvable_review_head(self):
+        """review_head_sha must resolve in the repo object DB (S3.5b fix):
+        review_head_resolves is a named check at READY_FOR_REVIEW."""
+        rel, _, _ = self.fake_record(head="e" * 40)
+        ev = {"internal_verdict": "PASS", "threads_state": "all-resolved",
+              "fix_pushes": "1", "r1_arrival": "both-pre-edit",
+              "review_record": rel, "review_head_sha": "e" * 40}
+        self.seed(chain_to("FULL_TESTS_GREEN"))
+        before = self.ledger_bytes()
+        rc, out = self.req("READY_FOR_REVIEW", ev)
+        self.refused(rc, out, before, "review_head_resolves")
+        # a real head passes
+        head = self.head()
+        rel2, _, _ = self.fake_record(rel="review/record-real", head=head)
+        rc, out = self.req("READY_FOR_REVIEW", {
+            **ev, "review_record": rel2, "review_head_sha": head})
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        self.assertTrue(row["check_results"]["review_head_resolves"]["ok"])
+
+    def test_draft_opened_to_reviewing_pr_number_roundtrip(self):
+        """One REAL controller-driven DRAFT_OPENED -> REVIEWING walk: the
+        DRAFT_OPENED pr_number is requested through the public request
+        path (never a hand-built row), persisted in the transition's
+        evidence_supplied detail, read back at REVIEWING, and matched
+        against the record's pr."""
+        head = self.head()
+        rel, sha, _ = self.fake_record(head=head, pr=42)
+        self.seed(chain_to("BUILD_GREEN"))
+        rc, out = self.req("DRAFT_OPENED", {
+            "pr_number": "42", "review_request_mechanism": "review-lane"})
+        self.assertEqual(rc, 0, out)
+        draft_row = L.load_events(self.ledger)[-1]
+        self.assertEqual(draft_row["to_state"], "DRAFT_OPENED")
+        self.assertEqual(
+            draft_row["check_results"]["evidence_supplied"]["detail"]
+                     ["pr_number"], "42")
+        # REVIEWING via the same request path: the persisted pr_number is
+        # what review_record_pr compares against
+        rc, out = self.req("REVIEWING", {
+            "review_record": rel, "review_record_sha": sha,
+            "review_head_sha": head})
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        self.assertEqual(row["to_state"], "REVIEWING")
+        self.assertEqual(row["from_state"], "DRAFT_OPENED")
+        self.assertTrue(row["check_results"]["review_record_pr"]["ok"])
+        self.assertEqual(
+            row["check_results"]["evidence_supplied"]["detail"]
+               ["review_head_sha"], head)
+        # a record pinned to a DIFFERENT pr than the requested
+        # DRAFT_OPENED pr_number is refused through the same path
+        rel2, sha2, _ = self.fake_record(rel="review/record-other",
+                                         head=head, pr=43)
+        self.seed(chain_to("BUILD_GREEN"))
+        rc, out = self.req("DRAFT_OPENED", {
+            "pr_number": "42", "review_request_mechanism": "review-lane"})
+        self.assertEqual(rc, 0, out)
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", {
+            "review_record": rel2, "review_record_sha": sha2,
+            "review_head_sha": head})
+        self.refused(rc, out, before, "review_record_pr")
+
     def test_live_proof_path_or_url(self):
         self.seed(chain_to("MERGED"))
         before = self.ledger_bytes()
@@ -551,6 +830,296 @@ class TestEvidenceFormats(ControlHome):
         rc, out = self.req("LIVE_PROVEN", {
             "live_proof_evidence": "https://example.test/proof"})
         self.assertEqual(rc, 0, out)
+
+
+# ------------------------------------------- review record gate (S3.5b) ----
+
+class TestReviewingRecordEvidence(ControlHome):
+    """REVIEWING requires the record triple: path + sha256 + pinned head,
+    with the record authority stubbed (the real subprocess integration is
+    tools/tests/test_review_gate.py)."""
+
+    def reviewing_ev(self, rel, sha, head):
+        return {"review_record": rel, "review_record_sha": sha,
+                "review_head_sha": head}
+
+    def seed_at_draft(self, pr="42"):
+        self.seed(chain_to("BUILD_GREEN") + [self.draft_row(pr=pr)])
+
+    def test_reviewing_accepts_valid_record(self):
+        rel, sha, head = self.fake_record(pr=42)
+        self.seed_at_draft("42")
+        rc, out = self.req("REVIEWING", self.reviewing_ev(rel, sha, head))
+        self.assertEqual(rc, 0, out)
+        row = L.load_events(self.ledger)[-1]
+        for key in ("review_record_path", "review_record_sha",
+                    "review_head_match", "review_record_valid",
+                    "review_record_pr"):
+            self.assertIn(key, row["checks_run"])
+            self.assertTrue(row["check_results"][key]["ok"], key)
+
+    def test_reviewing_refuses_missing_evidence_keys(self):
+        rel, sha, head = self.fake_record()
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", {"review_record": rel})
+        self.assertEqual(rc, 2, out)
+        self.assertIn("requires evidence", out)
+        for key in ("review_record_sha", "review_head_sha"):
+            self.assertIn(key, out)
+        self.assertEqual(self.ledger_bytes(), before)
+
+    def test_reviewing_refuses_missing_record_path(self):
+        rel, sha, head = self.fake_record()
+        (self.root / rel / "review.json").unlink()
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", self.reviewing_ev(rel, sha, head))
+        self.refused(rc, out, before, "review_record_path")
+
+    def test_reviewing_refuses_absolute_and_escaping_paths(self):
+        rel, sha, head = self.fake_record()
+        abs_path = str((self.root / rel).resolve())
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING",
+                           self.reviewing_ev(abs_path, sha, head))
+        self.refused(rc, out, before, "review_record_path")
+        # `..` escape (exists outside the control home)
+        outside = self.root.parent / "escaped-record"
+        outside.mkdir(exist_ok=True)
+        shutil.copy(self.root / rel / "review.json",
+                    outside / "review.json")
+        rc, out = self.req("REVIEWING",
+                           self.reviewing_ev("../escaped-record", sha, head))
+        self.refused(rc, out, before, "review_record_path")
+
+    def test_reviewing_refuses_bad_sha(self):
+        rel, sha, head = self.fake_record()
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING",
+                           self.reviewing_ev(rel, "e" * 64, head))
+        self.refused(rc, out, before, "review_record_sha")
+        self.assertIn(sha, out)  # names the actual digest
+
+    def test_reviewing_refuses_head_mismatch(self):
+        rel, sha, head = self.fake_record()
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING",
+                           self.reviewing_ev(rel, sha, "d" * 40))
+        self.refused(rc, out, before, "review_head_match")
+        # a 7-hex prefix of the record head passes (7-40 hex evidence)
+        rc, out = self.req("REVIEWING",
+                           self.reviewing_ev(rel, sha, head[:7]))
+        self.assertEqual(rc, 0, out)
+
+    def test_reviewing_refuses_empty_and_non_hex_review_head(self):
+        """review_head_sha must be 7-40 lowercase hex BEFORE the equality
+        comparison (S3.5b fix): empty and non-hex values fail the named
+        check, and an empty value is already an intake refusal."""
+        rel, sha, _ = self.fake_record()
+        self.seed_at_draft()
+        # empty value: evidence intake refuses (rc 2) on the request path
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING",
+                           {"review_record": rel, "review_record_sha": sha,
+                            "review_head_sha": ""})
+        self.assertEqual(rc, 2, out)
+        self.assertIn("requires evidence", out)
+        self.assertEqual(self.ledger_bytes(), before)
+        # empty value straight through check(): review_head_match fails
+        results = self.ctrl().check(self.sid, "REVIEWING", {
+            "review_record": rel, "review_record_sha": sha,
+            "review_head_sha": ""})
+        self.assertFalse(results["review_head_match"]["ok"])
+        self.assertIn("7-40 lowercase hex",
+                      results["review_head_match"]["detail"])
+        # non-hex values of every flavour fail the named check
+        for bad in ("NOT-HEX!", "g" * 40, "z" * 7, "a" * 41,
+                    "0123456789abcdefABCDEF"):
+            self.seed_at_draft()
+            before = self.ledger_bytes()
+            rc, out = self.req("REVIEWING",
+                               self.reviewing_ev(rel, sha, bad))
+            self.refused(rc, out, before, "review_head_match")
+
+    def test_reviewing_refuses_pr_mismatch(self):
+        rel, sha, head = self.fake_record(pr=42)
+        self.seed_at_draft("43")
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", self.reviewing_ev(rel, sha, head))
+        self.refused(rc, out, before, "review_record_pr")
+
+    def test_reviewing_refuses_invalid_record_per_authority(self):
+        rel, sha, head = self.fake_record()
+        # the authority (record.py check, stubbed) names a failure
+        self.stub_record_authority(
+            ["review record: package hash mismatch: recorded x, computed y"])
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", self.reviewing_ev(rel, sha, head))
+        self.refused(rc, out, before, "review_record_valid")
+        self.assertIn("package hash mismatch", out)
+
+    def test_reviewing_refuses_unparseable_review_json(self):
+        rel, sha, head = self.fake_record()
+        (self.root / rel / "review.json").write_text("{not json\n",
+                                                     encoding="utf-8")
+        self.seed_at_draft()
+        before = self.ledger_bytes()
+        rc, out = self.req("REVIEWING", self.reviewing_ev(rel, sha, head))
+        self.refused(rc, out, before, "review_record_valid")
+
+
+class TestHistoricalMechanismFold(ControlHome):
+    """Ledgers whose DRAFT_OPENED row carries a historical mechanism still
+    fold forward: the read path never re-judges recorded transitions."""
+
+    def historical_chain(self, mech):
+        rows = chain_to("BUILD_GREEN")
+        rows.append(self.draft_row(pr="42", mech=mech))
+        rows.extend(transition_row(f"tr-h-{i}", self.sid, frm, to)
+                    for i, (frm, to) in enumerate(CHAIN[10:15], 1))
+        # CHAIN[10] is ("DRAFT_OPENED", "REVIEWING") ... through MERGED
+        rows.append(transition_row("tr-h-6", self.sid,
+                                   "MERGE_ELIGIBLE", "MERGED"))
+        return rows
+
+    def test_ready_push_history_folds_to_merged(self):
+        for mech in SM.HISTORICAL_REVIEW_MECHANISMS:
+            self.seed(self.historical_chain(mech))
+            self.assertEqual(self.ctrl().state(self.sid), "MERGED", mech)
+
+    def test_no_rewrite_of_history(self):
+        self.seed(self.historical_chain("ready-push"))
+        before = self.ledger_bytes()
+        # reading state (and rendering) never touches the ledger
+        self.assertEqual(self.ctrl().state(self.sid), "MERGED")
+        self.assertEqual(self.ledger_bytes(), before)
+        # the historical value survives verbatim in the stored row
+        row = [e for e in L.load_events(self.ledger)
+               if e.get("to_state") == "DRAFT_OPENED"][0]
+        detail = row["check_results"]["evidence_supplied"]["detail"]
+        self.assertEqual(detail["review_request_mechanism"], "ready-push")
+
+    def test_later_transitions_from_history_are_not_refused(self):
+        # a story parked at REVIEWING under the historical mechanism still
+        # moves forward (FIXING is next-in-sequence; no record evidence)
+        rows = chain_to("BUILD_GREEN")
+        rows.append(self.draft_row(pr="42", mech="draft-mention-opportunistic"))
+        rows.append(transition_row("tr-h-1", self.sid,
+                                   "DRAFT_OPENED", "REVIEWING"))
+        self.seed(rows)
+        rc, out = self.req("FIXING")
+        self.assertEqual(rc, 0, out)
+
+
+class TestMergeEligibleRecordHeadRule(ControlHome):
+    """MERGE_ELIGIBLE: the record must cover head_sha — exact, a v2
+    record-only tail, or a v1 ancestor. Real git commits in the temp
+    control-home repo; the record authority is stubbed."""
+
+    def seed_ready(self):
+        self.seed(chain_to("READY_FOR_REVIEW") + [
+            gate_row("g-1", self.sid, "merge")])
+
+    def merge_ev(self, head, rel):
+        return {"tested_sha": head[:7], "head_sha": head,
+                "unresolved_threads": "0", "internal_verdict": "PASS",
+                "review_record": rel}
+
+    def test_merge_eligible_historical_row_without_pr_fails_closed(self):
+        """A historical DRAFT_OPENED row with no pr detail cannot bind a
+        record: MERGE_ELIGIBLE fails closed (S3.5b round-5 RA-003)."""
+        rows = chain_to("READY_FOR_REVIEW")
+        for row in rows:
+            if row["to_state"] == "DRAFT_OPENED":
+                row["check_results"] = {"order": {"ok": True, "detail": "ok"}}
+        self.seed(rows + [gate_row("g-1", self.sid, "merge")])
+        head = self.head()
+        rel, _, _ = self.fake_record(head=head)
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(head, rel))
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("no DRAFT_OPENED pr_number", out)
+
+    def test_merge_eligible_refuses_record_for_another_pr(self):
+        """A valid record for a SIBLING PR at the same head cannot clear
+        MERGE_ELIGIBLE (S3.5b round-5 RA-001)."""
+        head = self.head()
+        rel, _, _ = self.fake_record(rel="review/other-pr", head=head, pr=43)
+        self.seed_ready()
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(head, rel))
+        self.refused(rc, out, before, "review_record_pr")
+        self.assertIn("pr=43", out)
+
+    def test_v2_record_tail_commit_accepted(self):
+        rel, _, _ = self.fake_record(rel="review/rec-tail")
+        pinned = self.head()
+        # rewrite the record pinned to the CURRENT head, then add a
+        # record-only commit: the only changed path is under the record dir
+        data = json.loads(
+            (self.root / rel / "review.json").read_text(encoding="utf-8"))
+        data["head_sha"] = pinned
+        (self.root / rel / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        tail = self.commit_all("record tail: amend REVIEW md")
+        self.seed_ready()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(tail, rel))
+        self.assertEqual(rc, 0, out)
+
+    def test_v2_later_code_commit_refused(self):
+        rel, _, _ = self.fake_record(rel="review/rec-code")
+        pinned = self.head()
+        data = json.loads(
+            (self.root / rel / "review.json").read_text(encoding="utf-8"))
+        data["head_sha"] = pinned
+        (self.root / rel / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        (self.stories / self.sid).mkdir(parents=True, exist_ok=True)
+        (self.stories / self.sid / "code.py").write_text("x = 1\n",
+                                                         encoding="utf-8")
+        later = self.commit_all("code change after the record")
+        self.seed_ready()
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(later, rel))
+        self.refused(rc, out, before, "review_head_match",
+                     "review_record_valid")
+        self.assertIn("code.py", out)
+
+    def test_v1_ancestor_accepted_and_non_ancestor_refused(self):
+        rel, _, ancestor = self.fake_record(
+            rel="review/rec-v1", schema="review.record.v1")
+        data = json.loads(
+            (self.root / rel / "review.json").read_text(encoding="utf-8"))
+        data["head_sha"] = ancestor
+        data["lane"]["version"] = 1
+        (self.root / rel / "review.json").write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        later = self.commit_all("a later commit on top")
+        self.seed_ready()
+        rc, out = self.req("MERGE_ELIGIBLE", self.merge_ev(later, rel))
+        self.assertEqual(rc, 0, out)
+        # non-ancestor: an unrelated (orphan) head — the record head is
+        # not an ancestor of it, so the v1 rule refuses
+        self.git("checkout", "-q", "--orphan", "divergent")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t",
+                 "-c", "commit.gpgsign=false", "commit", "-q",
+                 "--allow-empty", "-m", "divergent root")
+        divergent = self.head()
+        self.git("checkout", "-q", "main")
+        self.seed_ready()
+        before = self.ledger_bytes()
+        rc, out = self.req("MERGE_ELIGIBLE",
+                           self.merge_ev(divergent, rel))
+        self.refused(rc, out, before, "review_head_match")
+        self.assertIn("not an ancestor", out)
 
 
 # ------------------------------------------------------------ order rules ----
@@ -1013,8 +1582,11 @@ class TestMergeEligibleFindings(ControlHome):
 
     def ev(self):
         head = self.head()
+        if not hasattr(self, "_rec_rel"):
+            self._rec_rel, _, _ = self.fake_record(head=head)
         return {"tested_sha": head[:7], "head_sha": head,
-                "unresolved_threads": "0", "internal_verdict": "PASS"}
+                "unresolved_threads": "0", "internal_verdict": "PASS",
+                "review_record": self._rec_rel}
 
     def test_external_findings_must_be_dispositioned(self):
         self.base(finding_row("f-1", "F-1", self.sid,
@@ -1434,8 +2006,11 @@ class TestMultirepoSetLevel(ControlHome):
 
     def merge_ev(self):
         head = self.head()
+        if not hasattr(self, "_rec_rel"):
+            self._rec_rel, _, _ = self.fake_record(head=head)
         return {"tested_sha": head[:7], "head_sha": head,
-                "unresolved_threads": "0", "internal_verdict": "PASS"}
+                "unresolved_threads": "0", "internal_verdict": "PASS",
+                "review_record": self._rec_rel}
 
     def test_merge_eligible_refuses_incomplete_set_naming_repos(self):
         subs = load_fixture_jsonl(

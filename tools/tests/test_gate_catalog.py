@@ -6,11 +6,12 @@ import unittest
 
 from tools import gate_catalog as GC
 
-EXPECTED_SLUGS = ("digest-gate", "plan-gate", "build-gate", "gate-selftest")
+EXPECTED_SLUGS = ("digest-gate", "plan-gate", "build-gate", "gate-selftest",
+                  "review-record")
 
 
 class TestGateCatalog(unittest.TestCase):
-    def test_exactly_four_slugs(self):
+    def test_exactly_five_slugs(self):
         self.assertEqual(tuple(g["slug"] for g in GC.GATES), EXPECTED_SLUGS)
 
     def test_fields_non_empty(self):
@@ -27,6 +28,7 @@ class TestGateCatalog(unittest.TestCase):
             "plan-gate": "pre_review_gate.py",
             "build-gate": "pre_review_gate.py",
             "gate-selftest": "test_gate.py",
+            "review-record": "review/ci_gate.py",
         }
         for gate in GC.GATES:
             with self.subTest(gate=gate["slug"]):

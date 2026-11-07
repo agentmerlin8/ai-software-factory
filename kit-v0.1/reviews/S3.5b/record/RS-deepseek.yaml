@@ -1,0 +1,23 @@
+schema: review.findings.v1
+review:
+  reviewer: review-security
+  rubric_version: review-security-v1
+  package_sha256: f6eabd7a1bbf0d2ae30786e4322431f29acba9cb6c8a0dfcf358d0af1f5b55c8
+  base_sha: bca959a63db7ddcaf12270e01ad70d6722b2442e
+  head_sha: 9c7b466013a7ab500f3b3406fd1bd21f19ed5ea2
+  decision: CHANGES_REQUESTED
+  findings:
+    - id: RS-001
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/review/record_gate.py:126
+      evidence: "head_rule_errors validates only the PR head against the 7-40 hex format (SHA_RE.fullmatch(pr_head), line 122) and then accepts any record head that prefix-matches in either direction: 'if pr_head.startswith(record_head) or record_head.startswith(pr_head): return []'. A review.json whose head_sha is a 1-hex-char (or any 1-6 char) prefix of the PR head passes this branch even though the module's own contract declares 7-40 hex, because the record head read from JSON is never format-checked or resolved to 40 hex (the comment claims 'prefix-tolerant exactness: resolve both to 40-hex for comparison' but no resolution happens). ci_gate step 2 runs head_rule_errors on discovered records before the authority is consulted, so the unvalidated-prefix acceptance is the head-selection control itself."
+      required_change: "enforce the 7-40 hex domain on record_head (SHA_RE.fullmatch) before the prefix comparison, or actually resolve both heads to 40-hex from the repo object DB as the comment claims; a non-conforming or unresolvable record head must fail the head rule at every call site (ci_gate step 2 and evaluate), never pass via prefix tolerance."
+      actionable: true
+    - id: RS-002
+      severity: major
+      rubric_dimension: security
+      artifact_reference: package:diff@tools/controller.py:632
+      evidence: "the controller's record gate for READY_FOR_REVIEW and MERGE_ELIGIBLE is built from record_gate.evaluate(...) in _review_evidence (line 632) plus _put_record_checks, which cover the authority, the head rule, open blockers/majors and verdict consistency only. The declared-panel equality check (panel_slot_errors) exists ONLY in tools/review/ci_gate.py (line 227), never in controller.py or record_gate.py: a record whose internal (role, model) reviewer slots do not match kit-v0.1/review-panel.toml passes the state-machine gates that lead to merge, so the 'record produced by the declared panel' authorization control is unreachable on the state-machine surface and holds only where the CI check runs."
+      required_change: "run the declared-panel equality (panel file vs the record's internal reviewer slots) inside the state-machine record checks (record_gate.evaluate or _put_record_checks) so READY_FOR_REVIEW and MERGE_ELIGIBLE refuse a record not produced by the declared panel, matching the control ci_gate already applies."
+      actionable: true

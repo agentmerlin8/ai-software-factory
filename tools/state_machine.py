@@ -37,6 +37,14 @@ UI_SKIP = ("PLAN_APPROVED", "CODING")
 # assignment/claim must exist before CODING.
 CLAIM_GATE = "CODING"
 
+# Review-request mechanism domain (S3.5b cutover): NEW DRAFT_OPENED
+# transitions accept ONLY the owned review lane. The historical values
+# remain readable in ledger history (the fold never re-judges a recorded
+# transition) but are refused as new evidence.
+REVIEW_MECHANISM = "review-lane"
+REVIEW_MECHANISMS = (REVIEW_MECHANISM,)
+HISTORICAL_REVIEW_MECHANISMS = ("ready-push", "draft-mention-opportunistic")
+
 # Required evidence per target state (empty tuple = none). BACKLOG has no
 # inbound transition.
 EVIDENCE_KEYS: dict[str, tuple[str, ...]] = {
@@ -50,13 +58,15 @@ EVIDENCE_KEYS: dict[str, tuple[str, ...]] = {
     "CODING": (),
     "BUILD_GREEN": ("commit_sha", "build_result", "named_tests_result"),
     "DRAFT_OPENED": ("pr_number", "review_request_mechanism"),
-    "REVIEWING": (),
+    "REVIEWING": ("review_record", "review_record_sha", "review_head_sha"),
     "FIXING": (),
     "FULL_TESTS_GREEN": ("projects", "tests_passed", "tests_failed",
                          "tests_skipped", "exclusions", "exit_code"),
     "READY_FOR_REVIEW": ("internal_verdict", "threads_state",
-                         "fix_pushes", "r1_arrival"),
-    "MERGE_ELIGIBLE": ("tested_sha", "head_sha", "unresolved_threads"),
+                         "fix_pushes", "r1_arrival",
+                         "review_record", "review_head_sha"),
+    "MERGE_ELIGIBLE": ("tested_sha", "head_sha", "unresolved_threads",
+                       "review_record"),
     "MERGED": ("merged_sha", "merged_at", "pr_number"),
     "LIVE_PROVEN": ("live_proof_evidence",),
     "CLOSED": ("doc_sync", "closeout_checklist"),
@@ -79,7 +89,11 @@ EVIDENCE_FORMATS: dict[str, str] = {
     "tests_failed": "0",
     "unresolved_threads": "0",
     "threads_state": "all-resolved | watchdog-exception",
-    "review_request_mechanism": "ready-push | draft-mention-opportunistic",
+    "review_request_mechanism": "review-lane",
+    "review_record": "repo-relative review record directory containing "
+                     "review.json",
+    "review_record_sha": "sha256 of review.json",
+    "review_head_sha": "7-40 hex; the record's pinned head",
     "live_proof_evidence": "existing path or http(s) URL",
     "fix_pushes": "digit count; <=1 where r1_arrival == both-pre-edit "
                   "(target, not safety constraint)",
@@ -114,10 +128,11 @@ CHECK_SUMMARY: dict[str, str] = {
               "skip requires the declared non-UI line",
     "BUILD_GREEN": "commit_sha resolves; build green; named tests green; "
                    "coder lane closed dispatch or lane-skip deviation",
-    "DRAFT_OPENED": "pr_number recorded; review_request_mechanism in the "
-                    "allowed set (ONE authenticated request); no duplicate "
+    "DRAFT_OPENED": "pr_number recorded; review_request_mechanism is "
+                    "review-lane (ONE authenticated request); no duplicate "
                     "DRAFT_OPENED",
-    "REVIEWING": "DRAFT_OPENED reached",
+    "REVIEWING": "DRAFT_OPENED reached; a valid review record at the pinned "
+                 "head (path, sha256, head)",
     "FIXING": "REVIEWING reached (or post-review reentry)",
     "FULL_TESTS_GREEN": "exact suite membership (projects, skip/exclusion "
                         "reasons, exit code); exit code 0; failed 0",
@@ -126,12 +141,16 @@ CHECK_SUMMARY: dict[str, str] = {
                         "external-review-unavailable watchdog exception "
                         "logged (absence is never recorded as PASS); <=1 "
                         "fix push where both first-round sets arrived "
-                        "pre-edit",
+                        "pre-edit; a valid review record at the pinned head "
+                        "(record-tail commits allowed) with no open "
+                        "blocker/major findings",
     "MERGE_ELIGIBLE": "tested SHA == current head; verdict eligible; no "
                       "logic-touched nits; external findings dispositioned; "
                       "external-unique findings attributed when "
                       "instrumentation present; zero unresolved threads; "
-                      "human merge approval recorded",
+                      "human merge approval recorded; a valid review record "
+                      "at the current head (record-tail commits allowed) "
+                      "with no open blocker/major findings",
     "MERGED": "merge evidence (merged_sha + merged_at + pr_number)",
     "LIVE_PROVEN": "live-proof evidence path/URL recorded",
     "CLOSED": "doc-sync obligations checked; closeout checklist complete; "
